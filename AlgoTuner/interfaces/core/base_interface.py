@@ -82,11 +82,13 @@ class BaseLLMInterface:
         global_config: GlobalConfig,
         model_name: str,
         task_instance,
+        single_shot: bool = False,
     ):
         logging.info(f"BaseLLMInterface __init__ started for model: {model_name}")
         self.model_config = model_config
         self.model_name = model_name
         self.task_instance = task_instance
+        self.single_shot = single_shot
         self.message_writer = MessageWriter()
 
         # Initialize configuration
@@ -170,7 +172,11 @@ class BaseLLMInterface:
     def _load_initial_messages(self):
         """Load and set up initial system message."""
         logging.info("Entered _load_initial_messages.")
-        initial_message_path = "AlgoTuner/messages/initial_system_message.txt"
+        initial_message_path = (
+            "AlgoTuner/messages/single_shot_initial_system_message.txt"
+            if self.single_shot
+            else "AlgoTuner/messages/initial_system_message.txt"
+        )
         description_path = f"{self.task_instance.get_task_directory()}/description.txt"
 
         # Load initial template

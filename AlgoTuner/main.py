@@ -195,6 +195,11 @@ def main():
         required=True,
         help="Task name to run (e.g., 'tsp', 'tsp_fuel') as defined in config.yaml",
     )
+    parser.add_argument(
+        "--single-shot",
+        action="store_true",
+        help="Request a full solver.py in one model response instead of using the agent command loop.",
+    )
 
     args = parser.parse_args()
 
@@ -258,6 +263,7 @@ def main():
             global_config=None,
             model_name="human",
             task_instance=task_instance,
+            single_shot=args.single_shot,
         )
         llm_interface.run_human_mode()
         return
@@ -409,13 +415,17 @@ def main():
         model_name=desired_model_name,
         task_instance=task_instance,
         model_specific_config=model_info,
+        single_shot=args.single_shot,
     )
 
     try:
         logger.info(
             "Starting LLM interface run_task (with final snapshot restore and test evaluation)..."
         )
-        llm_interface.run_task()
+        if args.single_shot:
+            llm_interface.run_single_shot_task()
+        else:
+            llm_interface.run_task()
         logger.info("LLM interface run_task completed successfully.")
 
         if summary_file_env:

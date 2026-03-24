@@ -6,6 +6,7 @@ from typing import Any
 
 from litellm import APIError, RateLimitError
 from litellm.exceptions import APIConnectionError
+from openai import OpenAI
 
 from AlgoTuner.config.model_config import GenericAPIModelConfig, GlobalConfig
 from AlgoTuner.editor.editor_functions import Path
@@ -48,6 +49,7 @@ class LLMInterface(base_interface.BaseLLMInterface):
         task_instance,
         model_specific_config: dict[str, Any] | None = None,
         max_samples: int | None = None,
+        single_shot: bool = False,
     ):
         self.model_specific_config = (
             model_specific_config if model_specific_config is not None else {}
@@ -55,7 +57,13 @@ class LLMInterface(base_interface.BaseLLMInterface):
         # Store default_params before calling super
         self.default_params = self.model_specific_config.get("default_params", {})
         self.max_samples = max_samples  # Store max_samples for test mode
-        super().__init__(model_config, global_config, model_name, task_instance)
+        super().__init__(
+            model_config,
+            global_config,
+            model_name,
+            task_instance,
+            single_shot=single_shot,
+        )
 
         # Create BaselineManager for this task
         if task_instance:
@@ -389,6 +397,107 @@ class LLMInterface(base_interface.BaseLLMInterface):
         """Helper method to consistently format code with line numbers and preserve indentation."""
         return self.message_writer.format_code_with_line_numbers(content, edited_lines)
 
+    def _get_single_shot_base_url(self) -> str | None:
+        """Resolve the OpenAI-compatible base URL for single-shot generation."""
+        env_base_url = os.environ.get("ALGOTUNE_SINGLE_SHOT_BASE_URL")
+        if env_base_url:
+            return env_base_url
+
+        model_name = getattr(self.model_config, "name", "") or ""
+        if model_name.startswith("openrouter/") or getattr(
+            self.model_config, "api_key_env", ""
+        ) == "OPENROUTER_API_KEY":
+            return "https://openrouter.ai/api/v1"
+
+        return None
+
+    def _get_single_shot_model_name(self) -> str:
+        """Resolve the model name for the OpenAI-compatible single-shot client."""
+        override_name = os.environ.get("ALGOTUNE_SINGLE_SHOT_MODEL_NAME")
+        if override_name:
+            return override_name
+
+        model_name = getattr(self.model_config, "name", "") or self.model_name
+        if model_name.startswith("openrouter/"):
+            return model_name.removeprefix("openrouter/")
+        return model_name
+
+    def _extract_single_shot_text(self, completion: Any) -> str:
+        """Extract text content from an OpenAI SDK chat completion response."""
+        try:
+            message = completion.choices[0].message
+        except (AttributeError, IndexError) as e:
+            raise ValueError(f"Single-shot completion missing choices/message: {e}") from e
+
+        content = getattr(message, "content", None)
+        if isinstance(content, str):
+            return content.strip()
+
+        if isinstance(content, list):
+            text_parts = []
+            for item in content:
+                if isinstance(item, dict):
+                    if item.get("type") == "text" and item.get("text"):
+                        text_parts.append(str(item["text"]))
+                else:
+                    text_value = getattr(item, "text", None)
+                    item_type = getattr(item, "type", None)
+                    if item_type == "text" and text_value:
+                        text_parts.append(str(text_value))
+
+            return "\n".join(part.strip() for part in text_parts if part and part.strip()).strip()
+
+        return ""
+
+    def _query_single_shot_client(self, relevant_messages: list[dict[str, Any]]) -> dict[str, Any]:
+        """Use the OpenAI client directly for single-shot generation."""
+        api_key = self.model_config.api_key
+        if hasattr(api_key, "get_secret_value"):
+            api_key = api_key.get_secret_value()
+
+        client_kwargs = {"api_key": api_key}
+        base_url = self._get_single_shot_base_url()
+        if base_url:
+            client_kwargs["base_url"] = base_url
+
+        client = OpenAI(**client_kwargs)
+
+        completion_params: dict[str, Any] = {
+            "model": self._get_single_shot_model_name(),
+            "messages": relevant_messages,
+        }
+
+        if getattr(self.model_config, "max_completion_tokens", None) is not None:
+            completion_params["max_completion_tokens"] = self.model_config.max_completion_tokens
+        elif getattr(self.model_config, "max_tokens", None) is not None:
+            completion_params["max_tokens"] = self.model_config.max_tokens
+
+        if getattr(self.model_config, "temperature", None) is not None:
+            completion_params["temperature"] = self.model_config.temperature
+        if getattr(self.model_config, "top_p", None) is not None:
+            completion_params["top_p"] = self.model_config.top_p
+
+        reasoning_effort = self.model_specific_config.get("reasoning_effort")
+        if not reasoning_effort:
+            reasoning_config = self.model_specific_config.get("reasoning", {})
+            if isinstance(reasoning_config, dict):
+                reasoning_effort = reasoning_config.get("effort")
+        if reasoning_effort:
+            completion_params["reasoning_effort"] = reasoning_effort
+
+        logging.info(
+            "Single-shot request via OpenAI client: base_url=%s model=%s",
+            base_url or "<default>",
+            completion_params["model"],
+        )
+
+        completion = client.chat.completions.create(**completion_params)
+        assistant_message = self._extract_single_shot_text(completion)
+        if not assistant_message:
+            logging.warning("Single-shot OpenAI client returned empty content")
+
+        return {"message": assistant_message, "cost": 0.0}
+
     def get_response(self):
         """Get a response from the LLM and update conversation history."""
         try:
@@ -498,7 +607,10 @@ class LLMInterface(base_interface.BaseLLMInterface):
                 max_malformed_feedback_injections = 5
                 for attempt in range(max_retries):
                     try:
-                        response = self.model.query(relevant_messages)
+                        if self.single_shot:
+                            response = self._query_single_shot_client(relevant_messages)
+                        else:
+                            response = self.model.query(relevant_messages)
                         break
                     except (RateLimitError, APIError, APIConnectionError) as e:
                         if self._is_malformed_provider_response_error(e):
@@ -545,7 +657,7 @@ class LLMInterface(base_interface.BaseLLMInterface):
                         )
                         raise
                     except Exception as model_error:
-                        logging.error(f"Exception in model.query: {model_error}")
+                        logging.error(f"Exception in model query: {model_error}")
                         logging.error(f"Model query exception type: {type(model_error)}")
                         logging.error(f"Model query full traceback:\n{traceback.format_exc()}")
                         raise
@@ -1050,17 +1162,103 @@ class LLMInterface(base_interface.BaseLLMInterface):
                 should_terminate = True
                 break
 
+        self._finalize_task_run(should_terminate)
+
+    @staticmethod
+    def _extract_single_shot_solver_code(response_message: str) -> str:
+        """Extract solver code from a one-shot model response."""
+        code_blocks = [
+            (lang.strip().lower(), content.strip())
+            for lang, content in extract_code_blocks(response_message)
+            if content and content.strip()
+        ]
+
+        if not code_blocks:
+            stripped_message = response_message.strip()
+            if stripped_message and "class Solver" in stripped_message:
+                return stripped_message
+            raise ValueError("Single-shot response did not include solver code.")
+
+        preferred_block = None
+        for language, content in code_blocks:
+            if language in {"python", "py"} and "class Solver" in content:
+                preferred_block = content
+                break
+
+        if preferred_block is None:
+            for _, content in code_blocks:
+                if "class Solver" in content:
+                    preferred_block = content
+                    break
+
+        if preferred_block is None:
+            if len(code_blocks) == 1:
+                preferred_block = code_blocks[0][1]
+            else:
+                preferred_block = max((content for _, content in code_blocks), key=len)
+
+        return preferred_block.strip()
+
+    def _replace_solver_file(self, solver_code: str) -> dict[str, Any]:
+        """Replace solver.py with the provided full-file contents."""
+        try:
+            existing_lines = self.editor.file_manager.read_file(Path("solver.py"))
+        except FileNotFoundError:
+            existing_lines = []
+
+        end_line = len(existing_lines)
+        return self.editor.edit_file(
+            file_path=Path("solver.py"),
+            start_line=0,
+            end_line=end_line,
+            new_content=solver_code,
+        )
+
+    def _log_code_dir_files(self, final_eval_success: bool) -> None:
+        """Log non-binary files in CODE_DIR for debugging and traceability."""
+        try:
+            if final_eval_success and self._final_eval_metrics:
+                mean_speedup = self._final_eval_metrics.get("mean_speedup")
+                logging.info(f"Final Test Speedup (mean): {mean_speedup}")
+
+            code_dir = os.environ.get("CODE_DIR", "llm_src")
+            if os.path.exists(code_dir):
+                for filename in os.listdir(code_dir):
+                    file_path = os.path.join(code_dir, filename)
+                    if os.path.isfile(file_path):
+                        lower_name = filename.lower()
+                        compiled_suffixes = (".so", ".pyc", ".pyo", ".pyd", ".dll", ".dylib")
+                        name_suffixes = Path(lower_name).suffixes
+                        if (
+                            lower_name.endswith(compiled_suffixes)
+                            or ".so." in lower_name
+                            or any(suffix in compiled_suffixes for suffix in name_suffixes)
+                        ):
+                            logging.debug(f"Skipping binary file {filename}")
+                            continue
+                        try:
+                            with open(file_path, encoding="utf-8") as f:
+                                content = f.read()
+                                logging.info(f"FILE IN CODE DIR {filename}:\n{content}")
+                        except UnicodeDecodeError:
+                            logging.debug(f"Skipping non-text file {filename} (decode error)")
+                        except Exception as e:
+                            logging.error(f"Error reading file {filename}: {e}")
+            else:
+                logging.error(f"CODE_DIR path {code_dir} does not exist")
+        except Exception as e:
+            logging.error(f"Error during final file content logging: {e}", exc_info=True)
+
+    def _finalize_task_run(self, should_terminate: bool) -> None:
+        """Restore the best snapshot, run the final test evaluation, and log outputs."""
         logging.info(
             self.message_writer.format_task_status(
                 "completed", "Attempting final snapshot restore and evaluation..."
             )
         )
 
-        # --- Final Evaluation Logic ---
-        final_eval_success = False  # Flag to track if final eval ran successfully
-        snapshot_restored = False  # Flag to track snapshot restoration status
+        final_eval_success = False
 
-        # Check if the loop terminated normally (not due to API error or other exception)
         if not should_terminate:
             logging.info(
                 self.message_writer.format_task_status(
@@ -1068,17 +1266,14 @@ class LLMInterface(base_interface.BaseLLMInterface):
                 )
             )
             try:
-                # Always try to restore the best performing snapshot
                 logging.info("Attempting to restore best performing snapshot...")
                 restore_result = self.editor.restore_snapshot()
                 if restore_result.get("success"):
-                    snapshot_restored = True
                     logging.info(
                         self.message_writer.format_system_message(
                             f"Successfully restored best snapshot: {restore_result.get('message', '')}"
                         )
                     )
-                    # Reload modules AFTER successful restore
                     try:
                         from AlgoTuner.editor.editor_functions import reload_all_llm_src
 
@@ -1089,7 +1284,6 @@ class LLMInterface(base_interface.BaseLLMInterface):
                             f"Error reloading modules after snapshot restore: {reload_err}"
                         )
                 else:
-                    # Handle specific "no snapshot" case vs other restore errors
                     error_msg = restore_result.get("error", "Unknown restore error")
                     if (
                         "No snapshot metadata found" in error_msg
@@ -1111,29 +1305,23 @@ class LLMInterface(base_interface.BaseLLMInterface):
                 logging.error(
                     self.message_writer.format_error(str(e), "during final snapshot restore")
                 )
-                # Snapshot restoration failed, snapshot_restored remains False
 
-            # Run final evaluation on the test dataset regardless of snapshot restore status
             try:
                 logging.info("Running final evaluation on 'test' dataset...")
-                # Use the specific dataset evaluation runner
                 eval_result = self.command_handlers._runner_eval_dataset(
                     data_subset="test",
-                    command_source="final_evaluation",  # Indicate source
+                    command_source="final_evaluation",
                 )
-                # Build readable message
                 final_message = getattr(eval_result, "message", None)
                 if final_message is None:
                     final_message = str(eval_result)
                 logging.info(f"Final Test Performance: {final_message}")
 
-                # Determine success flag and extract metrics from various result forms
                 metrics_candidate = None
                 if isinstance(eval_result, dict):
                     final_eval_success = bool(eval_result.get("success", True))
                     metrics_candidate = eval_result.get("aggregate_metrics")
-                elif isinstance(eval_result, list):  # AttributedList inherits list
-                    # Dataset evaluation returns AttributedList; treat as success if not empty
+                elif isinstance(eval_result, list):
                     final_eval_success = True
                     metrics_candidate = getattr(eval_result, "aggregate_metrics", None)
                 else:
@@ -1150,8 +1338,6 @@ class LLMInterface(base_interface.BaseLLMInterface):
 
                 if self._final_eval_metrics:
                     logging.info(f"Stored final test metrics: {self._final_eval_metrics}")
-
-                if self._final_eval_metrics:
                     mean_speedup = self._final_eval_metrics.get("mean_speedup")
                     label = "N/A" if mean_speedup is None else mean_speedup
                     logging.info(f"Final Test Speedup: {label}")
@@ -1177,44 +1363,64 @@ class LLMInterface(base_interface.BaseLLMInterface):
                 self._final_eval_success = False
                 self._final_eval_error = str(e)
 
-        # --- FIX: Use self.task_instance.task_name ---
         task_display_name = getattr(self.task_instance, "task_name", "unknown")
         logging.info(f"LLM interface for task {task_display_name} executed.")
-        # --- END FIX ---
+        self._log_code_dir_files(final_eval_success)
 
-        # Log the contents of every file in CODE_DIR
+    def run_single_shot_task(self):
+        """Request a complete solver.py in one response, then evaluate it."""
+        logging.info(self.message_writer.format_task_status("starting"))
+        should_terminate = False
+
         try:
-            # Get the aggregate metrics if available from final evaluation
-            if final_eval_success and self._final_eval_metrics:
-                mean_speedup = self._final_eval_metrics.get("mean_speedup")
-                logging.info(f"Final Test Speedup (mean): {mean_speedup}")
-
-            # Log contents of all files in CODE_DIR (always do this regardless of evaluation status)
-            code_dir = os.environ.get("CODE_DIR", "llm_src")
-            if os.path.exists(code_dir):
-                for filename in os.listdir(code_dir):
-                    file_path = os.path.join(code_dir, filename)
-                    if os.path.isfile(file_path):
-                        # Skip binary files (compiled extensions, etc.)
-                        lower_name = filename.lower()
-                        compiled_suffixes = (".so", ".pyc", ".pyo", ".pyd", ".dll", ".dylib")
-                        name_suffixes = Path(lower_name).suffixes
-                        if (
-                            lower_name.endswith(compiled_suffixes)
-                            or ".so." in lower_name
-                            or any(suffix in compiled_suffixes for suffix in name_suffixes)
-                        ):
-                            logging.debug(f"Skipping binary file {filename}")
-                            continue
-                        try:
-                            with open(file_path, encoding='utf-8') as f:
-                                content = f.read()
-                                logging.info(f"FILE IN CODE DIR {filename}:\n{content}")
-                        except UnicodeDecodeError:
-                            logging.debug(f"Skipping non-text file {filename} (decode error)")
-                        except Exception as e:
-                            logging.error(f"Error reading file {filename}: {e}")
+            response = self.get_response()
+            if response is None:
+                logging.warning(
+                    self.message_writer.format_warning(
+                        "No response received for single-shot generation."
+                    )
+                )
+                should_terminate = True
             else:
-                logging.error(f"CODE_DIR path {code_dir} does not exist")
+                response_message = (
+                    str(response.get("message", "")).strip()
+                    if isinstance(response, dict)
+                    else str(response).strip()
+                )
+                self.message_handler.add_message("assistant", response)
+
+                solver_code = self._extract_single_shot_solver_code(response_message)
+                edit_result = self._replace_solver_file(solver_code)
+                if not edit_result.get("success", False):
+                    logging.error(
+                        "Single-shot solver write failed: %s",
+                        edit_result.get("error", "unknown error"),
+                    )
+                    should_terminate = True
+                else:
+                    try:
+                        from AlgoTuner.editor.editor_functions import reload_all_llm_src
+
+                        reload_all_llm_src()
+                        logging.info("Reloaded modules after single-shot solver write.")
+                    except Exception as reload_err:
+                        logging.error(
+                            "Error reloading modules after single-shot solver write: %s",
+                            reload_err,
+                        )
+
+                    train_eval_result = self.command_handlers._runner_eval_dataset(
+                        data_subset="train",
+                        command_source="single_shot",
+                    )
+                    train_eval_message = getattr(train_eval_result, "message", None)
+                    if train_eval_message is None:
+                        train_eval_message = str(train_eval_result)
+                    logging.info(f"Single-shot train evaluation: {train_eval_message}")
         except Exception as e:
-            logging.error(f"Error during final file content logging: {e}", exc_info=True)
+            logging.error(
+                self.message_writer.format_error(str(e), "during single-shot task execution")
+            )
+            should_terminate = True
+
+        self._finalize_task_run(should_terminate)

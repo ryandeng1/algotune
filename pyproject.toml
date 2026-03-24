@@ -31,7 +31,7 @@ dependencies = [
     "torch",
     "pot",
     "ecos",
-    "litellm",
+    "litellm==1.82.6",
     "google-generativeai",
     "pylint",
     "line_profiler",
@@ -42,7 +42,8 @@ dependencies = [
     "pythran",
     "dace==0.16.1",
     "psutil==5.9.8",
-    "huggingface_hub"
+    "huggingface_hub",
+    "openai"
 ]
 
 [tool.setuptools.packages.find]

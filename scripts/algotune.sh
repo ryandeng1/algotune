@@ -32,6 +32,7 @@ COMMANDS:
     
 OPTIONS:
     --standalone                          Force standalone mode (no SLURM)
+    --single-shot                         Use one model response to generate the full solver.py
     --target-time-ms N                    Target time in milliseconds (for generate)
     --tasks task1,task2                   Specific tasks (for generate)
     
@@ -43,6 +44,7 @@ EXAMPLES:
     # Run agent on specific tasks
     $0 agent o4-mini svm kmeans                          # SLURM if available
     $0 agent --standalone o4-mini svm kmeans             # Force standalone
+    $0 agent --single-shot o4-mini svm                   # One-shot solver generation
     
     # Run agent on all tasks
     $0 agent o4-mini                                     # SLURM if available
@@ -66,10 +68,15 @@ EOF
 
 # Parse global options
 STANDALONE=false
+SINGLE_SHOT=false
 while [[ "$1" == --* ]]; do
     case "$1" in
         --standalone)
             STANDALONE=true
+            shift
+            ;;
+        --single-shot)
+            SINGLE_SHOT=true
             shift
             ;;
         --help|-h)
@@ -121,7 +128,11 @@ run_agent_standalone() {
         if [ -f "$PROJECT_ROOT/config.env" ] || [ -f "$PROJECT_ROOT/slurm/run_config.env" ]; then
             echo "🐍 Running agent via Singularity container..."
             # Use algotune.py which handles Singularity
-            exec python3 "$SCRIPT_DIR/algotune.py" agent --standalone --model "$model" "${tasks[@]}"
+            if [ "$SINGLE_SHOT" = true ]; then
+                exec python3 "$SCRIPT_DIR/algotune.py" agent --standalone --single-shot --model "$model" "${tasks[@]}"
+            else
+                exec python3 "$SCRIPT_DIR/algotune.py" agent --standalone --model "$model" "${tasks[@]}"
+            fi
         else
             echo "❌ Dependencies not installed and no Singularity configured."
             echo "   Please run: pip install -e ."
@@ -168,7 +179,11 @@ run_agent_standalone() {
         
         for task in "${tasks[@]}"; do
             echo "🎯 Running task: $task"
-            python3 -m AlgoTuner.main --model "$model" --task "$task"
+            if [ "$SINGLE_SHOT" = true ]; then
+                python3 -m AlgoTuner.main --single-shot --model "$model" --task "$task"
+            else
+                python3 -m AlgoTuner.main --model "$model" --task "$task"
+            fi
         done
     fi
 }
@@ -205,6 +220,10 @@ case "$COMMAND" in
                     STANDALONE=true
                     shift
                     ;;
+                --single-shot)
+                    SINGLE_SHOT=true
+                    shift
+                    ;;
                 *)
                     break
                     ;;
@@ -224,7 +243,11 @@ case "$COMMAND" in
             run_agent_standalone "$MODEL" "$@"
         else
             echo "🤖 Submitting AI agent jobs to SLURM..."
-            exec "$SCRIPT_DIR/submit_agent.sh" "$MODEL" "$@"
+            if [ "$SINGLE_SHOT" = true ]; then
+                exec "$SCRIPT_DIR/submit_agent.sh" --single-shot "$MODEL" "$@"
+            else
+                exec "$SCRIPT_DIR/submit_agent.sh" "$MODEL" "$@"
+            fi
         fi
         ;;
 
