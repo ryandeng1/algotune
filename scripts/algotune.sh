@@ -33,6 +33,7 @@ COMMANDS:
 OPTIONS:
     --standalone                          Force standalone mode (no SLURM)
     --single-shot                         Use one model response to generate the full solver.py
+    --write-results                       Write generated code into results/<model>/<task>
     --target-time-ms N                    Target time in milliseconds (for generate)
     --tasks task1,task2                   Specific tasks (for generate)
     
@@ -45,6 +46,7 @@ EXAMPLES:
     $0 agent o4-mini svm kmeans                          # SLURM if available
     $0 agent --standalone o4-mini svm kmeans             # Force standalone
     $0 agent --single-shot o4-mini svm                   # One-shot solver generation
+    $0 agent --single-shot --write-results o4-mini svm   # Write into results/<model>/<task>
     
     # Run agent on all tasks
     $0 agent o4-mini                                     # SLURM if available
@@ -69,6 +71,7 @@ EOF
 # Parse global options
 STANDALONE=false
 SINGLE_SHOT=false
+WRITE_RESULTS=false
 while [[ "$1" == --* ]]; do
     case "$1" in
         --standalone)
@@ -77,6 +80,10 @@ while [[ "$1" == --* ]]; do
             ;;
         --single-shot)
             SINGLE_SHOT=true
+            shift
+            ;;
+        --write-results)
+            WRITE_RESULTS=true
             shift
             ;;
         --help|-h)
@@ -129,9 +136,17 @@ run_agent_standalone() {
             echo "🐍 Running agent via Singularity container..."
             # Use algotune.py which handles Singularity
             if [ "$SINGLE_SHOT" = true ]; then
-                exec python3 "$SCRIPT_DIR/algotune.py" agent --standalone --single-shot --model "$model" "${tasks[@]}"
+                if [ "$WRITE_RESULTS" = true ]; then
+                    exec python3 "$SCRIPT_DIR/algotune.py" agent --standalone --single-shot --write-results --model "$model" "${tasks[@]}"
+                else
+                    exec python3 "$SCRIPT_DIR/algotune.py" agent --standalone --single-shot --model "$model" "${tasks[@]}"
+                fi
             else
-                exec python3 "$SCRIPT_DIR/algotune.py" agent --standalone --model "$model" "${tasks[@]}"
+                if [ "$WRITE_RESULTS" = true ]; then
+                    exec python3 "$SCRIPT_DIR/algotune.py" agent --standalone --write-results --model "$model" "${tasks[@]}"
+                else
+                    exec python3 "$SCRIPT_DIR/algotune.py" agent --standalone --model "$model" "${tasks[@]}"
+                fi
             fi
         else
             echo "❌ Dependencies not installed and no Singularity configured."
@@ -180,9 +195,17 @@ run_agent_standalone() {
         for task in "${tasks[@]}"; do
             echo "🎯 Running task: $task"
             if [ "$SINGLE_SHOT" = true ]; then
-                python3 -m AlgoTuner.main --single-shot --model "$model" --task "$task"
+                if [ "$WRITE_RESULTS" = true ]; then
+                    python3 -m AlgoTuner.main --single-shot --write-results --model "$model" --task "$task"
+                else
+                    python3 -m AlgoTuner.main --single-shot --model "$model" --task "$task"
+                fi
             else
-                python3 -m AlgoTuner.main --model "$model" --task "$task"
+                if [ "$WRITE_RESULTS" = true ]; then
+                    python3 -m AlgoTuner.main --write-results --model "$model" --task "$task"
+                else
+                    python3 -m AlgoTuner.main --model "$model" --task "$task"
+                fi
             fi
         done
     fi
@@ -224,6 +247,10 @@ case "$COMMAND" in
                     SINGLE_SHOT=true
                     shift
                     ;;
+                --write-results)
+                    WRITE_RESULTS=true
+                    shift
+                    ;;
                 *)
                     break
                     ;;
@@ -244,9 +271,17 @@ case "$COMMAND" in
         else
             echo "🤖 Submitting AI agent jobs to SLURM..."
             if [ "$SINGLE_SHOT" = true ]; then
-                exec "$SCRIPT_DIR/submit_agent.sh" --single-shot "$MODEL" "$@"
+                if [ "$WRITE_RESULTS" = true ]; then
+                    exec "$SCRIPT_DIR/submit_agent.sh" --single-shot --write-results "$MODEL" "$@"
+                else
+                    exec "$SCRIPT_DIR/submit_agent.sh" --single-shot "$MODEL" "$@"
+                fi
             else
-                exec "$SCRIPT_DIR/submit_agent.sh" "$MODEL" "$@"
+                if [ "$WRITE_RESULTS" = true ]; then
+                    exec "$SCRIPT_DIR/submit_agent.sh" --write-results "$MODEL" "$@"
+                else
+                    exec "$SCRIPT_DIR/submit_agent.sh" "$MODEL" "$@"
+                fi
             fi
         fi
         ;;

@@ -77,6 +77,12 @@ def normalize_summary_model_name(model_name: str) -> str:
     return model_name
 
 
+def resolve_results_code_dir(results_dir: str | os.PathLike[str], model_name: str, task_name: str) -> Path:
+    """Resolve a stable results directory for generated solver code."""
+    normalized_model = normalize_summary_model_name(model_name)
+    return Path(results_dir) / normalized_model / task_name
+
+
 def update_summary_json(
     summary_file_path_str: str,
     task_name: str,
@@ -199,6 +205,17 @@ def main():
         "--single-shot",
         action="store_true",
         help="Request a full solver.py in one model response instead of using the agent command loop.",
+    )
+    parser.add_argument(
+        "--write-results",
+        action="store_true",
+        help="Write generated code into results/<model>/<task> instead of an ephemeral CODE_DIR.",
+    )
+    parser.add_argument(
+        "--results-dir",
+        type=str,
+        default="results",
+        help="Base directory used with --write-results (default: results).",
     )
 
     args = parser.parse_args()
@@ -404,6 +421,15 @@ def main():
     task_instance = TaskFactory(
         task_name, oracle_time_limit=oracle_time_limit, data_dir=data_dir, **task_params_for_factory
     )
+
+    if args.write_results:
+        results_code_dir = resolve_results_code_dir(
+            args.results_dir,
+            desired_model_name,
+            task_name,
+        )
+        os.environ["CODE_DIR"] = str(results_code_dir)
+        logger.info(f"Using results-backed CODE_DIR: {results_code_dir}")
 
     code_dir = Path(os.environ.get("CODE_DIR", "llm_src"))
     code_dir.mkdir(exist_ok=True)

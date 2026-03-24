@@ -447,6 +447,8 @@ def run_agent_command(args):
             agent_args = ["--model", args.model, "--task", task]
             if args.single_shot:
                 agent_args.append("--single-shot")
+            if args.write_results:
+                agent_args.append("--write-results")
             run_with_singularity("AlgoTuner/main.py", agent_args)
     else:
         # Dependencies available - run directly
@@ -485,6 +487,8 @@ def run_agent_command(args):
             ]
             if args.single_shot:
                 cmd_args.append("--single-shot")
+            if args.write_results:
+                cmd_args.append("--write-results")
 
             result = subprocess.run(cmd_args, cwd=project_root)
             if result.returncode != 0:
@@ -1062,6 +1066,11 @@ def main():
         "--single-shot",
         action="store_true",
         help="Request a full solver.py in one model response instead of using the agent command loop",
+    )
+    agent_parser.add_argument(
+        "--write-results",
+        action="store_true",
+        help="Write generated code into results/<model>/<task>",
     )
     agent_parser.add_argument(
         "tasks", nargs="*", help="Specific tasks to run (all if none specified)"
