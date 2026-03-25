@@ -50,6 +50,7 @@ class LLMInterface(base_interface.BaseLLMInterface):
         model_specific_config: dict[str, Any] | None = None,
         max_samples: int | None = None,
         single_shot: bool = False,
+        write_only: bool = False,
     ):
         self.model_specific_config = (
             model_specific_config if model_specific_config is not None else {}
@@ -57,6 +58,7 @@ class LLMInterface(base_interface.BaseLLMInterface):
         # Store default_params before calling super
         self.default_params = self.model_specific_config.get("default_params", {})
         self.max_samples = max_samples  # Store max_samples for test mode
+        self.write_only = write_only
         super().__init__(
             model_config,
             global_config,
@@ -1367,6 +1369,28 @@ class LLMInterface(base_interface.BaseLLMInterface):
         logging.info(f"LLM interface for task {task_display_name} executed.")
         self._log_code_dir_files(final_eval_success)
 
+    def _complete_write_only_run(self, should_terminate: bool) -> None:
+        """Finish a write-only single-shot run without any evaluation."""
+        self._final_eval_metrics = None
+        self._final_eval_success = None
+        self._final_eval_error = None
+
+        task_display_name = getattr(self.task_instance, "task_name", "unknown")
+        if should_terminate:
+            logging.warning(
+                self.message_writer.format_task_status(
+                    "completed", "Write-only run terminated before successful completion."
+                )
+            )
+        else:
+            logging.info(
+                self.message_writer.format_task_status(
+                    "completed", "Write-only mode: skipping train and test evaluation."
+                )
+            )
+        logging.info(f"LLM interface for task {task_display_name} executed.")
+        self._log_code_dir_files(False)
+
     def run_single_shot_task(self):
         """Request a complete solver.py in one response, then evaluate it."""
         logging.info(self.message_writer.format_task_status("starting"))
@@ -1409,18 +1433,22 @@ class LLMInterface(base_interface.BaseLLMInterface):
                             reload_err,
                         )
 
-                    train_eval_result = self.command_handlers._runner_eval_dataset(
-                        data_subset="train",
-                        command_source="single_shot",
-                    )
-                    train_eval_message = getattr(train_eval_result, "message", None)
-                    if train_eval_message is None:
-                        train_eval_message = str(train_eval_result)
-                    logging.info(f"Single-shot train evaluation: {train_eval_message}")
+                    if not self.write_only:
+                        train_eval_result = self.command_handlers._runner_eval_dataset(
+                            data_subset="train",
+                            command_source="single_shot",
+                        )
+                        train_eval_message = getattr(train_eval_result, "message", None)
+                        if train_eval_message is None:
+                            train_eval_message = str(train_eval_result)
+                        logging.info(f"Single-shot train evaluation: {train_eval_message}")
         except Exception as e:
             logging.error(
                 self.message_writer.format_error(str(e), "during single-shot task execution")
             )
             should_terminate = True
 
-        self._finalize_task_run(should_terminate)
+        if self.write_only:
+            self._complete_write_only_run(should_terminate)
+        else:
+            self._finalize_task_run(should_terminate)

@@ -212,6 +212,11 @@ def main():
         help="Write generated code into results/<model>/<task> instead of an ephemeral CODE_DIR.",
     )
     parser.add_argument(
+        "--write-only",
+        action="store_true",
+        help="Generate and write code only; skip all train/test evaluation. Requires --single-shot.",
+    )
+    parser.add_argument(
         "--results-dir",
         type=str,
         default="results",
@@ -219,6 +224,9 @@ def main():
     )
 
     args = parser.parse_args()
+
+    if args.write_only and not args.single_shot:
+        parser.error("--write-only requires --single-shot")
 
     task_name = args.task
     desired_model_name = args.model
@@ -281,6 +289,7 @@ def main():
             model_name="human",
             task_instance=task_instance,
             single_shot=args.single_shot,
+            write_only=args.write_only,
         )
         llm_interface.run_human_mode()
         return
@@ -442,6 +451,7 @@ def main():
         task_instance=task_instance,
         model_specific_config=model_info,
         single_shot=args.single_shot,
+        write_only=args.write_only,
     )
 
     try:
@@ -454,7 +464,9 @@ def main():
             llm_interface.run_task()
         logger.info("LLM interface run_task completed successfully.")
 
-        if summary_file_env:
+        if args.write_only:
+            logger.info("Write-only mode enabled; skipping summary and failure file updates.")
+        elif summary_file_env:
             test_speedup = None
             failure_file_env = str(Path(summary_file_env).with_name("agent_failures.json"))
 

@@ -449,6 +449,8 @@ def run_agent_command(args):
                 agent_args.append("--single-shot")
             if args.write_results:
                 agent_args.append("--write-results")
+            if args.write_only:
+                agent_args.append("--write-only")
             run_with_singularity("AlgoTuner/main.py", agent_args)
     else:
         # Dependencies available - run directly
@@ -489,6 +491,8 @@ def run_agent_command(args):
                 cmd_args.append("--single-shot")
             if args.write_results:
                 cmd_args.append("--write-results")
+            if args.write_only:
+                cmd_args.append("--write-only")
 
             result = subprocess.run(cmd_args, cwd=project_root)
             if result.returncode != 0:
@@ -1071,6 +1075,11 @@ def main():
         "--write-results",
         action="store_true",
         help="Write generated code into results/<model>/<task>",
+    )
+    agent_parser.add_argument(
+        "--write-only",
+        action="store_true",
+        help="Generate and write code only; skip evaluation. Requires --single-shot.",
     )
     agent_parser.add_argument(
         "tasks", nargs="*", help="Specific tasks to run (all if none specified)"

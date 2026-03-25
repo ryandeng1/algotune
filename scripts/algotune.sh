@@ -34,6 +34,7 @@ OPTIONS:
     --standalone                          Force standalone mode (no SLURM)
     --single-shot                         Use one model response to generate the full solver.py
     --write-results                       Write generated code into results/<model>/<task>
+    --write-only                          Skip all evaluation; requires --single-shot
     --target-time-ms N                    Target time in milliseconds (for generate)
     --tasks task1,task2                   Specific tasks (for generate)
     
@@ -47,6 +48,7 @@ EXAMPLES:
     $0 agent --standalone o4-mini svm kmeans             # Force standalone
     $0 agent --single-shot o4-mini svm                   # One-shot solver generation
     $0 agent --single-shot --write-results o4-mini svm   # Write into results/<model>/<task>
+    $0 agent --single-shot --write-results --write-only o4-mini svm   # Generate only, no eval
     
     # Run agent on all tasks
     $0 agent o4-mini                                     # SLURM if available
@@ -72,6 +74,7 @@ EOF
 STANDALONE=false
 SINGLE_SHOT=false
 WRITE_RESULTS=false
+WRITE_ONLY=false
 while [[ "$1" == --* ]]; do
     case "$1" in
         --standalone)
@@ -84,6 +87,10 @@ while [[ "$1" == --* ]]; do
             ;;
         --write-results)
             WRITE_RESULTS=true
+            shift
+            ;;
+        --write-only)
+            WRITE_ONLY=true
             shift
             ;;
         --help|-h)
@@ -137,15 +144,31 @@ run_agent_standalone() {
             # Use algotune.py which handles Singularity
             if [ "$SINGLE_SHOT" = true ]; then
                 if [ "$WRITE_RESULTS" = true ]; then
-                    exec python3 "$SCRIPT_DIR/algotune.py" agent --standalone --single-shot --write-results --model "$model" "${tasks[@]}"
+                    if [ "$WRITE_ONLY" = true ]; then
+                        exec python3 "$SCRIPT_DIR/algotune.py" agent --standalone --single-shot --write-results --write-only --model "$model" "${tasks[@]}"
+                    else
+                        exec python3 "$SCRIPT_DIR/algotune.py" agent --standalone --single-shot --write-results --model "$model" "${tasks[@]}"
+                    fi
                 else
-                    exec python3 "$SCRIPT_DIR/algotune.py" agent --standalone --single-shot --model "$model" "${tasks[@]}"
+                    if [ "$WRITE_ONLY" = true ]; then
+                        exec python3 "$SCRIPT_DIR/algotune.py" agent --standalone --single-shot --write-only --model "$model" "${tasks[@]}"
+                    else
+                        exec python3 "$SCRIPT_DIR/algotune.py" agent --standalone --single-shot --model "$model" "${tasks[@]}"
+                    fi
                 fi
             else
                 if [ "$WRITE_RESULTS" = true ]; then
-                    exec python3 "$SCRIPT_DIR/algotune.py" agent --standalone --write-results --model "$model" "${tasks[@]}"
+                    if [ "$WRITE_ONLY" = true ]; then
+                        exec python3 "$SCRIPT_DIR/algotune.py" agent --standalone --write-results --write-only --model "$model" "${tasks[@]}"
+                    else
+                        exec python3 "$SCRIPT_DIR/algotune.py" agent --standalone --write-results --model "$model" "${tasks[@]}"
+                    fi
                 else
-                    exec python3 "$SCRIPT_DIR/algotune.py" agent --standalone --model "$model" "${tasks[@]}"
+                    if [ "$WRITE_ONLY" = true ]; then
+                        exec python3 "$SCRIPT_DIR/algotune.py" agent --standalone --write-only --model "$model" "${tasks[@]}"
+                    else
+                        exec python3 "$SCRIPT_DIR/algotune.py" agent --standalone --model "$model" "${tasks[@]}"
+                    fi
                 fi
             fi
         else
@@ -196,15 +219,31 @@ run_agent_standalone() {
             echo "🎯 Running task: $task"
             if [ "$SINGLE_SHOT" = true ]; then
                 if [ "$WRITE_RESULTS" = true ]; then
-                    python3 -m AlgoTuner.main --single-shot --write-results --model "$model" --task "$task"
+                    if [ "$WRITE_ONLY" = true ]; then
+                        python3 -m AlgoTuner.main --single-shot --write-results --write-only --model "$model" --task "$task"
+                    else
+                        python3 -m AlgoTuner.main --single-shot --write-results --model "$model" --task "$task"
+                    fi
                 else
-                    python3 -m AlgoTuner.main --single-shot --model "$model" --task "$task"
+                    if [ "$WRITE_ONLY" = true ]; then
+                        python3 -m AlgoTuner.main --single-shot --write-only --model "$model" --task "$task"
+                    else
+                        python3 -m AlgoTuner.main --single-shot --model "$model" --task "$task"
+                    fi
                 fi
             else
                 if [ "$WRITE_RESULTS" = true ]; then
-                    python3 -m AlgoTuner.main --write-results --model "$model" --task "$task"
+                    if [ "$WRITE_ONLY" = true ]; then
+                        python3 -m AlgoTuner.main --write-results --write-only --model "$model" --task "$task"
+                    else
+                        python3 -m AlgoTuner.main --write-results --model "$model" --task "$task"
+                    fi
                 else
-                    python3 -m AlgoTuner.main --model "$model" --task "$task"
+                    if [ "$WRITE_ONLY" = true ]; then
+                        python3 -m AlgoTuner.main --write-only --model "$model" --task "$task"
+                    else
+                        python3 -m AlgoTuner.main --model "$model" --task "$task"
+                    fi
                 fi
             fi
         done
@@ -251,6 +290,10 @@ case "$COMMAND" in
                     WRITE_RESULTS=true
                     shift
                     ;;
+                --write-only)
+                    WRITE_ONLY=true
+                    shift
+                    ;;
                 *)
                     break
                     ;;
@@ -272,15 +315,31 @@ case "$COMMAND" in
             echo "🤖 Submitting AI agent jobs to SLURM..."
             if [ "$SINGLE_SHOT" = true ]; then
                 if [ "$WRITE_RESULTS" = true ]; then
-                    exec "$SCRIPT_DIR/submit_agent.sh" --single-shot --write-results "$MODEL" "$@"
+                    if [ "$WRITE_ONLY" = true ]; then
+                        exec "$SCRIPT_DIR/submit_agent.sh" --single-shot --write-results --write-only "$MODEL" "$@"
+                    else
+                        exec "$SCRIPT_DIR/submit_agent.sh" --single-shot --write-results "$MODEL" "$@"
+                    fi
                 else
-                    exec "$SCRIPT_DIR/submit_agent.sh" --single-shot "$MODEL" "$@"
+                    if [ "$WRITE_ONLY" = true ]; then
+                        exec "$SCRIPT_DIR/submit_agent.sh" --single-shot --write-only "$MODEL" "$@"
+                    else
+                        exec "$SCRIPT_DIR/submit_agent.sh" --single-shot "$MODEL" "$@"
+                    fi
                 fi
             else
                 if [ "$WRITE_RESULTS" = true ]; then
-                    exec "$SCRIPT_DIR/submit_agent.sh" --write-results "$MODEL" "$@"
+                    if [ "$WRITE_ONLY" = true ]; then
+                        exec "$SCRIPT_DIR/submit_agent.sh" --write-results --write-only "$MODEL" "$@"
+                    else
+                        exec "$SCRIPT_DIR/submit_agent.sh" --write-results "$MODEL" "$@"
+                    fi
                 else
-                    exec "$SCRIPT_DIR/submit_agent.sh" "$MODEL" "$@"
+                    if [ "$WRITE_ONLY" = true ]; then
+                        exec "$SCRIPT_DIR/submit_agent.sh" --write-only "$MODEL" "$@"
+                    else
+                        exec "$SCRIPT_DIR/submit_agent.sh" "$MODEL" "$@"
+                    fi
                 fi
             fi
         fi
