@@ -12,10 +12,25 @@ MAX_TASKS=250
 
 # Parse flags
 RETRY_NA=false
+SINGLE_SHOT=0
+WRITE_RESULTS=0
+WRITE_ONLY=0
 while [[ $# -gt 0 ]]; do
     case $1 in
         --retry-na)
             RETRY_NA=true
+            shift
+            ;;
+        --single-shot)
+            SINGLE_SHOT=1
+            shift
+            ;;
+        --write-results)
+            WRITE_RESULTS=1
+            shift
+            ;;
+        --write-only)
+            WRITE_ONLY=1
             shift
             ;;
         *)
@@ -545,7 +560,7 @@ for i in "${TASK_INDICES_TO_RUN[@]}"; do
                     --time=72:00:00 \
                     --output="${PROJECT_ROOT}/slurm/outputs/${LOG_PREFIX}%j.out" \
                     --error="${PROJECT_ROOT}/slurm/errors/${LOG_PREFIX}%j.err" \
-                    --export=ALL,TASK_NAME="${TASK_NAME}",MODEL="${MODEL_NAME}",TASK_N="${TASK_N}",TASK_DATASET_SIZE="${TASK_DATASET_SIZE}",TASK_TARGET_TIME_MS="${TASK_TARGET_TIME_MS}",DATASET_PATH="${RESOLVED_DATASET_PATH}",REPORTS_DIR="${REPORTS_DIR}",SUMMARY_FILE="${SUMMARY_FILE}" \
+                    --export=ALL,TASK_NAME="${TASK_NAME}",MODEL="${MODEL_NAME}",TASK_N="${TASK_N}",TASK_DATASET_SIZE="${TASK_DATASET_SIZE}",TASK_TARGET_TIME_MS="${TASK_TARGET_TIME_MS}",DATASET_PATH="${RESOLVED_DATASET_PATH}",REPORTS_DIR="${REPORTS_DIR}",SUMMARY_FILE="${SUMMARY_FILE}",SINGLE_SHOT="${SINGLE_SHOT}",WRITE_RESULTS="${WRITE_RESULTS}",WRITE_ONLY="${WRITE_ONLY}" \
                     "$RUNSCRIPT_PATH")
     JOB_IDS+=("$JOB_ID")
     SUBMITTED_COUNT=$((SUBMITTED_COUNT + 1))
