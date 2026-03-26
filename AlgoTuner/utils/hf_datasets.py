@@ -162,8 +162,8 @@ def ensure_hf_dataset(task_name: str | None = None) -> Path | None:
             tqdm_class = None
             print("   (Install tqdm for progress bars: pip install tqdm)")
 
-        # Set cache_dir to be within local_dir to avoid duplicating space
-        # Use symlinks to prevent storing files twice (cache + local_dir)
+        # Keep the HF cache under local_dir to limit duplicate storage.
+        # Newer huggingface_hub versions removed local_dir_use_symlinks.
         cache_dir = local_dir / ".hf_cache"
         cache_dir.mkdir(parents=True, exist_ok=True)
 
@@ -173,7 +173,6 @@ def ensure_hf_dataset(task_name: str | None = None) -> Path | None:
             revision=revision,
             local_dir=str(local_dir),
             cache_dir=str(cache_dir),
-            local_dir_use_symlinks=True,  # Use symlinks to save 113GB disk space
             allow_patterns=allow_patterns,
             token=token,
             force_download=force,
@@ -241,8 +240,8 @@ def download_npy_files(task_name: str) -> bool:
         except ImportError:
             tqdm_class = None
 
-        # Set cache_dir to be within local_dir to avoid duplicating space
-        # Use symlinks to prevent storing files twice (cache + local_dir)
+        # Keep the HF cache under local_dir to limit duplicate storage.
+        # Newer huggingface_hub versions removed local_dir_use_symlinks.
         hf_cache_dir = local_dir / ".hf_cache"
         hf_cache_dir.mkdir(parents=True, exist_ok=True)
 
@@ -252,7 +251,6 @@ def download_npy_files(task_name: str) -> bool:
             revision=revision,
             local_dir=str(local_dir),
             cache_dir=str(hf_cache_dir),
-            local_dir_use_symlinks=True,  # Use symlinks to save 113GB disk space
             allow_patterns=allow_patterns,
             token=token,
             force_download=False,  # Use cached files if available
