@@ -214,7 +214,7 @@ def main():
     parser.add_argument(
         "--write-only",
         action="store_true",
-        help="Generate and write code only; skip all train/test evaluation. Requires --single-shot.",
+        help="Generate and write code only; skip final train/test evaluation.",
     )
     parser.add_argument(
         "--results-dir",
@@ -224,9 +224,6 @@ def main():
     )
 
     args = parser.parse_args()
-
-    if args.write_only and not args.single_shot:
-        parser.error("--write-only requires --single-shot")
 
     task_name = args.task
     desired_model_name = args.model

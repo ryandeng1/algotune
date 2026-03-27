@@ -327,8 +327,9 @@ def compile_code_if_needed(source_code_dir: Path, task_name: str) -> tuple[bool,
 class AgentCompatibleEvaluator:
     """Evaluator that uses identical methodology to the agent."""
 
-    def __init__(self, data_dir: Path):
+    def __init__(self, data_dir: Path, max_problems: int | None = 1):
         self.data_dir = data_dir
+        self.max_problems = max_problems
 
     def evaluate_task(self, task_name: str, model_name: str, code_dir: Path) -> EvaluationResult:
         """Single task evaluation using agent's exact pipeline."""
@@ -370,8 +371,8 @@ class AgentCompatibleEvaluator:
                 baseline_times_raw = baseline_manager.get_baseline_times(
                     subset="test",
                     force_regenerate=False,  # Don't force regeneration - use cached if available
-                    test_mode=False,
-                    max_samples=None,
+                    test_mode=self.max_problems is not None,
+                    max_samples=self.max_problems,
                 )
                 logging.info(
                     f"Generated {len(baseline_times_raw)} baseline times with keys: {list(baseline_times_raw.keys())[:5]}"
@@ -411,6 +412,8 @@ class AgentCompatibleEvaluator:
                 os.environ["SKIP_DATASET_GEN"] = "1"
                 _, test_iter = task_instance.load_dataset()
                 test_problems = list(test_iter)
+                if self.max_problems is not None:
+                    test_problems = test_problems[: self.max_problems]
 
                 if not test_problems:
                     result.error_message = "No test problems found"
@@ -636,6 +639,7 @@ def evaluate_single_task(args_tuple: tuple) -> EvaluationResult:
         generation_data,
         data_dir_str,
         num_runs,
+        max_problems,
     ) = args_tuple
 
     code_dir = Path(code_dir_str)
@@ -646,7 +650,7 @@ def evaluate_single_task(args_tuple: tuple) -> EvaluationResult:
     # Compilation will be handled inside AgentCompatibleEvaluator in the temporary directory
 
     # Use AgentCompatibleEvaluator for the actual evaluation
-    evaluator = AgentCompatibleEvaluator(data_dir)
+    evaluator = AgentCompatibleEvaluator(data_dir, max_problems=max_problems)
     result = evaluator.evaluate_task(task_name, model_name, code_dir)
 
     # Compilation flags are already set by AgentCompatibleEvaluator
@@ -1009,6 +1013,12 @@ def main():
     parser.add_argument(
         "--max-workers", type=int, default=4, help="Maximum worker processes (default: 4)"
     )
+    parser.add_argument(
+        "--max-problems",
+        type=int,
+        default=1,
+        help="Maximum number of test problems to evaluate per task (default: 1)",
+    )
     parser.add_argument("--models", nargs="+", help="Specific models to evaluate (default: all)")
     parser.add_argument("--tasks", nargs="+", help="Specific tasks to evaluate (default: all)")
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose logging")
@@ -1111,32 +1121,53 @@ def main():
                     generation_data,
                     str(args.data_dir),
                     args.num_runs,
+                    args.max_problems,
                 )
             )
 
     logging.info(f"Evaluating {len(eval_tasks)} model/task combinations")
+    logging.info(f"Using max_workers={args.max_workers}")
+    logging.info(f"Using max_problems={args.max_problems}")
 
     # Run evaluations
     results = []
     if args.max_workers == 1:
         # Sequential execution for debugging
-        for task_args in eval_tasks:
-            results.append(evaluate_single_task(task_args))
+        total_tasks = len(eval_tasks)
+        for index, task_args in enumerate(eval_tasks, start=1):
+            task_name, _model_name, display_model_name, *_ = task_args
+            logging.info(f"[{index}/{total_tasks}] Starting {task_name}/{display_model_name}")
+            result = evaluate_single_task(task_args)
+            results.append(result)
+            status = "ok" if result.success else "failed"
+            logging.info(f"[{index}/{total_tasks}] Finished {task_name}/{display_model_name} ({status})")
     else:
         # Parallel execution
+        total_tasks = len(eval_tasks)
         with ProcessPoolExecutor(max_workers=args.max_workers) as executor:
             future_to_task = {
                 executor.submit(evaluate_single_task, task_args): task_args
                 for task_args in eval_tasks
             }
 
+            completed = 0
             for future in as_completed(future_to_task):
+                task_args = future_to_task[future]
+                task_name, _model_name, display_model_name, *_ = task_args
                 try:
                     result = future.result()
                     results.append(result)
+                    completed += 1
+                    status = "ok" if result.success else "failed"
+                    logging.info(
+                        f"[{completed}/{total_tasks}] Finished {task_name}/{display_model_name} ({status})"
+                    )
                 except Exception as e:
-                    task_args = future_to_task[future]
+                    completed += 1
                     logging.error(f"Evaluation failed for {task_args[0]}/{task_args[2]}: {e}")
+                    logging.info(
+                        f"[{completed}/{total_tasks}] Finished {task_name}/{display_model_name} (error)"
+                    )
 
     # Summary statistics
     successful = [r for r in results if r.success]

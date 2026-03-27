@@ -1164,7 +1164,10 @@ class LLMInterface(base_interface.BaseLLMInterface):
                 should_terminate = True
                 break
 
-        self._finalize_task_run(should_terminate)
+        if self.write_only:
+            self._complete_write_only_run(should_terminate, restore_best_snapshot=True)
+        else:
+            self._finalize_task_run(should_terminate)
 
     @staticmethod
     def _extract_single_shot_solver_code(response_message: str) -> str:
@@ -1369,11 +1372,57 @@ class LLMInterface(base_interface.BaseLLMInterface):
         logging.info(f"LLM interface for task {task_display_name} executed.")
         self._log_code_dir_files(final_eval_success)
 
-    def _complete_write_only_run(self, should_terminate: bool) -> None:
-        """Finish a write-only single-shot run without any evaluation."""
+    def _complete_write_only_run(
+        self, should_terminate: bool, restore_best_snapshot: bool = False
+    ) -> None:
+        """Finish a write-only run without final evaluation."""
         self._final_eval_metrics = None
         self._final_eval_success = None
         self._final_eval_error = None
+
+        if restore_best_snapshot and not should_terminate:
+            try:
+                logging.info("Attempting to restore best performing snapshot for write-only run...")
+                restore_result = self.editor.restore_snapshot()
+                if restore_result.get("success"):
+                    logging.info(
+                        self.message_writer.format_system_message(
+                            "Successfully restored best snapshot for write-only completion: "
+                            f"{restore_result.get('message', '')}"
+                        )
+                    )
+                    try:
+                        from AlgoTuner.editor.editor_functions import reload_all_llm_src
+
+                        reload_all_llm_src()
+                        logging.info("Reloaded modules after write-only snapshot restore.")
+                    except Exception as reload_err:
+                        logging.error(
+                            "Error reloading modules after write-only snapshot restore: %s",
+                            reload_err,
+                        )
+                else:
+                    error_msg = restore_result.get("error", "Unknown restore error")
+                    if (
+                        "No snapshot metadata found" in error_msg
+                        or "No snapshot directory found" in error_msg
+                        or "No saved state" in error_msg
+                    ):
+                        logging.info(
+                            self.message_writer.format_system_message(
+                                "No best snapshot found to restore for write-only completion."
+                            )
+                        )
+                    else:
+                        logging.error(
+                            self.message_writer.format_error(
+                                error_msg, "during write-only snapshot restore"
+                            )
+                        )
+            except Exception as e:
+                logging.error(
+                    self.message_writer.format_error(str(e), "during write-only snapshot restore")
+                )
 
         task_display_name = getattr(self.task_instance, "task_name", "unknown")
         if should_terminate:
@@ -1385,7 +1434,7 @@ class LLMInterface(base_interface.BaseLLMInterface):
         else:
             logging.info(
                 self.message_writer.format_task_status(
-                    "completed", "Write-only mode: skipping train and test evaluation."
+                    "completed", "Write-only mode: skipping final train and test evaluation."
                 )
             )
         logging.info(f"LLM interface for task {task_display_name} executed.")

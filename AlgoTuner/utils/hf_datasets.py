@@ -109,6 +109,8 @@ def ensure_hf_dataset(task_name: str | None = None) -> Path | None:
     try:
         from huggingface_hub import snapshot_download
     except Exception as exc:
+        print("EXCEPTION")
+        print(exc)
         logging.warning("HF download unavailable (huggingface_hub import failed): %s", exc)
         return None
 
@@ -167,6 +169,7 @@ def ensure_hf_dataset(task_name: str | None = None) -> Path | None:
         cache_dir = local_dir / ".hf_cache"
         cache_dir.mkdir(parents=True, exist_ok=True)
 
+        print("BEFORE")
         snapshot_path = snapshot_download(
             repo_id=repo_id,
             repo_type="dataset",
@@ -180,6 +183,8 @@ def ensure_hf_dataset(task_name: str | None = None) -> Path | None:
         )
         print(f"✓ Download complete! Dataset cached at {local_dir}")
     except Exception as exc:
+        print("HERE")
+        print(exc)
         logging.warning("HF snapshot download failed for %s: %s", repo_id, exc)
         print(f"❌ HF download failed: {exc}")
         return None

@@ -970,8 +970,22 @@ def _fork_run_worker(
                 if module_file and any(
                     part in module_file for part in ["llm_src", "AlgoTune", "/tmp/", "solver"]
                 ):
-                    for name, obj in inspect.getmembers(module):
-                        if hasattr(obj, "cache_clear") and callable(obj.cache_clear):
+                    try:
+                        members = inspect.getmembers(module)
+                    except Exception:
+                        # inspect.getmembers can raise RuntimeError when
+                        # accessing torch.backends.cuda descriptors that
+                        # trigger CUDA lazy-init on a machine without a GPU.
+                        continue
+                    for name, obj in members:
+                        try:
+                            has_cc = hasattr(obj, "cache_clear") and callable(obj.cache_clear)
+                        except Exception:
+                            # hasattr only catches AttributeError; torch
+                            # descriptors can raise RuntimeError via
+                            # cuda._lazy_init() on GPU-less machines.
+                            continue
+                        if has_cc:
                             try:
                                 obj.cache_clear()
                                 cleared_caches.append(f"{module_name}.{name}.cache_clear()")

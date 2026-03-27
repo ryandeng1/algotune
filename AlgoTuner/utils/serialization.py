@@ -408,11 +408,11 @@ def dataset_decoder(dct: Any, base_dir: str | None = None) -> Any:
                 return dct
 
         try:
-            # Use mmap_mode='r' to load lazily from disk
-            arr = np.load(npy_path, mmap_mode="r", allow_pickle=False)
-
-            # OPTIONAL: transform memmap → plain ndarray view so
-            # accidental JSON dumps won't choke, yet no data is copied.
+            # Load fully into memory so the file descriptor is closed
+            # immediately.  Using mmap_mode='r' keeps the FD open for the
+            # lifetime of the memmap object, which exhausts the OS limit
+            # when many tasks are evaluated sequentially.
+            arr = np.load(npy_path, allow_pickle=False)
 
             return arr
         except Exception as exc:
@@ -454,45 +454,15 @@ def dataset_decoder(dct: Any, base_dir: str | None = None) -> Any:
                 return dct
 
         try:
-            # Heuristic: eagerly load "moderate"-sized blobs because certain
-            # third-party libraries (e.g. *cryptography*’s AEAD ciphers) expect a
-            # *bytes* instance and can raise ``MemoryError`` when handed an
-            # ``mmap.mmap`` object.  The threshold can be overridden via the
-            # env-var ``DATASET_EAGER_BYTES_MAX`` (bytes).
-
-            max_eager = int(
-                os.environ.get("DATASET_EAGER_BYTES_MAX", str(16 * 2**20))
-            )  # 16 MB default
-            file_size = os.path.getsize(bin_path)
-
-            if file_size <= max_eager:
-                with open(bin_path, "rb") as f:
-                    return f.read()
-
-            # For very large blobs fall back to zero-copy mmap to avoid huge RAM spikes.
-            import mmap
-
+            # Always read eagerly to avoid leaking file descriptors.
+            # The previous mmap path kept FDs open for the lifetime of the
+            # mmap object, exhausting the OS limit during long evaluation runs.
             with open(bin_path, "rb") as f:
-                mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
-
-            return mm  # mmap object (bytes-like & zero-copy)
-
+                return f.read()
         except Exception as exc:
-            # mmap can fail on some exotic filesystems (e.g. *procfs* or
-            # network mounts).  Fall back to an eager read so callers still get
-            # something usable, albeit at the cost of extra RAM.
-            logging.warning(
-                "dataset_decoder: memory-mapping failed for %s (%s) – falling back to eager read",
-                bin_path,
-                exc,
-            )
-            try:
-                with open(bin_path, "rb") as f:
-                    return f.read()
-            except Exception as exc2:
-                logging.error("dataset_decoder: fallback read failed for %s: %s", bin_path, exc2)
-                logging.error(traceback.format_exc())
-                return dct
+            logging.error("dataset_decoder: read failed for %s: %s", bin_path, exc)
+            logging.error(traceback.format_exc())
+            return dct
 
     # ---------------- base64 ndarray
     if type_name == "ndarray_b64":

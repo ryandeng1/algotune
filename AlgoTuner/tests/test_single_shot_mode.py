@@ -79,3 +79,37 @@ class Solver:
         edit_events = [event for event in events if event[0] == "edit"]
         self.assertEqual(len(edit_events), 1)
         self.assertIn("class Solver:", edit_events[0][4])
+
+    def test_run_task_write_only_uses_write_only_completion_path(self):
+        events = []
+        limit_checks = iter([False, True])
+
+        def check_limits():
+            return next(limit_checks, True)
+
+        interface = SimpleNamespace(
+            write_only=True,
+            message_writer=SimpleNamespace(
+                format_task_status=lambda *args: "task-status",
+                format_warning=lambda msg: msg,
+                format_error=lambda msg, _ctx: msg,
+                format_api_error=lambda msg: msg,
+            ),
+            check_limits=check_limits,
+            format_spend_status=lambda: "budget-ok",
+            get_response=lambda: {"message": "edit solver.py 1 1"},
+            message_handler=SimpleNamespace(
+                add_message=lambda role, content: events.append(("message", role, content)),
+                add_command_result=lambda result: events.append(("command_result", result)),
+            ),
+            handle_function_call=lambda response_message: {"success": True, "message": response_message},
+            _complete_write_only_run=lambda should_terminate, restore_best_snapshot=False: events.append(
+                ("write_only", should_terminate, restore_best_snapshot)
+            ),
+            _finalize_task_run=lambda should_terminate: events.append(("finalize", should_terminate)),
+        )
+
+        LLMInterface.run_task(interface)
+
+        self.assertIn(("write_only", False, True), events)
+        self.assertNotIn(("finalize", False), events)

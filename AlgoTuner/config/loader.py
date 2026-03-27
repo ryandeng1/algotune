@@ -1,3 +1,4 @@
+import logging
 import os
 import threading  # Import threading for lock
 from pathlib import Path
@@ -83,13 +84,11 @@ def load_config(config_path: str = f"{_CONFIG_DIR_NAME}/{_DEFAULT_CONFIG_FILENAM
                 # Resolve to make sure it's absolute for consistent logging
                 abs_path = p_path.resolve()
                 if abs_path.exists() and abs_path.is_file():
-                    print(f"Attempting to load config from: {abs_path}", file=os.sys.stderr)
+                    logging.debug("Attempting to load config from: %s", abs_path)
                     with open(abs_path) as file:
                         loaded_yaml = yaml.safe_load(file)
                         if loaded_yaml is not None:
-                            print(
-                                f"Successfully loaded config from: {abs_path}", file=os.sys.stderr
-                            )
+                            logging.debug("Successfully loaded config from: %s", abs_path)
                             loaded_config = loaded_yaml  # Store the loaded config
                             break  # Stop searching once loaded
                         else:
