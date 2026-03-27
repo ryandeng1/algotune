@@ -32,7 +32,7 @@ def build_code_opt_prompt(original_code: str) -> str:
         f"You are an expert python performance engineer.\n\n"
         f"Python version: 3.10\n"
         f"Task: Optimize the provided `solve` function.\n"
-        f"- Do not change the function signature expected by the harness.\n"
+        f"- Do not change the function signature.\n"
         f"- Provide a full replacement for this code.\n"
         f"- Return only the code in a single fenced block.\n\n"
         f"--- current source ---\n{original_code}\n"
@@ -119,7 +119,7 @@ def main():
     baseline_codes = {}
 
     for benchmark in os.listdir("baseline_codes"):
-        with open(Path("baseline_codes") / benchmark / "baseline.py") as f:
+        with open(Path("baseline_codes") / benchmark / "solver.py") as f:
             baseline_code = f.read()
             baseline_codes[benchmark] = baseline_code
     
