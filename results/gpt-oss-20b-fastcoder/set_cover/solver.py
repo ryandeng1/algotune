@@ -1,51 +1,54 @@
+import sys
+from typing import List, Set
 from pysat.card import CardEnc, EncType
 from pysat.formula import CNF
 from pysat.solvers import Solver
 
-class Solver:
-    def solve(self, problem: list[list[int]]) -> list[int]:
-        # Pre‑process: build list of subsets seen as sets for quick lookup
-        subsets = [set(s) for s in problem]
-        m = len(subsets)
+# ---------------------------------------------------------------------------
 
-        # Build element coverage mapping once
-        # assumes universe is {1..max_element}
-        max_elem = max((max(s) for s in subsets if s), default=0)
-        covers = [[] for _ in range(max_elem + 1)]
-        for idx, subset in enumerate(subsets, 1):  # 1‑based literal index
-            for e in subset:
-                covers[e].append(idx)
+def solve(problem: List[List[int]]) -> List[int]:
+    """
+    Find a minimum-cardinality subcollection of `problem` that covers the
+    universe.  Returns the 1‑based indices of the chosen subsets.
+    """
+    # Pre‑compute universe and the subsets that contain each element.
+    universe: Set[int] = set()
+    for subset in problem:
+        universe.update(subset)
+    universe = sorted(universe)                 # for deterministic order
+    n_elements = len(universe)
+    element_to_subsets = {e: [] for e in universe}
+    for idx, subset in enumerate(problem, start=1):   # 1‑based indices
+        for e in subset:
+            element_to_subsets[e].append(idx)
 
-        def sat_with_k(k: int) -> list[int] | None:
-            cnf = CNF()
-            # Coverage clauses
-            for e in range(1, max_elem + 1):
-                ce = covers[e]
-                if ce:
-                    cnf.append(ce)
-                else:
-                    # impossible to cover e
-                    return None
-            # Cardinality constraint
-            lits = list(range(1, m + 1))
-            cnf.extend(CardEnc.atmost(lits=lits, bound=k, encoding=EncType.seqcounter).clauses)
-            # Solve
-            with Solver(name="Minicard") as sol:
-                sol.append_formula(cnf)
-                if sol.solve():
-                    mmodel = sol.get_model()
-                    return [i for i in range(1, m + 1) if i in mmodel]
-            return None
+    # Build the CNF once and reuse it, simply altering the cardinality part.
+    base_cnf = CNF()
+    for e in universe:
+        base_cnf.append(element_to_subsets[e])     # at least one covering set
 
-        # Binary search on solution size
-        lo, hi = 1, m + 1
-        best = None
-        while lo < hi:
-            mid = (lo + hi) // 2
-            res = sat_with_k(mid)
-            if res:
-                best = res
-                hi = mid
+    subsets_count = len(problem)
+    all_lits = list(range(1, subsets_count + 1))
+
+    # Binary search for the minimum cardinality.
+    left, right = 1, subsets_count
+    best_solution = []
+
+    while left <= right:
+        mid = (left + right) // 2
+        # Re‑use the base CNF and add the at‑most‑mid constraint.
+        cnf = CNF()
+        cnf.extend(base_cnf.clauses)
+        atmost_mid = CardEnc.atmost(lits=all_lits, bound=mid, encoding=EncType.seqcounter)
+        cnf.extend(atmost_mid.clauses)
+
+        with Solver(name="minicard", bootstrap_with=cnf) as s:
+            if s.solve():
+                model = s.get_model()
+                selected = [i for i in range(1, subsets_count + 1) if model[i - 1] > 0]
+                best_solution = selected
+                right = mid - 1
             else:
-                lo = mid + 1
-        return best or []
+                left = mid + 1
+
+    return best_solution

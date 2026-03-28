@@ -1,31 +1,30 @@
 from typing import Any, Dict, List, Set
 
 class Solver:
-    @staticmethod
-    def solve(problem: Dict[str, Any]) -> Dict[str, float]:
+    def solve(self, problem: Dict[str, Any]) -> Dict[str, float]:
         """
-        Compute the edge expansion of a subset S in a directed graph given by an adjacency list.
-        
-        The graph is treated as directed: an edge u->v contributes to the boundary
-        if u∈S and v∉S (and vice‑versa for reverse edges).
+        Compute the edge expansion of the subset S in the given directed graph.
+        Edge expansion = |∂S| / |S| where ∂S is the set of directed edges
+        that leave S. If S is empty or contains all vertices, the expansion
+        is defined as 0.0.
         """
         adj: List[List[int]] = problem["adjacency_list"]
         S_list: List[int] = problem["nodes_S"]
-        n: int = len(adj)
-        S: Set[int] = set(S_list)
 
-        # Quick exit for empty or full set
-        if not S or len(S) == n:
+        n: int = len(adj)
+        if n == 0 or not S_list:
             return {"edge_expansion": 0.0}
 
-        # Count boundary edges
-        boundary: int = 0
-        for u in range(n):
-            in_S = u in S
-            for v in adj[u]:
-                if (v in S) != in_S:          # exactly one endpoint in S
-                    boundary += 1
+        S: Set[int] = set(S_list)
+        if len(S) == n:
+            return {"edge_expansion": 0.0}
 
-        denom = min(len(S), n - len(S))
-        expansion = boundary / denom if denom else 0.0
+        # Count edges from S to outside S
+        cut_edges: int = 0
+        for u in S:
+            for v in adj[u]:
+                if v not in S:
+                    cut_edges += 1
+
+        expansion = cut_edges / len(S)
         return {"edge_expansion": float(expansion)}

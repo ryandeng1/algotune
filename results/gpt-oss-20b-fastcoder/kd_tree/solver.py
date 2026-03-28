@@ -1,39 +1,42 @@
+from typing import Any
 import numpy as np
 import faiss
-from typing import Any
+
 
 class Solver:
     def solve(self, problem: dict[str, Any]) -> dict[str, Any]:
-        # Input arrays
-        points_np = np.asarray(problem["points"], dtype=np.float32, order="C")
-        queries_np = np.asarray(problem["queries"], dtype=np.float32, order="C")
-        k = min(problem["k"], len(points_np))
-        dim = points_np.shape[1]
+        # Prepare data
+        points = np.asarray(problem["points"], dtype=np.float32)
+        queries = np.asarray(problem["queries"], dtype=np.float32)
+        k = min(problem["k"], len(points))
+        dim = points.shape[1]
 
-        # Build index
-        flat_index = faiss.IndexFlatL2(dim)
-        flat_index = faiss.IndexIDMap(flat_index)
-        ids = np.arange(len(points_np), dtype=np.int64)
-        flat_index.add_with_ids(points_np, ids)
+        # Build FAISS index
+        index = faiss.IndexFlatL2(dim)
+        index = faiss.IndexIDMap(index)
+        ids = np.arange(len(points), dtype=np.int64)
+        index.add_with_ids(points, ids)
 
-        # Main k‑nn search
-        dist, idx = flat_index.search(queries_np, k)
-        solution = {"indices": idx.tolist(), "distances": dist.tolist()}
+        # Main search
+        dists, idxs = index.search(queries, k)
 
-        # Optional boundary search
+        # Prepare result
+        solution = {"indices": [idxs.flatten().tolist()][:k], "distances": dists.tolist()}
+
+        # Boundary queries if needed
         if problem.get("distribution") == "hypercube_shell":
-            # Construct two boundary query points for each dimension
-            bq = np.empty((2 * dim, dim), dtype=np.float32)
-            # zeros
-            bq[0::2] = 0.0
-            # ones
-            bq[1::2] = 1.0
-            # set per-dimension differences
+            # Construct all boundary queries in one go
+            bqs = []
             for d in range(dim):
-                bq[2 * d, d] = 0.0
-                bq[2 * d + 1, d] = 1.0
-            bd_dist, bd_idx = flat_index.search(bq, k)
-            solution["boundary_distances"] = bd_dist.tolist()
-            solution["boundary_indices"] = bd_idx.tolist()
+                q0 = np.zeros(dim, dtype=np.float32)
+                q1 = np.ones(dim, dtype=np.float32)
+                q0[d] = 0.0
+                q1[d] = 1.0
+                bqs.append(q0)
+                bqs.append(q1)
+            bqs = np.stack(bqs, axis=0)
+            bd, bi = index.search(bqs, k)
+            solution["boundary_distances"] = bd.tolist()
+            solution["boundary_indices"] = bi.tolist()
 
         return solution

@@ -1,38 +1,21 @@
+from typing import Any
 import numpy as np
-from typing import Any, Dict, List
 
 class Solver:
-
-    def solve(self, problem: Dict[str, Any]) -> Dict[str, List]:
+    def solve(self, problem: dict[str, Any]) -> dict[str, list]:
         """
-        Solve the problem using the algorithm described in
-        https://doi.org/10.1109/CVPR.2018.00890.
-
-        The task is to keep the k largest-magnitude elements of v and set the rest to 0.
-        The implementation uses np.argpartition which runs in O(n) average time.
+        Return the vector consisting of the k largest‑in‑absolute value terms
+        from the input vector v; all other terms are set to 0.
         """
-        # Extract and flatten the input array
-        v = np.asarray(problem['v']).ravel()
+        v = np.asarray(problem.get("v", []), dtype=float).ravel()
+        k = int(problem.get("k", 0))
+        if k <= 0 or v.size == 0:
+            return {"solution": [0.0] * v.size}
 
-        # Number of elements to keep
-        k = int(problem['k'])
-        n = v.size
-
-        if k <= 0:
-            # Nothing to keep – return all zeros
-            pruned = np.zeros(n, dtype=v.dtype)
-        elif k >= n:
-            # Keep everything
-            pruned = v.copy()
-        else:
-            # Find indices of the k elements with largest absolute value
-            # np.argpartition returns indices such that the elements at those indices
-            # are the k largest (in any order)
-            idx = np.argpartition(-np.abs(v), k - 1)[:k]
-
-            # Build the result array
-            pruned = np.zeros(n, dtype=v.dtype)
-            pruned[idx] = v[idx]
-
-        # Return as plain Python list
-        return {'solution': pruned.tolist()}
+        # Find the indices of the k largest absolute values in linear time
+        idx = np.argpartition(np.abs(v), -k)[-k:]
+        # Create the pruned vector
+        pruned = np.empty_like(v)
+        pruned.fill(0.0)
+        pruned[idx] = v[idx]
+        return {"solution": pruned.tolist()}

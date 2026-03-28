@@ -1,61 +1,68 @@
 import numpy as np
-from typing import Any, Dict, List
 
 class Solver:
-    """
-    Fast discounted MDP solver using value iteration.
+    def solve(self, problem: dict[str, float | np.ndarray]) -> dict[str, list[float]]:
+        """
+        Solve a discounted Markov Decision Process using value iteration.
+        The algorithm iteratively improves the value function until the
+        maximum change is below a tolerance.  The resulting policy chooses
+        an action that maximises the Bellman backup for each state.
 
-    Parameters
-    ----------
-    problem : dict
-        Dictionary with the keys:
-            - num_states (int)
-            - num_actions (int)
-            - discount (float)
-            - transitions (np.ndarray, shape [S, A, S])
-            - rewards (np.ndarray, shape [S, A, S])
+        Args:
+            problem: Dictionary containing the keys:
+                - 'num_states': number of states (int)
+                - 'num_actions': number of actions (int)
+                - 'discount': discount factor gamma (float)
+                - 'transitions': 3‑D array of shape (S, A, S) giving
+                                 transition probabilities P(s'|s,a)
+                - 'rewards': 3‑D array of shape (S, A, S) giving
+                              immediate rewards r(s,a,s')
 
-    Returns
-    -------
-    dict
-        Keys:
-            - value_function : list[float]
-            - policy : list[int]
-    """
-
-    def solve(self, problem: Dict[str, Any]) -> Dict[str, List[float]]:
-        num_states = problem["num_states"]
-        num_actions = problem["num_actions"]
-        gamma = problem["discount"]
-        # convert to numpy arrays for faster ops
-        transitions = np.array(problem["transitions"], dtype=np.float64)
-        rewards = np.array(problem["rewards"], dtype=np.float64)
-
-        # Pre‑compute the expected returns for each state–action pair
-        # shape: (S, A)
-        exp_returns = np.einsum(
-            "s a s', s a s' -> s a",
-            transitions,
-            rewards + gamma * np.eye(num_states)[None, None, :],  # placeholder for V
-        )
+        Returns:
+            A dictionary with keys:
+                - 'value_function': list of state values
+                - 'policy': list of chosen actions (0‑based indexing)
+        """
+        # Extract problem data
+        num_states = problem['num_states']
+        num_actions = problem['num_actions']
+        gamma = problem['discount']
+        transitions = np.asarray(problem['transitions'], dtype=np.float64)
+        rewards = np.asarray(problem['rewards'], dtype=np.float64)
 
         # Value iteration
         V = np.zeros(num_states, dtype=np.float64)
-        threshold = 1e-8
-        max_iter = 10000
-        for _ in range(max_iter):
-            # Update expected returns with current V
-            exp_returns = np.einsum(
-                "s a s', s a s' -> s a",
-                transitions,
-                rewards + gamma * V[None, None, :],
-            )
-            new_V = exp_returns.max(axis=1)
-            if np.max(np.abs(new_V - V)) < threshold:
-                V = new_V
-                break
-            V = new_V
+        policy = np.zeros(num_states, dtype=int)
 
-        # Extract deterministic policy
-        policy = np.argmax(exp_returns, axis=1).tolist()
-        return {"value_function": V.tolist(), "policy": policy}
+        # Convergence parameters
+        eps = 1e-8   # tolerance
+        max_iter = 10000
+
+        for _ in range(max_iter):
+            V_old = V.copy()
+
+            # Compute Bellman backups for all states
+            for s in range(num_states):
+                # (A, S) tensors for this state
+                trans_sa = transitions[s]          # shape (A, S)
+                rewards_sa = rewards[s]           # shape (A, S)
+
+                # Expected return for each action:
+                # sum_{s'} P(s'|s,a) * [ r(s,a,s') + gamma * V_old[s'] ]
+                tmp = trans_sa * (rewards_sa + gamma * V_old)
+                act_vals = tmp.sum(axis=1)         # shape (A,)
+
+                # Best action and value
+                best_a = int(act_vals.argmax())
+                V[s] = act_vals[best_a]
+                policy[s] = best_a
+
+            # Check convergence
+            if np.max(np.abs(V - V_old)) < eps:
+                break
+
+        # Return results
+        return {
+            'value_function': V.tolist(),
+            'policy': policy.tolist()
+        }

@@ -1,38 +1,22 @@
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
+AES_KEY_SIZES = {16, 24, 32}
+GCM_TAG_SIZE = 16
+
 class Solver:
-    # Pre‑computed constants
-    _TAG_LEN = 16
-    _VALID_KEY_SIZES = {16, 24, 32}
-
     def solve(self, problem: dict[str, bytes]) -> dict[str, bytes]:
-        """
-        Encrypt the plaintext using AES-GCM from the `cryptography` library.
+        key = problem["key"]
+        nonce = problem["nonce"]
+        plaintext = problem["plaintext"]
+        associated_data = problem["associated_data"]
 
-        Args:
-            problem (dict): Dictionary containing 'key', 'nonce', 'plaintext',
-                            and 'associated_data'.
-
-        Returns:
-            dict: Contains 'ciphertext' and 'tag'.
-        """
-        key, nonce, plaintext, ad = (
-            problem['key'],
-            problem['nonce'],
-            problem['plaintext'],
-            problem['associated_data'],
-        )
-
-        if len(key) not in self._VALID_KEY_SIZES:
-            raise ValueError(
-                f"Invalid key size: {len(key)}. Must be one of {sorted(self._VALID_KEY_SIZES)}."
-            )
+        if len(key) not in AES_KEY_SIZES:
+            raise ValueError(f"Invalid key size: {len(key)}. Must be one of {sorted(AES_KEY_SIZES)}")
 
         aesgcm = AESGCM(key)
-        enc = aesgcm.encrypt(nonce, plaintext, ad)
+        ct = aesgcm.encrypt(nonce, plaintext, associated_data)
 
-        # Separate plaintext and tag
-        cipher = enc[:-self._TAG_LEN]
-        tag = enc[-self._TAG_LEN:]
+        if len(ct) < GCM_TAG_SIZE:
+            raise ValueError("Encrypted output is shorter than the expected tag size")
 
-        return {'ciphertext': cipher, 'tag': tag}
+        return {"ciphertext": ct[:-GCM_TAG_SIZE], "tag": ct[-GCM_TAG_SIZE:]}

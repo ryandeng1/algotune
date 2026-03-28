@@ -1,20 +1,19 @@
 import numpy as np
-from typing import Any
 
 class Solver:
     def solve(self, problem: dict[str, list[list[float]]]) -> list[list[float]]:
         """
-        Compute the matrix product C = A · B as efficiently as possible.
-        The input matrices are first converted to NumPy arrays; the multiplication
-        is performed with the highly optimized BLAS routine exposed via numpy's
-        dot/.matmul. Finally the result is converted back to native Python lists.
+        Compute the product C = A · B for the given matrices.
+        The inputs are converted to NumPy arrays in one step, the dot product
+        is calculated using the highly optimised BLAS routine, and the result
+        is returned as a plain Python nested list.
         """
-        # Convert the data to contiguous NumPy arrays (float64 by default)
-        A = np.ascontiguousarray(problem["A"], dtype=np.float64)
-        B = np.ascontiguousarray(problem["B"], dtype=np.float64)
+        # Convert inputs to NumPy arrays using ``asarray`` to avoid unnecessary copies
+        A = np.asarray(problem["A"], dtype=np.float64)
+        B = np.asarray(problem["B"], dtype=np.float64)
 
-        # Perform the matrix multiplication using BLAS
+        # Perform the matrix multiplication using the efficient BLAS implementation
         C = np.dot(A, B)
 
-        # Convert the NumPy array back to a list of lists
+        # Convert the NumPy array back to a plain list for the required output type
         return C.tolist()

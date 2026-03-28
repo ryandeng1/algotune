@@ -1,37 +1,77 @@
 import numpy as np
-from typing import Any, Dict, List
 
 class Solver:
-    def solve(self, problem: Dict[str, Any]) -> Dict[str, List]:
+    """
+    Fast convolution solver using real FFT (rfft) for real signals.
+    """
+
+    @staticmethod
+    def _convolve_real(a: np.ndarray, b: np.ndarray, mode: str = "full") -> np.ndarray:
         """
-        Compute the linear convolution of two real sequences using FFT.
-        Chosen for speed: only uses NumPy (no SciPy dependency) and
-        handles both 'full' and 'same' modes.
+        Convolve two real numpy arrays using a single real FFT.
+
+        Parameters
+        ----------
+        a : np.ndarray
+            First input array.
+        b : np.ndarray
+            Second input array.
+        mode : str, optional
+            One of {'full', 'valid', 'same'}.
+
+        Returns
+        -------
+        np.ndarray
+            Convolution of a and b in the requested mode.
         """
-        # Convert inputs to 1‑D float arrays
-        x = np.asarray(problem["signal_x"], dtype=np.float64, copy=False)
-        y = np.asarray(problem["signal_y"], dtype=np.float64, copy=False)
+        if a.ndim != 1 or b.ndim != 1:
+            raise ValueError("Only 1‑D real signals are supported.")
 
-        # Lengths of the inputs
-        nx, ny = x.shape[0], y.shape[0]
-        # Size of the FFT: next power of two of nx + ny - 1
-        nfft = 1 << (nx + ny - 1).bit_length()
+        la, lb = a.size, b.size
+        lres = la + lb - 1
+        n = np.fft.next_fast_len(lres)
 
-        # Forward FFT of zero‑padded inputs
-        X = np.fft.rfft(x, nfft)
-        Y = np.fft.rfft(y, nfft)
+        # Compute FFTs
+        fa = np.fft.rfft(a, n=n)
+        fb = np.fft.rfft(b, n=n)
 
-        # Element‑wise product in frequency domain and inverse FFT
-        conv = np.fft.irfft(X * Y, nfft)[: nx + ny - 1]
+        # Element‑wise multiplication in frequency domain
+        fc = fa * fb
 
-        mode = problem.get("mode", "full").lower()
+        # Inverse FFT to data domain
+        conv_full = np.fft.irfft(fc, n=n)[:lres]
+
+        # Downsample to requested mode
         if mode == "full":
-            result = conv
+            return conv_full
         elif mode == "same":
-            start = (ny - 1) // 2
-            result = conv[start:start + nx]
+            start = (lb - 1) // 2
+            return conv_full[start : start + la]
+        elif mode == "valid":
+            return conv_full[(lb - 1) : -(la - 1) if lb > 1 else None]
         else:
-            raise ValueError(f"Unsupported mode: {mode}")
+            raise ValueError(f"Invalid mode: {mode}")
 
-        # Return as a plain Python list
-        return {"convolution": result.tolist()}
+    def solve(self, problem: dict[str, any]) -> dict[str, any]:
+        """
+        Compute the convolution of two sequences using real FFT.
+
+        Parameters
+        ----------
+        problem : dict
+            Dictionary containing:
+                - 'signal_x': Iterable of real numbers.
+                - 'signal_y': Iterable of real numbers.
+                - 'mode': One of 'full', 'same', 'valid' (default: 'full').
+
+        Returns
+        -------
+        dict
+            A dictionary with the key 'convolution' mapping to the result list.
+        """
+        a = np.asarray(problem["signal_x"], dtype=float)
+        b = np.asarray(problem["signal_y"], dtype=float)
+        mode = problem.get("mode", "full")
+
+        conv = self._convolve_real(a, b, mode=mode)
+        return {"convolution": conv.tolist()}

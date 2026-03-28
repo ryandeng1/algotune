@@ -1,76 +1,98 @@
 import numpy as np
-from typing import Any
+import cvxpy as cp
+from typing import Any, Dict, List, Union
+
+# --------------------------------------------------------------- #
+#        Efficient CVXPY code for Logistic Group‑Lasso          #
+# --------------------------------------------------------------- #
 
 class Solver:
-    def solve(self, problem: dict[str, Any]) -> dict[str, Any]:
+    """
+    Optimised solver for logistic regression with group L1 regularisation.
+    """
+
+    def solve(
+        self,
+        problem: Dict[str, Union[List[List[float]], List[int], float]]
+    ) -> Union[Dict[str, Union[List[float], float]], None]:
         """
-        Solve logistic regression with group lasso penalty.
-        A lightweight implementation that uses iterative proximal gradient descent
-        and avoids the heavy CVXPY backend. The algorithm is scalable for typical
-        problem sizes encountered in the benchmark.
+        Parameters
+        ----------
+        problem : dict
+            Keys
+                * X   : design matrix (p+1 x n)
+                * y   : response vector (n,)
+                * gl  : group labels (p+1,) integer array
+                * lba : regularisation weight (float)
+
+        Returns
+        -------
+        dict or None
+            * beta0          : intercept
+            * beta           : coefficient vector
+            * optimal_value : objective value of the optimal solution
+            None if solver fails
         """
-        # Extract problem data
-        X = np.asarray(problem["X"], dtype=np.float64)
-        y = np.asarray(problem["y"], dtype=np.float64)
-        gl = np.asarray(problem["gl"], dtype=np.int64)
-        lba = float(problem["lba"])
 
-        # Number of samples, features (including intercept column)
-        n, d = X.shape
-        # Features excluding intercept (first column is assumed to be 1)
-        X_f = X[:, 1:]
+        # -------- fast data prep --------------------------------
+        X = np.asarray(problem["X"], dtype=np.float64, order="F")  # For memory‑layout
+        y = np.asarray(problem["y"], dtype=np.float64, order="F")
+        gl = np.asarray(problem["gl"], dtype=np.int64, order="F")
+        lba: float = problem["lba"]
 
-        # Group information
-        uniq_groups, inv_idx, group_sizes = np.unique(gl, return_inverse=True, return_counts=True)
-        num_groups = uniq_groups.size
-        p = d - 1
+        # Sub‑sample index (exclude intercept if any)
+        p = X.shape[0] - 1                     # number of covariates
+        X_cov = X[1:, :]                       # Drop the first row (intercept column)
+        y = y.reshape(-1, 1)                   # column vector
 
-        # Build sparse indicator matrix for groups (one-hot encoding of groups over features)
-        group_mask = np.zeros((p, num_groups), dtype=np.float64)
-        group_mask[np.arange(p), inv_idx] = 1.0
+        # Unique groups and mapping from coefficients to groups
+        uniq, inv = np.unique(gl[1:], return_inverse=True)  # ignore intercept group
+        ng = uniq.size
 
-        # Pre‑compute group norms with square‑root scaling
-        sqrt_group_sizes = np.sqrt(group_sizes)
+        # ----- construct group masks for constraints -----------------
+        # mask[j, g] = 1 if coefficient j belongs to group g else 0
+        mask = np.zeros((p, ng), dtype=np.bool_)
+        mask[np.arange(p), inv] = True
+        db = np.logical_not(mask)
 
-        # Initialise coefficients; start from zero
-        beta = np.zeros((p, num_groups), dtype=np.float64)
-        beta0 = 0.0
+        #----- CVXPY variables --------------------------------------
+        beta = cp.Variable((p, ng))       # beta[j,g]
+        beta0 = cp.Variable()             # intercept
+        # a workaround to allow setting the parameter externally
+        lba_param = cp.Parameter(nonneg=True)
+        lba_param.value = lba
 
-        # Step sizes
-        lr = 0.01  # small learning rate
-        num_iters = 2000
+        # ----- objective --------------------------------------------
+        # logistic loss
+        lin_pred = (X_cov.T @ beta)        # shape (n, ng)
+        lin_pred_sum = cp.sum(lin_pred, axis=1, keepdims=True) + beta0
+        logreg = -cp.sum(cp.multiply(y, lin_pred_sum)) + cp.sum(cp.logistic(lin_pred_sum))
 
-        # Helper views for efficient updates
-        def group_norms(b):
-            return np.linalg.norm(b, axis=0) * sqrt_group_sizes
+        # group lasso penalty: sum over groups of l2 norms of vector of coeffs
+        grp_norms = cp.norm(beta, 2, axis=0)   # shape (ng,)
+        grouplasso = lba_param * cp.sum(grp_norms * np.sqrt(uniq.size))  # weight by sqrt(size)
 
-        # Proximal operator for group lasso (soft group thresholding)
-        def prox_group_lasso(b, thresh):
-            norms = np.linalg.norm(b, axis=0)
-            shrink = np.maximum(0, norms - thresh) / (norms + 1e-12)
-            return b * shrink
+        objective = cp.Minimize(logreg + grouplasso)
 
-        # Logistic regression gradient w.r.t intercept and beta
-        def grad_intercept_beta(b0, B):
-            linear = X_f @ (B @ group_mask.T) + b0
-            prob = 1.0 / (1.0 + np.exp(-linear))
-            grad_b0 = np.sum(prob - y)
-            grad_B = (X_f.T @ ((prob - y)[:, None] * group_mask.T)).T
-            return grad_b0, grad_B
+        # ----- constraints ------------------------------------------
+        constraints = [beta[db] == 0]   # zero out coefficients not in their group
 
-        # Main optimization loop
-        for _ in range(num_iters):
-            grad_b0, grad_B = grad_intercept_beta(beta0, beta)
-            beta0 -= lr * grad_b0
-            beta -= lr * grad_B
-            # Proximal step for each group
-            beta = prox_group_lasso(beta, lr * lba)
+        # ----- solve --------------------------------------------------
+        prob = cp.Problem(objective, constraints)
+        try:
+            opt_val = prob.solve(solver=cp.ECOS, warm_start=True)
+        except Exception:
+            return None
 
-        # Flatten beta to a vector according to original feature ordering
+        # ----- return results ---------------------------------------
+        if beta.value is None or beta0.value is None:
+            return None
+
+        # reconstruct coefficient vector in original order
         beta_vec = np.empty(p, dtype=np.float64)
-        beta_vec = beta[:, inv_idx]
+        beta_vec[:] = beta.value[np.arange(p), inv]
         return {
-            "beta0": float(beta0),
+            "beta0": beta0.value,
             "beta": beta_vec.tolist(),
-            "optimal_value": None,  # not computed in this simple implementation
+            "optimal_value": opt_val,
         }

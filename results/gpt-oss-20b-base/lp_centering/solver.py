@@ -1,10 +1,8 @@
-from typing import Any
-import cvxpy as cp
 import numpy as np
-
+import cvxpy as cp
 
 class Solver:
-    def solve(self, problem: dict[str, Any]) -> dict[str, list]:
+    def solve(self, problem: dict[str, any]) -> dict[str, list]:
         """
         Solve the lp centering problem using CVXPY.
 
@@ -12,24 +10,25 @@ class Solver:
         :return: A dictionary with key:
                  "solution": a 1D list with n elements representing the solution to the lp centering problem.
         """
-        # Extract data as NumPy arrays for performance
-        c = np.array(problem["c"])
-        A = np.array(problem["A"])
-        # b is not used directly; CVXPY takes care of broadcasting
-        n = c.shape[0]
+        # Convert inputs to numpy arrays (float64) for better performance
+        c = np.asarray(problem["c"], dtype=np.float64)
+        A = np.asarray(problem["A"], dtype=np.float64)
+        b = np.asarray(problem["b"], dtype=np.float64)
 
-        # Define the variable
-        x = cp.Variable(n, pos=True)
+        n = c.size
+        x = cp.Variable(n)
 
-        # Construct and solve the problem
-        objective = cp.Minimize(c.T @ x - cp.sum(cp.log(x)))
-        constraints = [A @ x == problem["b"]]
+        # Objective: minimize linear term minus sum of logs (strictly concave)
+        objective = cp.Minimize(c @ x - cp.sum(cp.log(x)))
+        constraints = [A @ x == b]
         prob = cp.Problem(objective, constraints)
-        prob.solve(solver=cp.CLARABEL)
 
-        # Ensure the problem solved successfully
+        # Use a fast interior-point solver (Cerberus is efficient for this type of problem)
+        prob.solve(solver=cp.CERBERUS, verbose=False, eps_abs=1e-7, eps_rel=1e-7, max_iter=500)
+
+        # Standard CVXPY status check
         if prob.status not in {"optimal", "optimal_inaccurate"}:
-            raise RuntimeError(f"CVXPY did not find an optimal solution: {prob.status}")
+            raise RuntimeError(f"Solver did not find optimal solution: {prob.status}")
 
-        # Return the solution as a plain Python list
+        # Return solution as a plain Python list
         return {"solution": x.value.tolist()}

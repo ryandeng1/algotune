@@ -3,13 +3,29 @@ from numpy.typing import NDArray
 
 class Solver:
     def solve(self, problem: NDArray) -> list[complex]:
-        """Return eigenvalues of a real square matrix sorted by real part (descending) and imaginary part (descending)."""
-        # Fast eigenvalue computation: eigvals returns only eigenvalues.
-        vals = np.linalg.eigvals(problem)
+        """
+        Solve the eigenvalue problem for the given square matrix.
 
-        # np.lexsort expects keys in ascending order, so we negate to get descending.
-        # The first key is the most significant (real part), the second is the imaginary part.
-        order = np.lexsort((-vals.imag, -vals.real))
+        The returned list contains the eigenvalues sorted in descending order
+        according to real part first and then imaginary part.
 
-        # Apply the ordering and convert to a plain Python list of complex numbers.
-        return vals[order].tolist()
+        Parameters
+        ----------
+        problem : NDArray
+            Square real matrix.
+
+        Returns
+        -------
+        list[complex]
+            Sorted eigenvalues.
+        """
+        # Compute only eigenvalues (no eigenvectors) for speed
+        eigvals = np.linalg.eigvals(problem)
+
+        # Sort by real part descending, then by imaginary part descending
+        # np.lexsort sorts according to the last key first, hence the
+        # negative signs to achieve descending order.
+        order = np.lexsort((-eigvals.imag, -eigvals.real))
+        sorted_vals = eigvals[order]
+
+        return sorted_vals.tolist()

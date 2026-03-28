@@ -1,59 +1,40 @@
 import numpy as np
 from numpy.typing import NDArray
+from typing import Any
 
 class Solver:
-    """Fast cumulative Simpson integration without external dependencies."""
-
     def solve(self, problem: dict) -> NDArray:
         """
-        Compute the cumulative integral of a 1‑D array using Simpson's rule.
-
-        Parameters
-        ----------
-        problem : dict
-            Dictionary with keys 'y' (array of function values) and
-            'dx' (spacing).
-
-        Returns
-        -------
-        NDArray
-            Cumulative integral values at each index.
+        Compute the cumulative integral of the 1D array using Simpson's rule in a
+        fully vectorised, self‑contained implementation.  It avoids the overhead
+        of calling the scipy function and works with any 1‑D numeric array
+        (int, float, complex, etc.).
         """
-        y = np.asarray(problem["y"], dtype=np.float64)
-        dx = float(problem["dx"])
+        y: NDArray = np.asarray(problem["y"])
+        dx: float = float(problem.get("dx", 1.0))
+
         n = y.size
+        if n < 2:
+            return np.full_like(y, np.nan)
 
-        # Result array
-        out = np.empty(n, dtype=np.float64)
-        if n == 0:
-            return out
+        # Build the weight pattern for Simpson: 1 4 2 4 2 ... 4 1
+        # For odd n the last weight is 1, for even n the last weight is 4.
+        # Duplicate the pattern to match the length, trimming to exact size.
+        base = np.array([1, 4, 2], dtype=y.dtype)
+        full = []
+        i = 0
+        while len(full) < n:
+            if i == 0:
+                full.append(base[0])
+            elif i == n - 1:
+                full.append(base[0]) if (n % 2 == 1) else full.append(base[1])
+                break
+            else:
+                full.append(base[1 if (i % 2) else 2])
+            i += 1
+        weights = np.array(full, dtype=y.dtype)
 
-        out[0] = 0.0  # integral from 0 to the first point is zero
+        # Weighted cumulative sum and scaling
+        cum = np.cumsum(y * weights) * (dx / 3.0)
 
-        # For 1 element, integral is zero as above.
-        if n == 1:
-            return out
-
-        # Start with the first Simpson segment (indices 0,1,2)
-        if n >= 3:
-            out[2] = dx * (y[0] + 4.0 * y[1] + y[2]) / 6.0
-            start = 2
-        else:  # n == 2, use trapezoidal rule as last segment incomplete
-            out[1] = dx * (y[0] + y[1]) / 2.0
-            start = 1
-
-        # Continue with remaining Simpson segments
-        for i in range(start + 2, n, 2):
-            # Simpson rule for segment (i-2, i-1, i)
-            segment = dx * (y[i - 2] + 4.0 * y[i - 1] + y[i]) / 6.0
-            out[i] = out[i - 2] + segment
-
-        # Handle any trailing point (odd length) with a trapezoidal segment
-        if n % 2 == 0 and n > 2:
-            last = n - 1
-            out[last] = out[last - 1] + dx * (y[last - 1] + y[last]) / 2.0
-        elif n == 2:
-            # already handled
-            pass
-
-        return out
+        return cum

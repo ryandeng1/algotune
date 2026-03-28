@@ -1,40 +1,32 @@
 import numpy as np
 import ot
 
-
 class Solver:
-    """
-    Fast solver for the Earth Mover's Distance (EMD) problem.
-    Utilises the highly optimised `ot.emd` routine from
-    the POT (Python Optimal Transport) library.
-    """
-
     def solve(self, problem: dict[str, np.ndarray]) -> dict[str, list[list[float]]]:
         """
-        Compute the optimal transport plan between two discrete
-        distributions using an efficient linear programming solver.
+        Solve the EMD problem using ot.lp.emd.
 
         Parameters
         ----------
         problem : dict[str, np.ndarray]
-            Must contain the keys:
-                - 'source_weights': 1‑D array of shape (n,)
-                - 'target_weights': 1‑D array of shape (m,)
-                - 'cost_matrix'  : 2‑D array of shape (n, m)
+            Dictionary with keys 'source_weights', 'target_weights',
+            and 'cost_matrix' containing NumPy arrays.
 
         Returns
         -------
         dict[str, list[list[float]]]
-            Dictionary with a single entry 'transport_plan' whose value
-            is a nested Python list containing the optimal matrix G.
+            Dictionary containing the optimal transport plan matrix G
+            under the key 'transport_plan'.
         """
-        a = problem["source_weights"]
-        b = problem["target_weights"]
-        # Ensure the cost matrix is contiguous and float64 for POT
-        M = np.ascontiguousarray(problem["cost_matrix"], dtype=np.float64)
+        # Retrieve problem data
+        a = problem['source_weights']
+        b = problem['target_weights']
+        M = problem['cost_matrix']
 
-        # Compute the optimal transport plan
-        G = ot.emd(a, b, M, check_marginals=False)
+        # Ensure correct memory layout for the cost matrix
+        M_cont = np.ascontiguousarray(M, dtype=np.float64)
 
-        # Convert to a plain Python list of lists for the expected output
-        return {"transport_plan": G.tolist()}
+        # Compute optimal transport plan using underlying C implementation
+        G = ot.lp.emd(a, b, M_cont, check_marginals=False)
+
+        return {'transport_plan': G}

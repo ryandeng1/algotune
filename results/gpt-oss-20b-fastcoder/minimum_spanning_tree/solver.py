@@ -1,51 +1,62 @@
-from typing import Any
+from __future__ import annotations
+from typing import Any, List, Tuple, Dict
 
 class Solver:
-    def solve(self, problem: dict[str, Any]) -> dict[str, list[list[float]]]:
-        """
-        Compute the Minimum Spanning Tree (MST) of an undirected weighted graph
-        using Kruskal's algorithm and a union‑find data structure.
-        The returned edges are sorted by (u, v) in ascending order.
+    """Fast MST solver without networkx."""
 
-        :param problem: dict with keys 'num_nodes' and 'edges'
-        :return: dict with key 'mst_edges' containing a list of [u, v, weight]
-        """
-        # ---------- Union‑Find ----------
-        parent = list(range(problem['num_nodes']))
-        rank = [0] * problem['num_nodes']
+    class _DSU:
+        __slots__ = ("parent", "rank")
 
-        def find(x: int) -> int:
-            while parent[x] != x:
-                parent[x] = parent[parent[x]]
-                x = parent[x]
+        def __init__(self, n: int):
+            self.parent = list(range(n))
+            self.rank = [0] * n
+
+        def find(self, x: int) -> int:
+            while self.parent[x] != x:
+                self.parent[x] = self.parent[self.parent[x]]
+                x = self.parent[x]
             return x
 
-        def union(x: int, y: int) -> bool:
-            xroot, yroot = find(x), find(y)
-            if xroot == yroot:
+        def union(self, a: int, b: int) -> bool:
+            ra, rb = self.find(a), self.find(b)
+            if ra == rb:
                 return False
-            if rank[xroot] < rank[yroot]:
-                parent[xroot] = yroot
-            elif rank[xroot] > rank[yroot]:
-                parent[yroot] = xroot
+            if self.rank[ra] < self.rank[rb]:
+                self.parent[ra] = rb
+            elif self.rank[ra] > self.rank[rb]:
+                self.parent[rb] = ra
             else:
-                parent[yroot] = xroot
-                rank[xroot] += 1
+                self.parent[rb] = ra
+                self.rank[ra] += 1
             return True
 
-        # ---------- Kruskal ----------
-        edges = problem['edges']
-        # sort edges by weight
+    def solve(self, problem: Dict[str, Any]) -> Dict[str, List[List[float]]]:
+        """
+        Compute the Minimum Spanning Tree (MST) of an undirected weighted graph.
+        The input graph is given as:
+          * `num_nodes` – number of nodes, 0‑based indexing
+          * `edges` – list of (u, v, w) with 0‑based node indices and float weight
+
+        Returns a dictionary with key 'mst_edges' containing a sorted list of
+        edges in the MST as [u, v, w] with u <= v.
+        """
+        n: int = problem["num_nodes"]
+        edges: List[Tuple[int, int, float]] = problem["edges"]
+
+        # Sort edges by weight once – Kruskal’s algorithm
         edges.sort(key=lambda e: e[2])
 
-        mst = []
+        dsu = self._DSU(n)
+        mst: List[List[float]] = []
+
         for u, v, w in edges:
-            if union(u, v):
+            if dsu.union(u, v):
                 if u > v:
                     u, v = v, u
                 mst.append([u, v, w])
-                if len(mst) == problem['num_nodes'] - 1:
+                if len(mst) == n - 1:
                     break
 
+        # Final sort by node indices to meet the required ordering
         mst.sort(key=lambda x: (x[0], x[1]))
         return {"mst_edges": mst}

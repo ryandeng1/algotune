@@ -1,37 +1,43 @@
-from typing import Any
-import scipy.sparse
-import scipy.sparse.csgraph
+from typing import Any, Dict, List, Tuple
+
+import numpy as np
+import scipy.sparse as sp
+import scipy.sparse.csgraph as csgraph
+
 
 class Solver:
-    def solve(self, problem: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    def solve(self, problem: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
         """
         Computes the graph Laplacian using scipy.sparse.csgraph.laplacian.
-        Returns the result as a CSR‑formatted dictionary.
+        Returns CSR components of the Laplacian.
         """
-        try:
-            # Build the sparse matrix once
-            graph_csr = scipy.sparse.csr_matrix(
-                (problem["data"], problem["indices"], problem["indptr"]),
-                shape=problem["shape"],
-            )
-            normed = problem.get("normed", False)
+        # Extract CSR data and normed flag
+        data: List[float] = problem["data"]
+        indices: List[int] = problem["indices"]
+        indptr: List[int] = problem["indptr"]
+        shape: Tuple[int, int] = problem["shape"]
+        normed: bool = problem["normed"]
 
-            # Compute the Laplacian
-            L = scipy.sparse.csgraph.laplacian(graph_csr, normed=normed)
+        # Build CSR matrix
+        graph_csr: sp.csr_matrix = sp.csr_matrix((data, indices, indptr), shape=shape)
 
-            # Ensure a CSR matrix and drop zeros
-            L_csr = L.tocsr() if not isinstance(L, scipy.sparse.csr_matrix) else L
-            L_csr.eliminate_zeros()
+        # Compute laplacian
+        L: sp.csr_matrix = csgraph.laplacian(graph_csr, normed=normed, return_diag=False)
 
-            return {
-                "laplacian": {
-                    "data": L_csr.data.tolist(),
-                    "indices": L_csr.indices.tolist(),
-                    "indptr": L_csr.indptr.tolist(),
-                    "shape": L_csr.shape,
-                }
+        # Convert to CSR (it may already be)
+        if not isinstance(L, sp.csr_matrix):
+            L = L.tocsr()
+
+        # eliminate explicit zeros
+        L.eliminate_zeros()
+
+        # Prepare result
+        res = {
+            "laplacian": {
+                "data": L.data.tolist(),
+                "indices": L.indices.tolist(),
+                "indptr": L.indptr.tolist(),
+                "shape": L.shape,
             }
-        except Exception:
-            # Return an empty CSR structure on failure
-            shape = problem.get("shape", (0, 0))
-            return {"laplacian": {"data": [], "indices": [], "indptr": [], "shape": shape}}
+        }
+        return res

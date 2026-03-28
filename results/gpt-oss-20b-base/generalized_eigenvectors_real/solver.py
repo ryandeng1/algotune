@@ -1,40 +1,40 @@
-from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 
 class Solver:
     def solve(self, problem: tuple[NDArray, NDArray]) -> tuple[list[float], list[list[float]]]:
         """
-        Solve the generalized eigenvalue problem A x = λ B x for symmetric A and SPD B
-        using the transformation A~ = L⁻¹ A L⁻ᵀ, where B = L Lᵀ.
-        Returns eigenvalues sorted in descending order and corresponding B‑orthonormal
-        eigenvectors.
+        Solve the generalized eigenvalue problem A·x = λ B·x for symmetric A and symmetric
+        positive definite B using only NumPy primitives without explicit matrix inverses.
+        The returned eigenvalues are sorted in descending order and eigenvectors are
+        normalized with respect to B (i.e., xᵀ·B·x = 1).
         """
         A, B = problem
 
-        # Cholesky factorisation and solve instead of matrix inverse
+        # Cholesky decomposition B = L·Lᵀ
         L = np.linalg.cholesky(B)
-        # solve L * X = A for X, then multiply by Lᵀ
-        X = np.linalg.solve(L, A)
-        Atilde = X @ L.T
 
-        eig_vals, eig_vecs = np.linalg.eigh(Atilde)
+        # Compute Ã = L⁻¹ · A · L⁻ᵀ without forming L⁻¹ explicitly
+        # First solve L·Y = A  →  Y = L⁻¹·A
+        Y = np.linalg.solve(L, A)
+        # Then solve Lᵀ·Z = Yᵀ → Zᵀ = L⁻ᵀ·Y
+        Z = np.linalg.solve(L.T, Y.T).T
+        Atilde = Z
 
-        # Back‑transform eigenvectors: x = L⁻ᵀ y
-        eig_vecs = np.linalg.solve(L.T, eig_vecs)
+        # Standard eigenproblem on the transformed matrix
+        eigvals, eigvecs = np.linalg.eigh(Atilde)
 
-        # Normalise w.r.t. B: norm = sqrt(vᵀ B v)
-        norms = np.sqrt(np.einsum('ij,ij->i', eig_vecs, B @ eig_vecs))
-        # Avoid division by zero
-        nonzero = norms > 0
-        eig_vecs[:, nonzero] /= norms[nonzero]
+        # Back-transform eigenvectors: x = L⁻ᵀ·v
+        eigvecs = np.linalg.solve(L.T, eigvecs)
 
-        # Reverse order to get descending eigenvalues
-        eig_vals = eig_vals[::-1]
-        eig_vecs = eig_vecs[:, ::-1]
+        # Normalize eigenvectors with respect to B
+        Bv = B @ eigvecs                    # B·x for all columns
+        norms = np.sqrt(np.einsum('ij,ij->i', eigvecs, Bv))
+        # Avoid division by zero – norm>0 by construction
+        eigvecs /= norms
 
-        # Convert to lists
-        eig_vals_list = eig_vals.tolist()
-        eig_vecs_list = [eig_vecs[:, i].tolist() for i in range(eig_vecs.shape[1])]
+        # Return in descending order of eigenvalues
+        eigvals = eigvals[::-1]
+        eigvecs = eigvecs[:, ::-1]
 
-        return eig_vals_list, eig_vecs_list
+        return (eigvals.tolist(), [eigvecs[:, i].tolist() for i in range(eigvecs.shape[1])])

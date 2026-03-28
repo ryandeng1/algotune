@@ -1,26 +1,30 @@
-from typing import Any
 import numpy as np
-from scipy import sparse
+import scipy.sparse.linalg
 
-class Solver:
-    def solve(self, problem: dict[str, Any]) -> list[complex]:
-        A = problem['matrix']
-        k = problem['k']
-        N = A.shape[0]
+def solve(problem: dict) -> list[complex]:
+    """
+    Solve the eigenvalue problem for the given square sparse matrix.
+    The solution returned is a list of eigenvectors with the largest `k`
+    eigenvalues sorted in descending order by their modulus.
 
-        # Ensure k does not exceed permissible dimension
-        if k > N - 1:
-            k = N - 1
+    :param problem: A dictionary containing the sparse matrix under the key
+                    'matrix' and the number of eigenvalues `k` under the key
+                    'k'.
+    :return: List of eigenvectors sorted in descending order by the modulus
+             of the corresponding eigenvalue.
+    """
+    A = problem["matrix"]
+    k = problem["k"]
 
-        v0 = np.ones(N, dtype=A.dtype)  # initial guess for eigs
-        eigvals, eigvecs = sparse.linalg.eigs(
-            A,
-            k=k,
-            v0=v0,
-            maxiter=N * 200,
-            ncv=max(2 * k + 1, 20),
-        )
+    # Use the default random vector to seed the Arnoldi iteration – this
+    # is usually faster than creating a large one‑vector and works with any
+    # matrix type.
+    evals, evecs = scipy.sparse.linalg.eigs(
+        A, k=k, maxiter=A.shape[0] * 200, ncv=max(2 * k + 1, 20)
+    )
 
-        # Order by decreasing modulus of eigenvalues
-        idx = np.argsort(-np.abs(eigvals))
-        return [eigvecs[:, i] for i in idx]
+    # Sort indices by descending modulus of the eigenvalues
+    idx = np.argsort(-np.abs(evals))
+
+    # Return the eigenvectors in sorted order
+    return [evecs[:, i] for i in idx]

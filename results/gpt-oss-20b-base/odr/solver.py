@@ -1,26 +1,16 @@
 import numpy as np
+import scipy.odr as odr
 
 class Solver:
-    def solve(self, problem: dict[str, Any]) -> dict[str, Any]:
-        """Fit weighted ODR (approximate) using iterative weighted least squares."""
-        x = np.asarray(problem["x"], dtype=float)
-        y = np.asarray(problem["y"], dtype=float)
-        sx = np.asarray(problem["sx"], dtype=float)
-        sy = np.asarray(problem["sy"], dtype=float)
-
-        # Prepare design matrix
-        X = np.column_stack((x, np.ones_like(x)))
-
-        # Initial guess using ordinary weighted least squares (only y errors)
-        w = 1.0 / (sy**2 + 1e-15)
-        beta = np.linalg.lstsq(X * np.sqrt(w[:, None]), y * np.sqrt(w), rcond=None)[0]
-
-        # Iteratively refine weights accounting for x errors
-        for _ in range(5):
-            slope = beta[0]
-            # Effective variance of orthogonal residuals
-            sigma2 = sx**2 * slope**2 + sy**2
-            w = 1.0 / (sigma2 + 1e-15)
-            beta = np.linalg.lstsq(X * np.sqrt(w[:, None]), y * np.sqrt(w), rcond=None)[0]
-
-        return {"beta": beta.tolist()}
+    def solve(self, problem):
+        # directly use numpy arrays without explicit copying
+        x, y, sx, sy = (
+            np.asarray(problem['x']),
+            np.asarray(problem['y']),
+            np.asarray(problem['sx']),
+            np.asarray(problem['sy']),
+        )
+        data = odr.RealData(x, y=y, sx=sx, sy=sy)
+        model = odr.Model(lambda beta, x: beta[0] * x + beta[1])
+        output = odr.ODR(data, model, beta0=[0.0, 1.0]).run()
+        return {'beta': list(output.beta)}

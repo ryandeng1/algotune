@@ -1,45 +1,38 @@
+from typing import Any
 import numpy as np
 from scipy.optimize import linprog
 
 class Solver:
     def solve(self, problem: dict[str, Any]) -> dict[str, Any]:
-        G = np.asarray(problem['G'], dtype=float)
-        sigma = np.asarray(problem['σ'], dtype=float)
-        P_min = np.asarray(problem['P_min'], dtype=float)
-        P_max = np.asarray(problem['P_max'], dtype=float)
-        S_min = float(problem['S_min'])
+        G = np.asarray(problem["G"], dtype=float)
+        σ = np.asarray(problem["σ"], dtype=float)
+        P_min = np.asarray(problem["P_min"], dtype=float)
+        P_max = np.asarray(problem["P_max"], dtype=float)
+        S_min = float(problem["S_min"])
 
         n = G.shape[0]
-
-        # Objective: minimize sum(P)
+        # objective: minimize sum(P)
         c = np.ones(n)
 
-        # Bounds for variables
-        bounds = [(P_min[i], P_max[i]) for i in range(n)]
+        # Bounds: P_min <= P <= P_max
+        bounds = list(zip(P_min, P_max))
 
-        # Form inequalities A_ub x <= b_ub
-        A_ub = []
-        b_ub = []
-
-        # For each constraint:
-        # Gii*(1+S_min) P_i - S_min * sum_j Gij P_j >= S_min * sigma_i
-        # => -Gii*(1+S_min) P_i + S_min * sum_j Gij P_j <= -S_min * sigma_i
-        factor = S_min
+        # Inequality constraints: (S_min * sum_j G[i,j] P[j] - (1+S_min)*G[i,i] P[i]) <= -S_min * σ[i]
+        A = np.empty((n, n), dtype=float)
+        b = -S_min * σ
         for i in range(n):
-            coef = - G[i, i] * (1 + S_min)
-            row = np.zeros(n)
-            row[i] = coef
-            row += factor * G[i, :]
-            A_ub.append(row)
-            b_ub.append(-factor * sigma[i])
+            # base row: S_min * G[i, :]
+            row = S_min * G[i, :].copy()
+            # adjust i-th coefficient
+            row[i] -= (1 + S_min) * G[i, i]
+            A[i, :] = row
 
-        A_ub = np.vstack(A_ub)
-        b_ub = np.asarray(b_ub)
-
-        res = linprog(c, A_ub=A_ub, b_ub=b_ub, bounds=bounds,
-                      method='highs', options={'presolve': True, 'msg': 0})
+        res = linprog(
+            c, A_ub=A, b_ub=b, bounds=bounds, method="highs", options={"disp": False}
+        )
 
         if not res.success:
-            raise ValueError(f'Linear solver failed: {res.message}')
+            raise ValueError(f"Solver failed: {res.message}")
 
-        return {'P': res.x.tolist(), 'objective': float(res.fun)}
+        P_opt = res.x
+        return {"P": P_opt.tolist(), "objective": float(res.fun)}

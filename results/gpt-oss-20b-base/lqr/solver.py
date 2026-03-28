@@ -1,48 +1,33 @@
 import numpy as np
-from scipy.linalg import cho_factor, cho_solve
 
-def solve(problem: dict) -> dict:
-    """
-    Backward Riccati recursion to compute optimal control sequence.
-    Returns dictionary with key `"U"` (shape (T, m)).
-    """
-    A = problem['A']          # (n, n)
-    B = problem['B']          # (n, m)
-    Q = problem['Q']          # (n, n)
-    R = problem['R']          # (m, m)
-    P = problem['P']          # (n, n)
-    T = problem['T']          # int
-    x0 = problem['x0']        # (n,)
+class Solver:
+    def solve(self, problem: dict[str, any]) -> dict[str, any]:
+        A, B = problem["A"], problem["B"]
+        Q, R, P = problem["Q"], problem["R"], problem["P"]
+        T, x0 = problem["T"], problem["x0"]
+        n, m = B.shape
 
-    n, m = B.shape
-    # Riccati matrices
-    S = np.empty((T + 1, n, n), dtype=A.dtype)
-    K = np.empty((T, m, n), dtype=A.dtype)
-    S[T] = P
+        S = np.empty((T + 1, n, n))
+        K = np.empty((T, m, n))
+        S[T] = P.copy()
 
-    for t in range(T - 1, -1, -1):
-        St1 = S[t + 1]
-        # M1 = R + B.T @ St1 @ B
-        BTSt1 = B.T @ St1
-        M1 = R + BTSt1 @ B
-        # K[t] = M1^{-1} @ (B.T @ St1 @ A)
-        rhs = BTSt1 @ A
-        # Use Cholesky for speed and numerical stability
-        c, lower = cho_factor(M1)
-        K[t] = cho_solve((c, lower), rhs)
+        for t in range(T - 1, -1, -1):
+            St1 = S[t + 1]
+            # Solve linear system M1 * K[t] = M2  (K[t] already transposed shape m*n)
+            M1 = R + B.T @ St1 @ B
+            M2 = B.T @ St1 @ A
+            K[t] = np.linalg.solve(M1, M2).T
+            # Closed-loop matrix
+            Acl = A - B @ K[t].T
+            # Update S[t]
+            S[t] = Q + K[t].T @ R @ K[t] + Acl.T @ St1 @ Acl
+            # Symmetrize S[t] to guard against numerical asymmetry
+            S[t] = (S[t] + S[t].T) * 0.5
 
-        # Closed‑loop dynamics
-        Acl = A - B @ K[t]
-        # Update Riccati matrix
-        S[t] = Q + K[t].T @ R @ K[t] + Acl.T @ St1 @ Acl
-        # Symmetrise to guard against round‑off
-        S[t] = (S[t] + S[t].T) * 0.5
-
-    U = np.empty((T, m), dtype=A.dtype)
-    x = x0
-    for t in range(T):
-        u = -K[t] @ x
-        U[t] = u
-        x = A @ x + B @ u
-
-    return {'U': U}
+        U = np.empty((T, m))
+        x = x0.copy()
+        for t in range(T):
+            u = -K[t].T @ x
+            U[t] = u.ravel()
+            x = A @ x + B @ u
+        return {"U": U}

@@ -1,65 +1,45 @@
-import math
 import numpy as np
 from scipy.integrate import solve_ivp
 
 class Solver:
-    """
-    Heat equation solver using the method of lines with a high‑order finite
-    difference approximation for the second derivative and a standard
-    Runge–Kutta integrator.
-    """
-    __slots__ = ("_debug",)
-
-    def __init__(self, debug: bool = False) -> None:
-        self._debug = debug
-
     def solve(self, problem: dict[str, np.ndarray | float]) -> dict[str, list[float]]:
-        """Convenience wrapper returning the final state as a plain list."""
-        sol = self._solve(problem, debug=self._debug)
+        sol = self._solve(problem, debug=False)
         if sol.success:
             return sol.y[:, -1].tolist()
         raise RuntimeError(f"Solver failed: {sol.message}")
 
-    # --------------------------------------------------------------------
-    # Core solver – speed logic lives here
-    # --------------------------------------------------------------------
-    def _solve(self, problem: dict[str, np.ndarray | float], debug: bool = False):
-        y0 = np.asarray(problem["y0"], dtype=float)
+    def _solve(
+        self,
+        problem: dict[str, np.ndarray | float],
+        debug: bool = True,
+    ) -> "scipy.integrate.OptimizeResult":
+        y0 = np.asarray(problem["y0"], dtype=np.float64)
         t0, t1 = problem["t0"], problem["t1"]
-        alpha = problem["params"]["alpha"]
-        dx = problem["params"]["dx"]
+        params = problem["params"]
 
-        # Pre‑compute constants for efficiency
-        inv_dx2 = 1.0 / (dx * dx)
+        alpha = params["alpha"]
+        dx = params["dx"]
 
-        def f(t, u):
-            # Central difference for interior points
-            u_xx = (
-                np.roll(u, -1, axis=0)
-                - 2.0 * u
-                + np.roll(u, 1, axis=0)
-            ) * inv_dx2
-            # Enforce Dirichlet boundaries (zero pad)
-            u_xx[0] = 0.0
-            u_xx[-1] = 0.0
-            return alpha * u_xx
+        def ode(t, u):
+            # Manual padding to avoid repeated np.pad calls
+            u_ext = np.empty(u.size + 2, dtype=u.dtype)
+            u_ext[0] = 0.0
+            u_ext[-1] = 0.0
+            u_ext[1:-1] = u
+            uxx = (u_ext[2:] - 2 * u_ext[1:-1] + u_ext[:-2]) / dx**2
+            return alpha * uxx
 
-        # Integration settings – fine enough for typical test cases
-        rtol = 1.0e-6
-        atol = 1.0e-6
+        rtol, atol = 1e-6, 1e-6
         method = "RK45"
-
-        # If debugging, sample the trajectory; otherwise, only final point is needed
-        t_eval = np.linspace(t0, t1, 2000) if debug else None
-
+        t_eval = np.linspace(t0, t1, 1000) if debug else None
         sol = solve_ivp(
-            f,
+            ode,
             [t0, t1],
             y0,
             method=method,
-            t_eval=t_eval,
             rtol=rtol,
             atol=atol,
+            t_eval=t_eval,
             dense_output=debug,
         )
         return sol

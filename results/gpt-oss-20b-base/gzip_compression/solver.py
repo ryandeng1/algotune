@@ -3,7 +3,10 @@ from typing import Any, Dict
 
 def solve(problem: Dict[str, Any]) -> Dict[str, bytes]:
     """
-    Compress the plaintext using gzip with maximum compression and no timestamp.
+    Compress the provided plaintext using gzip with maximum compression level
+    and a fixed mtime of 0 (making the output deterministic and fast).
     """
-    # gzip.compress handles bytes directly; compresslevel 9 is the fastest to produce smallest
-    return {"compressed_data": gzip.compress(problem["plaintext"], compresslevel=9, mtime=0)}
+    plaintext: bytes = problem["plaintext"]
+    # gzip.compress is highly optimized in C; no Python overhead needed.
+    compressed = gzip.compress(plaintext, compresslevel=9, mtime=0)
+    return {"compressed_data": compressed}

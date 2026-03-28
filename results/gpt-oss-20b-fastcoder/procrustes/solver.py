@@ -1,37 +1,27 @@
 import numpy as np
-from typing import Dict, Any
+from typing import Any
 
 class Solver:
-    def solve(self, problem: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    def solve(self, problem: dict[str, np.ndarray]) -> dict[str, dict[str, list[list[float]]]]:
         """
-        Solve the Orthogonal Procrustes Problem (OPP) by computing the
-        singular value decomposition of M = B @ A.T and returning G = U @ V.T
-        where [U,_,V] = svd(M).
-
-        Parameters
-        ----------
-        problem : dict
-            Must contain numpy‑compatible arrays 'A' and 'B'.
-
-        Returns
-        -------
-        dict
-            {'solution': G.tolist()}  (G is a real orthogonal matrix)
+        Compute the orthogonal matrix G = U Vᵀ that minimizes the Frobenius norm
+        of A - G B for matrices A and B of equal shape.
         """
-        A = np.asarray(problem.get('A'), dtype=float)
-        B = np.asarray(problem.get('B'), dtype=float)
-
-        # Quick validation
-        if A.ndim != 2 or B.ndim != 2 or A.shape != B.shape:
+        A, B = problem.get('A'), problem.get('B')
+        if A is None or B is None or A.shape != B.shape:
             return {}
 
-        # Compute the cross‑covariance matrix
+        # Ensure we have NumPy arrays and avoid unnecessary copies
+        A = np.asarray(A, dtype=float)
+        B = np.asarray(B, dtype=float)
+
+        # Compute the cross‐product M = B Aᵀ
         M = B @ A.T
 
-        # Economy‑size SVD (faster when n > 1_000)
+        # Fast SVD decomposition (economy size)
         U, _, Vt = np.linalg.svd(M, full_matrices=False)
 
-        # Optimal orthogonal transformation
+        # The optimal orthogonal transformation
         G = U @ Vt
 
         return {'solution': G.tolist()}

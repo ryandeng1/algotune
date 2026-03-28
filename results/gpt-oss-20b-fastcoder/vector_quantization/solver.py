@@ -1,32 +1,56 @@
-import faiss
 import numpy as np
-from typing import Any
+import faiss
+from typing import Any, Dict
 
 class Solver:
-    def solve(self, problem: dict[str, Any]) -> dict[str, Any]:
+    def solve(self, problem: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Perform vector quantization with Faiss k-means.
-        """
-        # Convert to contiguous float32 array
-        vectors = np.asarray(problem["vectors"], dtype=np.float32, order="C")
-        k = problem["k"]
-        dim = vectors.shape[1]
+        Perform vector quantization with Faiss KMeans.
 
-        # Train k-means with fewer iterations if possible
-        kmeans = faiss.Kmeans(dim, k, niter=50, verbose=False, seed=123)
+        Parameters
+        ----------
+        problem : dict
+            Must contain:
+            - 'vectors': List[List[float]] or np.ndarray of shape (n, d)
+            - 'k'       : int, number of centroids
+
+        Returns
+        -------
+        dict
+            {
+                'centroids'        : list of centroids (k × d),
+                'assignments'      : list of assignments (len n),
+                'quantization_error' : float, mean squared error
+            }
+        """
+        # Convert to float32 numpy array once
+        vectors = np.asarray(problem['vectors'], dtype=np.float32)
+        k = int(problem['k'])
+        n, dim = vectors.shape
+
+        # Use the fastest possible KMeans settings
+        kmeans = faiss.Kmeans(
+            dim,
+            k,
+            niter=20,          # fewer iterations, good enough for most cases
+            nredo=1,           # no redundant restarts
+            verbose=False,
+            seed=0
+        )
         kmeans.train(vectors)
 
-        # Retrieve centroids
         centroids = kmeans.centroids
+        # Build flat index for nearest-centroid search
+        index = faiss.IndexFlatL2(dim)
+        index.add(centroids)
 
-        # Build index and search for nearest centroids
-        idx = faiss.IndexFlatL2(dim)
-        idx.add(centroids)
-        distances, assignments = idx.search(vectors, 1)
+        # Query nearest centroid for all vectors
+        distances, assignments = index.search(vectors, 1)
 
-        # Return results
+        mean_error = float(np.mean(distances))
+
         return {
-            "centroids": centroids.tolist(),
-            "assignments": assignments.flatten().tolist(),
-            "quantization_error": float(np.mean(distances)),
+            'centroids': centroids.tolist(),
+            'assignments': assignments.reshape(-1).tolist(),
+            'quantization_error': mean_error
         }

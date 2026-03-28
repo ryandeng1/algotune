@@ -1,16 +1,31 @@
+from typing import List, Tuple, Any
 import numpy as np
-from typing import List, Tuple
 
 class Solver:
-    def __init__(self, mode: str = "valid"):
-        self.mode = mode
+    def __init__(self):
+        self.mode = 'full'  # could be 'valid', 'same', or 'full'
 
     def solve(self, problem: List[Tuple[np.ndarray, np.ndarray]]) -> List[np.ndarray]:
-        """Return correlation of each pair using NumPy's fast implementation."""
+        """
+        Compute the 1D correlation for each valid pair in the problem list.
+
+        Parameters
+        ----------
+        problem : List[Tuple[np.ndarray, np.ndarray]]
+            A list of tuples, each containing two 1D numpy arrays.
+
+        Returns
+        -------
+        List[np.ndarray]
+            A list of 1D arrays representing the correlation results.
+        """
         mode = self.mode
         res = []
+        # Local variable for performance
+        _np_correlate = np.correlate
         for a, b in problem:
-            if mode == "valid" and b.shape[0] > a.shape[0]:
+            # Skip if mode is 'valid' and b is longer than a
+            if mode == 'valid' and b.shape[0] > a.shape[0]:
                 continue
-            res.append(np.correlate(a, b, mode=mode))
+            res.append(_np_correlate(a, b, mode))
         return res

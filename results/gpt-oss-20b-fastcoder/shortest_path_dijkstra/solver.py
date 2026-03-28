@@ -1,34 +1,40 @@
+from typing import Any, Dict, List
 import numpy as np
 import scipy.sparse
 import scipy.sparse.csgraph
 
+
 class Solver:
-    def __init__(self, method="FW", directed=False):
-        self.method = method
-        self.directed = directed
+    def __init__(self):
+        self.directed = False
+        self.method = "D"
 
-    def solve(self, problem: dict[str, object]) -> dict[str, list[list[float]]]:
+    def solve(self, problem: Dict[str, Any]) -> Dict[str, List[List[float]]]:
         """
-        Computes all‑pairs shortest paths for a graph stored as a CSR
-        representation.  The result is returned as a list of lists,
-        with `None` in place of unreachable nodes (`np.inf`).
+        Solves the all‑pairs shortest path problem using
+        scipy.sparse.csgraph.shortest_path.
+        Returns a dictionary with the key ``distance_matrix`` whose value
+        is a list of lists (rows). ``None`` represents an infinite distance.
         """
-        # Build CSR matrix directly from the supplied data
-        graph_csr = scipy.sparse.csr_matrix(
-            (problem["data"], problem["indices"], problem["indptr"]),
-            shape=problem["shape"],
-        )
+        try:
+            graph_csr = scipy.sparse.csr_matrix(
+                (problem["data"], problem["indices"], problem["indptr"]),
+                shape=problem["shape"],
+            )
+            dist = scipy.sparse.csgraph.shortest_path(
+                csgraph=graph_csr, method=self.method, directed=self.directed
+            )
+        except Exception:  # pragma: no cover
+            return {"distance_matrix": []}
 
-        # Compute distances
-        dist_matrix = scipy.sparse.csgraph.shortest_path(
-            csgraph=graph_csr,
-            method=self.method,
-            directed=self.directed,
-        )
-
-        # Convert to list while replacing infinities with None
-        distance_matrix = np.where(
-            np.isinf(dist_matrix), None, dist_matrix
-        ).tolist()
-
-        return {"distance_matrix": distance_matrix}
+        # Convert to a Python nested list while replacing infinities with None.
+        # Using local variables and list comprehensions keeps it fast.
+        isinf = np.isinf(dist)
+        out = []
+        for i in range(dist.shape[0]):
+            row = dist[i].tolist()
+            for j, val in enumerate(row):
+                if isinf[i, j]:
+                    row[j] = None
+            out.append(row)
+        return {"distance_matrix": out}

@@ -1,35 +1,35 @@
+from typing import Any, Tuple, List
 import numpy as np
-from typing import Any
 from numpy.typing import NDArray
+from scipy.linalg import solve_triangular
 
 class Solver:
-    def solve(self, problem: tuple[NDArray, NDArray]) -> list[float]:
+    def solve(self, problem: Tuple[NDArray, NDArray]) -> List[float]:
         """
-        Solve the generalized eigenvalue problem A · x = λ B · x
-        for symmetric A and symmetric positive‑definite B.
+        Solve the generalized eigenvalue problem A·x = λ B·x for symmetric A and
+        symmetric positive‑definite B.
 
-        The algorithm transforms the problem to a standard one
-        using a Cholesky decomposition of B and solves it with
-        np.linalg.eigh.  All matrix inversions are avoided by
-        solving triangular systems directly for better speed
-        and numerical stability.
+        The algorithm transforms the problem into a standard eigenvalue problem
+        by applying the Cholesky factor of B and then solves it with
+        np.linalg.eigh.  Triangular solves are used instead of full matrix
+        inversion for speed and numerical stability.
+
+        :param problem: Tuple (A, B) where A is symmetric and B is SPD.
+        :return: List of eigenvalues sorted in descending order.
         """
         A, B = problem
-        # Cholesky factor L such that B = L @ L.T
+        # Cholesky factorization: B = L @ L.T
         L = np.linalg.cholesky(B)
 
-        # Compute X = inv(L) @ A efficiently via solving L X = A
-        X = np.linalg.solve(L, A)
+        # Compute L⁻¹ A L⁻T without forming the inverse explicitly
+        # Step 1: solve L X = A  →  X = L⁻¹ A
+        X = solve_triangular(L, A, lower=True, trans='N', overwrite_b=False)
 
-        # Compute Atilde = inv(L) @ A @ inv(L).T
-        # Solve L.T Z = X.T  ⇒  Z = inv(L).T @ X.T
-        Z = np.linalg.solve(L.T, X.T)
+        # Step 2: solve L.T Atilde = X.T  →  Atilde = L⁻T X
+        Atilde = solve_triangular(L.T, X.T, lower=False, trans='N', overwrite_b=False).T
 
-        # Atilde is the transpose of Z
-        Atilde = Z.T
+        # Eigenvalues of the standard problem
+        eigenvalues = np.linalg.eigh(Atilde, lower=True, eigvals_only=True)
 
-        # Eigenvalues of the standard problem (ascending order)
-        eigenvalues = np.linalg.eigh(Atilde)[0]
-
-        # Return in descending order as a Python list
-        return eigenvalues[::-1].tolist()
+        # Return in descending order
+        return sorted(eigenvalues.tolist(), reverse=True)

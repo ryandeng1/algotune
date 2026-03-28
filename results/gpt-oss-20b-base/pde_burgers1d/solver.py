@@ -1,55 +1,58 @@
-import numpy as np
 from typing import Any
+import numpy as np
+from scipy.integrate import solve_ivp
 
 class Solver:
-    """Fast solver for the 1‑D viscous Burgers equation using a
-    vectorised 4th‑order Runge–Kutta with fixed time steps.  The
-    implementation replaces the scipy integrator to eliminate the
-    per‑step Python call overhead and the costly padding operation.
-    """
-
     def solve(self, problem: dict[str, np.ndarray | float]) -> dict[str, list[float]]:
-        sol = self._solve(problem, debug=False)
-        # return the final state as a list
-        return sol.tolist()
+        sol = self._solve(problem)
+        if sol.success:
+            return sol.y[:, -1].tolist()
+        else:
+            raise RuntimeError(f'Solver failed: {sol.message}')
 
-    def _solve(self, problem: dict[str, np.ndarray | float], debug=True) -> Any:
-        y0 = np.asarray(problem["y0"], dtype=float)
-        t0, t1 = problem["t0"], problem["t1"]
-        params = problem["params"]
-        nu, dx = params["nu"], params["dx"]
+    def _solve(self, problem: dict[str, np.ndarray | float], debug: bool = False) -> Any:
+        y0 = np.array(problem['y0'])
+        t0, t1 = problem['t0'], problem['t1']
+        params = problem['params']
+        nu = params['nu']
+        dx = params['dx']
+        nx = y0.size
 
-        # Number of fixed time steps (same as the original t_eval grid)
-        nsteps = 100 if debug else 100
-        dt = (t1 - t0) / nsteps
+        # Pre‑compute constants
+        invdx = 1.0 / dx
+        invdx2 = invdx * invdx
+        nu_d = nu * invdx2
 
-        # Pre‑compute shift indices for ghost cells (zero padding)
-        mx = y0.size
-        # Helper to compute diffusive and advective terms with zero boundaries
-        def f(u):
-            # padding with zeros on both ends
-            up = np.empty(mx + 2, dtype=u.dtype)
-            up[1:-1] = u
-            up[0] = up[-1] = 0.0
+        def burgers_equation(t, u):
+            # Pad with zeros at both ends via np.concatenate for speed
+            u_pad = np.empty(nx + 2, dtype=u.dtype)
+            u_pad[0] = 0.0
+            u_pad[1:-1] = u
+            u_pad[-1] = 0.0
 
-            # Laplacian term
-            lap = (up[2:] - 2 * up[1:-1] + up[:-2]) / dx ** 2
+            u_center = u_pad[1:-1]
+            diff_forward = u_pad[2:] - u_pad[1:-1]
+            diff_backward = u_pad[1:-1] - u_pad[:-2]
 
-            # Advection terms (upwind)
-            u_c = up[1:-1]
-            du_f = (up[2:] - up[1:-1]) / dx
-            du_b = (up[1:-1] - up[:-2]) / dx
-            adv = np.where(u_c >= 0, u_c * du_b, u_c * du_f)
+            # Advection term with upwind
+            advection = np.where(u_center >= 0,
+                                 u_center * diff_backward,
+                                 u_center * diff_forward)
+            advection *= invdx
 
-            return -adv + nu * lap
+            diffusion = (u_pad[2:] - 2 * u_pad[1:-1] + u_pad[:-2]) * invdx2
 
-        # Runge–Kutta 4 with vectorised operations
-        u = y0.copy()
-        for _ in range(nsteps):
-            k1 = f(u)
-            k2 = f(u + 0.5 * dt * k1)
-            k3 = f(u + 0.5 * dt * k2)
-            k4 = f(u + dt * k3)
-            u += dt / 6.0 * (k1 + 2 * k2 + 2 * k3 + k4)
+            return -advection + nu_d * diffusion
 
-        return u
+        # Integration without intermediate evaluations
+        sol = solve_ivp(
+            burgers_equation,
+            (t0, t1),
+            y0,
+            method='RK45',
+            rtol=1e-6,
+            atol=1e-6,
+            t_eval=None,          # only final state needed
+            dense_output=False
+        )
+        return sol

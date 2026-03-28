@@ -1,29 +1,32 @@
 import numpy as np
-from typing import Any
+from typing import Any, Dict, List
 
 class Solver:
-    def solve(self, problem: dict[str, Any]) -> dict[str, list]:
-        """Fast O(n log n) L1 pruning solution."""
-        v = np.asarray(problem["v"], dtype=float).ravel()
-        k = problem["k"]
+    def solve(self, problem: Dict[str, Any]) -> Dict[str, List]:
+        v = np.asarray(problem['v']).ravel()
+        k = problem['k']
 
-        # Sort absolute values descending and compute cumulative sums
+        # Subproblem solver using vectorisation
+        def subproblem_sol(vn: np.ndarray, z: float) -> np.ndarray:
+            mu = np.sort(vn, kind='mergesort')[::-1]  # descending
+            cumsum = np.cumsum(mu)
+            denom = np.arange(1, mu.size + 1)
+            theta_candidates = (cumsum - z) / denom
+            # Find first index where mu < theta
+            mask = mu < theta_candidates
+            idx = np.argmax(mask)
+            if mask.any() and idx < mask.size:
+                theta = theta_candidates[idx]
+            else:
+                theta = 0.0
+            return np.maximum(vn - theta, 0.0)
+
         u = np.abs(v)
-        idx = np.argsort(u)[::-1]
-        mu = u[idx]
-        cumsum = np.cumsum(mu)
+        b = subproblem_sol(u, k)
+        new_v = b * np.sign(v)
 
-        # Find the threshold θ where mu[j] >= (cumsum[j] - k) / (j + 1)
-        # Use vectorized search: compute all candidate θ, then pick the first where condition holds
-        denom = np.arange(1, len(mu) + 1)
-        theta_candidates = (cumsum - k) / denom
-        mask = mu >= theta_candidates
-        if np.any(mask):
-            j = np.argmax(mask)  # first True
-            theta = theta_candidates[j]
-        else:
-            theta = 0.0
+        # Only keep non‑zero entries (pruning)
+        pruned = np.zeros_like(v, dtype=float)
+        pruned[new_v != 0] = new_v[new_v != 0]
 
-        w = np.maximum(u - theta, 0)
-        solution = {"solution": (w * np.sign(v)).tolist()}
-        return solution
+        return {'solution': pruned.tolist()}

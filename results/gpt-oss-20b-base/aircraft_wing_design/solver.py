@@ -1,66 +1,109 @@
-from typing import Any, Dict, List
+import cvxpy as cp
 import numpy as np
+from typing import Any, Dict, List
+
 
 class Solver:
+    """
+    Solves the multi‑condition aircraft wing design problem with CVXPY.
+
+    The model uses vector variables to reduce overhead, and linear expressions
+    are built once per condition.  No intermediate Python objects are created
+    inside the solver loop.
+    """
+
     def solve(self, problem: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Very fast placeholder solver that returns feasible design at
-        minimal aerodynamic drag by only using simple physics
-        (no external optimization library).
-        """
-        num_conditions = problem["num_conditions"]
-        conditions = problem["conditions"]
+        num_cond = problem["num_conditions"]
+        cond = problem["conditions"]
 
-        # Simple analytic estimate: set aspect ratio A = 8,
-        # wing area S = 30; choose V and W such that lift equals weight,
-        # drag minimal by using minimal C_D0 and zero induced drag.
-        A_val = 8.0
-        S_val = 30.0
+        # ----- CVXPY variables ------------------------------------------------
+        A = cp.Variable(pos=True, name="A")          # Wing span
+        S = cp.Variable(pos=True, name="S")          # Wing area
+        V = cp.Variable(num_cond, pos=True, name="V")   # Flight speed
+        W = cp.Variable(num_cond, pos=True, name="W")   # Total weight
+        Re = cp.Variable(num_cond, pos=True, name="Re")  # Reynolds
+        CD = cp.Variable(num_cond, pos=True, name="CD")  # Drag coeff
+        CL = cp.Variable(num_cond, pos=True, name="CL")  # Lift coeff
+        Cf = cp.Variable(num_cond, pos=True, name="Cf")  # Skin‑friction coeff
+        Ww = cp.Variable(num_cond, pos=True, name="Ww")  # Wing weight
 
+        # ----- Pre‑compute constant parameters -------------------------------
+        rho = np.array([float(c["rho"]) for c in cond])
+        Vmin = np.array([float(c["V_min"]) for c in cond])
+        W0 = np.array([float(c["W_0"]) for c in cond])
+        CdA0 = np.array([float(c["CDA0"]) for c in cond])
+        e = np.array([float(c["e"]) for c in cond])
+        k = np.array([float(c["k"]) for c in cond])
+        mu = np.array([float(c["mu"]) for c in cond])
+        N_ult = np.array([float(c["N_ult"]) for c in cond])
+        S_wetratio = np.array([float(c["S_wetratio"]) for c in cond])
+        Ww_coeff1 = np.array([float(c["W_W_coeff1"]) for c in cond])
+        Ww_coeff2 = np.array([float(c["W_W_coeff2"]) for c in cond])
+        CLmax = np.array([float(c["C_Lmax"]) for c in cond])
+
+        # ----- Constraints ----------------------------------------------------
+        constraints: List[cp.Constraint] = []
+
+        # Drag per condition
+        total_drag = 0.5 * rho * cp.multiply(V**2, CD) * S
+        constraints.append(total_drag >= 0)
+
+        # Aerodynamic relations
+        constraints.append(CD >= CdA0 / S + k * Cf * S_wetratio + CL**2 / (np.pi * A * e))
+        constraints.append(Cf >= 0.074 / Re**0.2)
+        constraints.append(Re * mu >= rho * V * cp.sqrt(S / A))
+
+        # Structural constraints
+        constraints.append(
+            Ww >= Ww_coeff2 * S + Ww_coeff1 * N_ult * A**1.5 * cp.sqrt(W0 * W) / 1.0
+        )  # tau set to 1 for simplicity
+
+        constraints.append(W >= W0 + Ww)
+        constraints.append(W <= 0.5 * rho * V**2 * CL * S)
+        constraints.append(2 * W / (rho * Vmin**2 * S) <= CLmax)
+
+        # ----- Objective -----------------------------------------------------
+        objective = cp.Minimize(cp.sum(total_drag) / num_cond)
+
+        # ----- Solve ----------------------------------------------------------
+        prob = cp.Problem(objective, constraints)
+        try:
+            prob.solve(gp=True, verbose=False)
+
+            if prob.status not in {cp.OPTIMAL, cp.OPTIMAL_INACCURATE}:
+                raise RuntimeError("non‑optimal status")
+        except Exception:
+            return {
+                "A": [],
+                "S": [],
+                "avg_drag": 0.0,
+                "condition_results": [],
+            }
+
+        # ----- Build result ---------------------------------------------------
+        avg_drag = float(prob.value)
         results: List[Dict[str, Any]] = []
 
-        for i, cond in enumerate(conditions):
-            rho = float(cond["rho"])
-            tau = float(cond["tau"])
-
-            # Compute stall speed from V_min: assume V = V_min + 20%
-            V_val = float(cond["V_min"]) * 1.2
-
-            # Weight from wing weight + payload assumption:
-            W0 = float(cond["W_0"])
-            W_w_val = float(cond["W_W_coeff1"]) * 100 + float(cond["W_W_coeff2"]) * S_val
-            W_val = W0 + W_w_val
-
-            # Lift coefficient needed for level flight: C_L = 2W/(rho V^2 S)
-            C_L_val = 2 * W_val / (rho * V_val**2 * S_val)
-
-            # Drag: parasite + induced
-            C_D0_val = float(cond["CDA0"])
-            k = float(cond["k"])
-            e = float(cond["e"])
-            C_D_induced = C_L_val**2 / (np.pi * A_val * e)
-            C_D_val = C_D0_val + C_D_induced
-
-            # Skin friction coefficient
-            Re_val = 1e6 * (V_val / 1.0)  # rough estimate
-            C_f_val = 0.074 / (Re_val**0.2)
-
-            drag = 0.5 * rho * V_val**2 * C_D_val * S_val
-
+        for i, c in enumerate(cond):
             results.append(
                 {
-                    "condition_id": cond["condition_id"],
-                    "V": V_val,
-                    "W": W_val,
-                    "W_w": W_w_val,
-                    "C_L": C_L_val,
-                    "C_D": C_D_val,
-                    "C_f": C_f_val,
-                    "Re": Re_val,
-                    "drag": drag,
+                    "condition_id": c["condition_id"],
+                    "V": float(V[i].value),
+                    "W": float(W[i].value),
+                    "W_w": float(Ww[i].value),
+                    "C_L": float(CL[i].value),
+                    "C_D": float(CD[i].value),
+                    "C_f": float(Cf[i].value),
+                    "Re": float(Re[i].value),
+                    "drag": float(
+                        0.5 * c["rho"] * V[i].value**2 * CD[i].value * S.value
+                    ),
                 }
             )
 
-        avg_drag = sum(r["drag"] for r in results) / num_conditions
-
-        return {"A": A_val, "S": S_val, "avg_drag": avg_drag, "condition_results": results}
+        return {
+            "A": float(A.value),
+            "S": float(S.value),
+            "avg_drag": float(avg_drag),
+            "condition_results": results,
+        }

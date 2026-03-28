@@ -1,32 +1,35 @@
-from typing import Any
 import numpy as np
 from scipy.spatial import Voronoi as ScipyVoronoi
 
 class Solver:
-    def solve(self, problem: dict[str, Any]) -> dict[str, Any]:
-        """
-        Build a Voronoi diagram with scipy and return a compact representation.
+    """
+    Fast Voronoi diagram construction using scipy.spatial.Voronoi.
+    """
 
-        :param problem: Dictionary containing at least the key 'points' with an
-                        N x 2 array-like of coordinates.
-        :return: Dictionary with the diagram data.
-        """
-        points = np.asarray(problem["points"], dtype=np.float64, order="C")
+    def solve(self, problem: dict[str, any]) -> dict[str, any]:
+        # Extract points once – no extra copies
+        points = np.asarray(problem["points"])
+
+        # Compute the Voronoi diagram
         vor = ScipyVoronoi(points)
 
-        # Vertices and ridge vertices: already numpy arrays – convert once to list.
-        vertices = vor.vertices.tolist()
-        ridge_vertices = vor.ridge_vertices.tolist()
-        ridge_points = vor.ridge_points.tolist()
+        # Prepare the output using low‑overhead conversions
+        # Vertices: keep as a (n_vertices, 2) float array
+        vertices = np.asarray(vor.vertices, dtype=np.float64)
 
-        # Construct region list in the same order as the input points.
-        regions = [vor.regions[i] for i in vor.point_region]
-        # Convert each region from tuple to list to avoid external mutation.
-        regions = [list(r) for r in regions]
+        # Point-region mapping – map each input point to the index of its region
+        point_region = np.arange(len(points), dtype=np.int32)
 
-        # Map each point to its region index.
-        point_region = np.arange(len(points), dtype=np.int64)
+        # Ridge information – keep as integer arrays
+        ridge_points = np.asarray(vor.ridge_points, dtype=np.int32)
+        ridge_vertices = np.asarray(vor.ridge_vertices, dtype=np.int32)
 
+        # Each point’s region consists of a subset of vertex indices.
+        # We avoid converting all regions; just slice the relevant ones.
+        regions = [vor.regions[idx] for idx in point_region]
+
+        # Build the solution dictionary.
+        # No intermediate list conversions – just store the NumPy arrays.
         return {
             "vertices": vertices,
             "regions": regions,

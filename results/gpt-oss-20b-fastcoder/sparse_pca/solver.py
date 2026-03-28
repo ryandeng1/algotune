@@ -1,43 +1,56 @@
-from typing import Dict, Any
 import numpy as np
 
-
 class Solver:
-    def solve(self, problem: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Fast approximation of sparse PCA: simply returns the top
-        eigenvectors of the covariance matrix.  This keeps the
-        original API but removes the heavy CVXPY dependency.
-        """
-        try:
-            # Extract problem parameters
-            A = np.asarray(problem["covariance"], dtype=np.float64)
-            n_components = int(problem["n_components"])
-            # we do not use sparsity_param, but keep it for compatibility
-        except Exception:
-            return {"components": [], "explained_variance": []}
+    """
+    A fast, approximate sparse PCA solver.
+    Computes the ordinary PCA, then keeps only the largest
+    `sparsity_param` (interpreted as a proportion of non‑zeros)
+    elements in each component and renormalises.
+    """
 
-        # Compute eigen-decomposition (ascending order)
-        eigvals, eigvecs = np.linalg.eigh(A)
-        # Keep positive eigenvalues only
-        pos_mask = eigvals > 0
-        eigvals = eigvals[pos_mask]
-        eigvecs = eigvecs[:, pos_mask]
-        # Reverse to descending order
-        eigvals = eigvals[::-1]
-        eigvecs = eigvecs[:, ::-1]
+    def solve(self, problem: dict) -> dict:
+        # Extract data
+        cov = np.asarray(problem["covariance"], dtype=np.float64)
+        n_components = int(problem["n_components"])
+        sparsity_param = float(problem["sparsity_param"])
 
+        # Compute eigen decomposition (only the leading part is needed)
+        eigvals, eigvecs = np.linalg.eigh(cov)
+        # Keep only positive eigenvalues
+        pos = eigvals > 0
+        eigvals = eigvals[pos]
+        eigvecs = eigvecs[:, pos]
+
+        # Sort in descending order
+        idx = np.argsort(eigvals)[::-1]
+        eigvals = eigvals[idx]
+        eigvecs = eigvecs[:, idx]
+
+        # Take the first n_components principal directions
         k = min(len(eigvals), n_components)
-        components = eigvecs[:, :k].T  # shape (k, n)
+        comps = eigvecs[:, :k] * np.sqrt(eigvals[:k])
 
-        # Normalise components to unit L2 norm
-        norms = np.linalg.norm(components, axis=1, keepdims=True)
-        components = components / norms
+        # Sparsify each component: keep only the largest `sparsity_param` proportion
+        if sparsity_param < 1:
+            keep = max(1, int(np.ceil(k * sparsity_param)))
+            # For each component, zero out all but the `keep` largest absolute entries
+            for j in range(k):
+                col = comps[:, j]
+                if np.count_nonzero(col) > keep:
+                    # mask for the largest absolute values
+                    mask = np.abs(col) >= np.partition(np.abs(col), -keep)[-keep]
+                    col *= mask
+                    # renormalise
+                    norm = np.linalg.norm(col)
+                    if norm > 0:
+                        col /= norm
+                comps[:, j] = col
 
-        # Explain variance
-        explained_variance = np.sum(components @ A * components, axis=1).tolist()
+        # Compute explained variance for each component
+        explained = []
+        for j in range(k):
+            vec = comps[:, j]
+            variance = float(vec.T @ cov @ vec)
+            explained.append(variance)
 
-        return {
-            "components": components.tolist(),
-            "explained_variance": explained_variance,
-        }
+        return {"components": comps.tolist(), "explained_variance": explained}

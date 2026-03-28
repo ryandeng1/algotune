@@ -1,19 +1,21 @@
-import sys
 from typing import Dict
 import random
+import math
 
 def _is_probable_prime(n: int) -> bool:
     if n < 2:
         return False
-    small_primes = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31]
+    # small primes
+    small_primes = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29]
     for p in small_primes:
         if n % p == 0:
             return n == p
-    # Miller–Rabin deterministic for 64‑bit integers
+    # Miller-Rabin
     d, s = n - 1, 0
     while d % 2 == 0:
         d //= 2
         s += 1
+    # deterministic bases for 64‑bit numbers
     for a in [2, 325, 9375, 28178, 450775, 9780504, 1795265022]:
         if a % n == 0:
             continue
@@ -42,26 +44,25 @@ def _pollard_rho(n: int) -> int:
         if d != n:
             return d
 
-def _factor_two_primes(n: int) -> tuple[int, int]:
+def _factor(n: int) -> list[int]:
+    if n == 1:
+        return []
     if _is_probable_prime(n):
-        raise ValueError("The input is itself prime")
+        return [n]
     d = _pollard_rho(n)
-    a, b = n // d, d
-    if not _is_probable_prime(a) or not _is_probable_prime(b):
-        # One factor may still be composite; keep factorising
-        facs = []
-        for f in (a, b):
-            if _is_probable_prime(f):
-                facs.append(f)
-            else:
-                facs.extend(_factor_two_primes(f))
-        if len(facs) != 2:
-            raise ValueError(f"Expected 2 prime factors, got {len(facs)}")
-        return tuple(sorted(facs))
-    return tuple(sorted((a, b)))
+    return _factor(d) + _factor(n // d)
 
-class Solver:
-    def solve(self, problem: Dict[str, int]) -> Dict[str, int]:
-        composite = problem["composite"]
-        p, q = _factor_two_primes(int(composite))
-        return {"p": p, "q": q}
+def solve(problem: Dict[str, int]) -> Dict[str, int]:
+    """
+    Factor the provided composite into exactly two prime factors.
+    The result will contain the smaller prime under key 'p' and the larger under key 'q'.
+    """
+    composite_val = problem['composite']
+    # ensure integer
+    if not isinstance(composite_val, int):
+        raise ValueError(f"Composite value must be int, got {type(composite_val)}")
+    factors = _factor(composite_val)
+    if len(factors) != 2:
+        raise ValueError(f'Expected 2 factors, but got {len(factors)}.')
+    p, q = sorted(map(int, factors))
+    return {'p': p, 'q': q}

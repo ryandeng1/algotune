@@ -1,32 +1,30 @@
-from typing import Any
 import numpy as np
 from scipy.interpolate import RBFInterpolator
 
 class Solver:
-    def solve(self, problem: dict[str, Any]) -> dict[str, Any]:
+    def solve(self, problem):
         """
         Solve the RBF interpolation problem using scipy.interpolate.RBFInterpolator.
-
-        :param problem: A dictionary containing:
-            - "x_train": array-like of training coordinates.
-            - "y_train": array-like of training values.
-            - "x_test":  array-like of points to evaluate.
-            - "rbf_config": dict with RBF parameters ('kernel', 'epsilon', 'smoothing').
-        :return: Dictionary with key "y_pred" containing predictions as a list.
         """
-        x_train = np.asarray(problem["x_train"], dtype=np.float64, order="C")
-        y_train = np.asarray(problem["y_train"], dtype=np.float64, order="C").ravel()
-        x_test = np.asarray(problem["x_test"], dtype=np.float64, order="C")
+        # Fast numpy conversion
+        x_train = np.asarray(problem['x_train'], dtype=float)
+        y_train = np.asarray(problem['y_train'], dtype=float).ravel()
+        x_test = np.asarray(problem['x_test'], dtype=float)
 
-        cfg = problem.get("rbf_config", {})
-        rbf_interpolator = RBFInterpolator(
-            x_train,
-            y_train,
-            kernel=cfg.get("kernel"),
-            epsilon=cfg.get("epsilon"),
-            smoothing=cfg.get("smoothing"),
-        )
-        y_pred = rbf_interpolator(x_test)
-        # Convert to list only at the point of return to keep intermediate
-        # data in ndarray format for speed.
-        return {"y_pred": y_pred.tolist()}
+        # Extract configuration with defaults
+        rbf_conf = problem.get('rbf_config', {})
+        kernel = rbf_conf.get('kernel', 'linear')
+        epsilon = rbf_conf.get('epsilon', None)
+        smoothing = rbf_conf.get('smoothing', 0)
+
+        # Build interpolator
+        interp = RBFInterpolator(x_train, y_train,
+                                 kernel=kernel,
+                                 epsilon=epsilon,
+                                 smoothing=smoothing)
+
+        # Predict
+        y_pred = interp(x_test)
+
+        # Return as Python list (compatible with the original API)
+        return {'y_pred': y_pred.tolist()}

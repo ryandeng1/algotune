@@ -1,58 +1,47 @@
+from typing import Any
+import cvxpy as cp
 import numpy as np
-from scipy import sparse
-import osqp
 
 class Solver:
     def solve(self, problem: dict[str, Any]) -> dict[str, Any]:
-        # Convert inputs to numpy arrays
-        P = np.asarray(problem["P"], dtype=np.float64)
-        q = np.asarray(problem["q"], dtype=np.float64)
-        G = np.asarray(problem["G"], dtype=np.float64)
-        h = np.asarray(problem["h"], dtype=np.float64)
-        A = np.asarray(problem["A"], dtype=np.float64)
-        b = np.asarray(problem["b"], dtype=np.float64)
+        # Convert data to numpy arrays of type float64
+        P = np.asarray(problem['P'], dtype=float)
+        q = np.asarray(problem['q'], dtype=float)
+        G = np.asarray(problem['G'], dtype=float)
+        h = np.asarray(problem['h'], dtype=float)
+        A = np.asarray(problem['A'], dtype=float)
+        b = np.asarray(problem['b'], dtype=float)
+
+        # Symmetrize P to guarantee numerical PSD-ness
+        P = (P + P.T) * 0.5
 
         n = P.shape[0]
-        # Ensure P is symmetric positive definite
-        P = (P + P.T) / 2.0
+        x = cp.Variable(n)
 
-        # Build OSQP problem
-        # OSQP expects a sparse QP in the form:
-        #   Min 0.5 x^T P x + q^T x
-        #   s.t. A x == l = u = b
-        #        G x <= h
-        prob = osqp.OSQP()
-        P_csc = sparse.csc_matrix(P)
-        A_csc = sparse.csc_matrix(A) if A.size else None
-        G_csc = sparse.csc_matrix(G) if G.size else None
+        # Objective: (1/2)xᵀPx + qᵀx
+        objective = 0.5 * cp.quad_form(x, cp.psd_wrap(P)) + q @ x
 
-        if A_csc is not None and G_csc is not None:
-            # Concatenate equality and inequality constraints
-            A_mat = sparse.vstack([A_csc, G_csc])
-            l = np.concatenate([b, -np.inf * np.ones(G_csc.shape[0])])
-            u = np.concatenate([b, h])
-        elif G_csc is not None:
-            A_mat = G_csc
-            l = -np.inf * np.ones(G_csc.shape[0])
-            u = h
-        else:  # only equality constraints
-            A_mat = A_csc
-            l = b
-            u = b
+        # Constraints: Gx <= h , Ax == b
+        constraints = []
+        if G.size:
+            constraints.append(G @ x <= h)
+        if A.size:
+            constraints.append(A @ x == b)
 
-        prob.setup(
-            P=P_csc,
-            q=q,
-            A=A_mat,
-            l=l,
-            u=u,
-            verbose=False,
+        prob = cp.Problem(cp.Minimize(objective), constraints)
+
+        # Solve using OSQP with tight tolerances
+        optimal_value = prob.solve(
+            solver=cp.OSQP,
             eps_abs=1e-8,
             eps_rel=1e-8,
-            max_iter=10000,
+            verbose=False,
         )
-        res = prob.solve()
-        if res.info.status != "solved":
-            raise ValueError(f"Solver failed (status = {res.info.status})")
 
-        return {"solution": res.x.tolist(), "objective": float(res.info.obj_val)}
+        if prob.status not in (cp.OPTIMAL, cp.OPTIMAL_INACCURATE):
+            raise ValueError(f'Solver failed (status = {prob.status})')
+
+        return {
+            'solution': x.value.tolist(),
+            'objective': float(optimal_value),
+        }

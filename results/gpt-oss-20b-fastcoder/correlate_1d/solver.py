@@ -1,28 +1,37 @@
 import numpy as np
+from typing import List, Tuple, Sequence
 
-def solve(problem):
-    """
-    Compute the 1‑D correlation for each valid pair in the problem list.
+class Solver:
+    def __init__(self):
+        self.mode = 'full'
 
-    For mode 'valid', process only pairs where the length of the second array
-    does not exceed the first.
+    def _validate_input(self, a: ArrayLike, b: ArrayLike) -> bool:
+        """
+        In 'valid' mode skip pairs where |b| > |a|.
+        """
+        return self.mode != 'valid' or a.shape[0] >= b.shape[0]
 
-    Parameters
-    ----------
-    problem : list[tuple[np.ndarray, np.ndarray]]
-        List of (a, b) pairs.
+    def solve(self, problem: List[Tuple[np.ndarray, np.ndarray]]) -> List[np.ndarray]:
+        """
+        Compute the 1‑D cross‑correlation for each pair in *problem*.
 
-    Returns
-    -------
-    list[np.ndarray]
-        List of correlation results in the same order as the input pairs.
-    """
-    mode = 'valid'  # mode is fixed for this challenge
-    res_list = []
+        Parameters
+        ----------
+        problem : list of (array, array) tuples
+            Each tuple contains two 1‑D NumPy arrays.
 
-    for a, b in problem:
-        if mode == 'valid' and b.shape[0] > a.shape[0]:
-            continue
-        res_list.append(np.correlate(a, b, mode=mode))
+        Returns
+        -------
+        list of np.ndarray
+            Correlation results for every pair that satisfies the mode constraint.
+        """
+        results: List[np.ndarray] = []
 
-    return res_list
+        for a, b in problem:
+            if not self._validate_input(a, b):
+                continue
+
+            # np.correlate is a thin wrapper around the highly optimised FFT or direct method
+            results.append(np.correlate(a, b, mode=self.mode))
+
+        return results

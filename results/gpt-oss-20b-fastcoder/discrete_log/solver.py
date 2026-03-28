@@ -1,39 +1,38 @@
-from math import isqrt
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+import math
+from typing import Dict
 
 class Solver:
-    def solve(self, problem: dict[str, int]) -> dict[str, int]:
-        """
-        Compute the discrete logarithm x such that g^x ≡ h (mod p)
-        using the Baby‑Step Giant‑Step algorithm.
+    """Fast Baby‑Step Giant‑Step discrete‑log implementation."""
 
-        :param problem: Dictionary with keys 'p', 'g', 'h'.
-        :return: Dictionary with key 'x' containing the solution,
-                 or -1 if no solution exists.
-        """
-        p = problem["p"]
-        g = problem["g"]
-        h = problem["h"]
+    def _bsgs(self, p: int, g: int, h: int) -> int:
+        """Return x such that g^x ≡ h (mod p). Assumes p is prime and g is a primitive root."""
+        n = int(math.isqrt(p - 1)) + 1
 
-        # The search space is [0, p-2] because g is a generator of Z*_p.
-        # Use baby‑step giant‑step with step size m.
-        m = isqrt(p - 2) + 1
-
-        # Baby steps: g^j for j in [0, m)
-        table = {}
+        # Baby steps: g^j (mod p), 0 <= j < n
+        table: Dict[int, int] = {}
         cur = 1
-        for j in range(m):
-            if cur not in table:          # keep smallest j
+        for j in range(n):
+            if cur not in table:          # keep smallest j for correctness
                 table[cur] = j
             cur = (cur * g) % p
 
-        # Compute g^(-m) mod p using Fermat's little theorem
-        factor = pow(g, p - 1 - m, p)
+        # Precompute g^-n (mod p)
+        inv_g_n = pow(g, p - 1 - n, p)     # Fermat: g^(p-1) ≡ 1
 
-        gamma = h
-        for i in range(m):
-            if gamma in table:
-                return {"x": i * m + table[gamma]}
-            gamma = (gamma * factor) % p
+        cur = h
+        for i in range(n):
+            if cur in table:
+                return i * n + table[cur]
+            cur = (cur * inv_g_n) % p
 
-        # No solution found
-        return {"x": -1}
+        raise ValueError("Discrete logarithm not found")
+    
+    def solve(self, problem: Dict[str, int]) -> Dict[str, int]:
+        """Solve the discrete logarithm problem using an efficient BSGS algorithm."""
+        p = problem["p"]
+        g = problem["g"]
+        h = problem["h"]
+        return {"x": self._bsgs(p, g, h)}

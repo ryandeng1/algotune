@@ -2,21 +2,23 @@ from typing import Any, Dict
 
 SolutionType = Dict[str, int]
 
+
 class Solver:
-    def solve(self, problem: Dict[str, Any]) -> SolutionType:
+    def solve(self, problem: dict[str, Any]) -> SolutionType:
         try:
             n = problem.get("num_nodes", 0)
             edges = problem.get("edges", [])
+
             parent = list(range(n))
             rank = [0] * n
 
-            def find(x):
+            def find(x: int) -> int:
                 while parent[x] != x:
                     parent[x] = parent[parent[x]]
                     x = parent[x]
                 return x
 
-            def union(a, b):
+            def union(a: int, b: int) -> None:
                 ra, rb = find(a), find(b)
                 if ra == rb:
                     return
@@ -33,7 +35,9 @@ class Solver:
                     union(u, v)
 
             # Count unique roots
-            roots = set(find(i) for i in range(n))
-            return {"number_connected_components": len(roots)}
+            components = set()
+            for i in range(n):
+                components.add(find(i))
+            return {"number_connected_components": len(components)}
         except Exception:
             return {"number_connected_components": -1}

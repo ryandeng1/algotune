@@ -1,26 +1,25 @@
-from typing import Any
 import numpy as np
 from sklearn.linear_model import QuantileRegressor
+from typing import Any
 
 class Solver:
-    """Fast quantile regression solver based on scikit‑learn."""
     def solve(self, problem: dict[str, Any]) -> dict[str, Any]:
-        # Convert inputs only once
-        X = np.array(problem['X'], dtype=float, copy=False)
-        y = np.array(problem['y'], dtype=float, copy=False)
+        # Prepare data
+        X = np.asarray(problem['X'], dtype=float)
+        y = np.asarray(problem['y'], dtype=float)
 
-        # Instantiate a lightning‑fast solver (Highs) and fit the model
+        # Initialize quantile regressor
         model = QuantileRegressor(
             quantile=problem['quantile'],
             alpha=0.0,
             fit_intercept=problem['fit_intercept'],
-            solver='highs',
+            solver='highs'
         )
-        model.fit(X, y)
 
-        # Materialise results
+        # Fit and predict
+        model.fit(X, y)
         coef = model.coef_.tolist()
         intercept = [model.intercept_]
         predictions = model.predict(X).tolist()
 
-        return {"coef": coef, "intercept": intercept, "predictions": predictions}
+        return {'coef': coef, 'intercept': intercept, 'predictions': predictions}

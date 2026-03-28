@@ -1,41 +1,31 @@
-from typing import Any, Dict
 import numpy as np
 import scipy.sparse
 import scipy.sparse.csgraph
 
 class Solver:
-    method = "FW"          # Floyd‑Warshall, works for dense or sparse graphs
-    directed = False
+    def __init__(self):
+        self.directed = False
+        self.method = "D"
 
-    def solve(self, problem: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Computes all-pairs shortest path distances.
-
-        Parameters
-        ----------
-        problem : dict
-            Dictionary with keys 'data', 'indices', 'indptr', and 'shape' describing a CSR matrix.
-
-        Returns
-        -------
-        dict
-            {'distance_matrix': list[list[float]]} with `None` where no path exists.
-        """
-        # Build CSR matrix in one go (fast)
-        graph_csr = scipy.sparse.csr_matrix(
+    def solve(self, problem):
+        # Construct CSR matrix from triplet format
+        csr = scipy.sparse.csr_matrix(
             (problem["data"], problem["indices"], problem["indptr"]),
             shape=problem["shape"],
         )
-
-        # Compute distances
-        dist_matrix = scipy.sparse.csgraph.shortest_path(
-            csgraph=graph_csr,
-            method=self.method,
-            directed=self.directed,
+        # Compute all‑pairs shortest path matrix
+        dist = scipy.sparse.csgraph.shortest_path(
+            csr, method=self.method, directed=self.directed
         )
-
-        # Convert infinities to None efficiently
-        dist_matrix[dist_matrix == np.inf] = None
-
-        # Convert to list of lists for the required output format
-        return {"distance_matrix": dist_matrix.tolist()}
+        # Replace infinite values with None for the required output format
+        # Use vectorised operations for speed
+        inf_mask = np.isinf(dist)
+        # Turn the numpy array into list of lists
+        mat = dist.tolist()
+        for i, row in enumerate(mat):
+            if any(inf_mask[i]):  # Only iterate rows containing inf
+                row = [
+                    None if inf_mask[i][j] else row[j] for j in range(len(row))
+                ]
+                mat[i] = row
+        return {"distance_matrix": mat}

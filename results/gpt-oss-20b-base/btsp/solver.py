@@ -1,123 +1,103 @@
 import itertools
 import math
+import time
 import networkx as nx
-import numpy as np
 from pysat.solvers import Solver as SATSolver
-from typing import List, Tuple, Optional
-
 
 class Timer:
     def __init__(self, runtime: float = math.inf):
+        self.start = time.time()
         self.runtime = runtime
-        self.start = __import__("time").time()
 
-    def remaining(self) -> float:
-        return self.runtime - (.__import__("time").time() - self.start)
+    def remaining(self):
+        return self.runtime - (time.time() - self.start)
 
     def check(self):
         if self.remaining() < 0:
-            raise TimeoutError("Timer has expired.")
+            raise TimeoutError()
 
 
 class HamiltonianCycleModel:
-    def __init__(self, G: nx.Graph):
-        self.G = G
-        self.n = G.number_of_nodes()
-        self.solver = SATSolver(name="minicard")
-        self.edge_vars = {e: i + 1 for i, e in enumerate(G.edges)}
-        self.solver.add_atmost(list(self.edge_vars.values()), self.n)
-        self.solver.add_atmost([-v for v in self.edge_vars.values()],
-                               len(self.edge_vars) - self.n)
-        for v in G.nodes:
-            inc = [self.edge_vars[e] for e in G.edges(v)]
-            self.solver.add_atmost(inc, 2)
-            self.solver.add_atmost([-i for i in inc], len(inc) - 2)
-        self.assumptions: List[int] = []
+    def __init__(self, graph: nx.Graph):
+        self.graph = graph
+        self.solver = SATSolver('Minicard')
+        self.n = graph.number_of_nodes()
+        self.nodes = list(graph.nodes)
+        self.edge_vars = {e: i + 1 for i, e in enumerate(graph.edges)}
+        self._add_cardinality_exact(list(self.edge_vars.values()), self.n)
+        for node in graph.nodes:
+            inc = [self.edge_vars[e] for e in graph.edges(node)]
+            self._add_cardinality_exact(inc, 2)
 
-    def get_var(self, e):
-        return self.edge_vars[e] if e in self.edge_vars else self.edge_vars[e[::-1]]
+    def _add_cardinality_exact(self, vars, val):
+        self.solver.add_atmost(vars, val)
+        self.solver.add_atmost([-v for v in vars], len(vars) - val)
 
-    def forbid_subtour(self, comp):
-        comp_set = set(comp)
-        cross = [self.get_var((u, v))
-                 for u in comp_set for v in self.G.nodes if v not in comp_set and self.G.has_edge(u, v)]
-        if cross:
-            self.solver.add_clause(cross)
-
-    def extract(self) -> List[Tuple[int, int]]:
-        model = self.solver.get_model()
-        if model is None:
-            raise RuntimeError("No model")
-        pos = {v for v in model if v > 0}
-        return [e for e, v in self.edge_vars.items() if v in pos]
-
-    def find_cycle(self) -> Optional[List[Tuple[int, int]]]:
-        while self.solver.solve(assumptions=self.assumptions):
-            sol = self.extract()
+    def find(self, max_edge_index: int, all_edges_sorted: list):
+        forbidden = all_edges_sorted[max_edge_index + 1 :]
+        self.solver.add_clause([-self.edge_vars[e] for e in forbidden])
+        if self.solver.solve():
+            model = self.solver.get_model()
+            sel = set(v for v in model if v > 0)
+            edges = [e for e, v in self.edge_vars.items() if v in sel]
+            # check connectivity
             sub = nx.Graph()
-            sub.add_edges_from(sol)
-            comps = list(nx.connected_components(sub))
-            if len(comps) == 1:
-                return sol
-            for comp in comps:
-                self.forbid_subtour(comp)
+            sub.add_edges_from(edges)
+            if len(list(nx.connected_components(sub))) == 1:
+                return edges
+            # forbid subtours
+            for comp in nx.connected_components(sub):
+                other = set(self.nodes) - comp
+                for u in comp:
+                    for v in other:
+                        if self.graph.has_edge(u, v):
+                            self.solver.add_clause([self.edge_vars[(u, v)]])
         return None
 
 
 class BottleneckTSPSolver:
-    def __init__(self, G: nx.Graph):
-        self.G = G
-        self.model = HamiltonianCycleModel(G)
-        self.best = self.approx()
-        self.edges_sorted = sorted(G.edges, key=lambda e: G[e[0]][e[1]]["weight"])
-        self.lb = G.number_of_nodes()
-        bottleneck = max(self.best, key=lambda e: G[e[0]][e[1]]["weight"])
-        self.ub = self.edges_sorted.index(bottleneck)
+    def __init__(self, graph: nx.Graph):
+        self.graph = graph
+        self.model = HamiltonianCycleModel(graph)
+        self.edges_sorted = sorted(graph.edges, key=lambda e: graph.edges[e]["weight"])
+        self.n = graph.number_of_nodes()
+        self.lower = self.n
+        best = self._approx()
+        bottleneck = max(best, key=lambda e: graph.edges[e]["weight"])
+        self.upper = self.edges_sorted.index(bottleneck)
 
-    def approx(self):
-        cycle = nx.approximation.traveling_salesman.christofides(self.G)
-        cycle = list(np.array(cycle))
+    def _approx(self):
+        cycle = nx.approximation.traveling_salesman.christofides(self.graph)
+        cycle = [int(x) for x in cycle]
         return [(cycle[i], cycle[(i + 1) % len(cycle)]) for i in range(len(cycle))]
 
-    def _edge_index(self, e):
-        try:
-            return self.edges_sorted.index(e)
-        except ValueError:
-            return self.edges_sorted.index((e[1], e[0]))
-
-    def _edge_weight(self, e):
-        return self.G[e[0]][e[1]]["weight"]
-
-    def solve(self, time_limit: float) -> Optional[List[Tuple[int, int]]]:
-        timer = Timer(time_limit)
-        while self.lb < self.ub:
+    def solve(self, limit: float = math.inf):
+        timer = Timer(limit)
+        while self.lower < self.upper:
+            mid = (self.lower + self.upper) // 2
             timer.check()
-            idx = (self.lb + self.ub) // 2
-            forbidden = [self.edges_sorted[i] for i in range(idx + 1, len(self.edges_sorted))]
-            self.model.assumptions = [-self.model.get_var(e) for e in forbidden]
-            sol = self.model.find_cycle()
-            if sol is None:
-                self.lb = idx + 1
+            res = self.model.find(mid, self.edges_sorted)
+            if res is None:
+                self.lower = mid + 1
             else:
-                self.best = sol
-                bottleneck = max(sol, key=self._edge_weight)
-                self.ub = self._edge_index(bottleneck)
+                self.upper = mid
+                self.best = res
         return self.best
 
 
 class Solver:
-    def solve(self, prob: List[List[float]]) -> List[int]:
-        n = len(prob)
+    def solve(self, problem: list[list[float]]) -> list[int]:
+        n = len(problem)
         if n <= 1:
             return [0, 0]
         G = nx.Graph()
         for i, j in itertools.combinations(range(n), 2):
-            G.add_edge(i, j, weight=prob[i][j])
-        t = BottleneckTSPSolver(G).solve(time_limit=math.inf)
-        if not t:
+            G.add_edge(i, j, weight=problem[i][j])
+        sol_edges = BottleneckTSPSolver(G).solve()
+        if not sol_edges:
             return []
-        tour_g = nx.Graph()
-        tour_g.add_edges_from(t)
-        path = list(nx.dfs_preorder_nodes(tour_g, source=0))
+        tour = nx.Graph()
+        tour.add_edges_from(sol_edges)
+        path = list(nx.dfs_preorder_nodes(tour, source=0))
         path.append(0)
         return path

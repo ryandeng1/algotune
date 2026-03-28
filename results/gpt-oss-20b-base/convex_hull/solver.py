@@ -1,57 +1,48 @@
-from typing import Any, List, Tuple
+from typing import Any, Dict, List, Tuple
 
 class Solver:
-    def solve(self, problem: dict[str, Any]) -> dict[str, Any]:
+
+    @staticmethod
+    def _convex_hull(points: List[Tuple[float, float]]) -> List[int]:
         """
-        Compute the 2‑D convex hull of a set of points using the
-        monotone chain algorithm (O(n log n)).  This implementation
-        avoids importing heavy libraries such as scipy and is
-        therefore much faster for problems that fit into memory.
-
-        Parameters
-        ----------
-        problem : dict
-            Expected to contain a key ``"points"`` with a list of
-            ``[x, y]`` coordinates.
-
-        Returns
-        -------
-        dict
-            ``"hull_vertices"`` – list of indices of the input points
-            that form the convex hull (in counter‑clockwise order).
-            ``"hull_points"`` – the corresponding coordinate pairs.
+        Computes the convex hull of a set of 2D points using Andrew's monotone chain
+        algorithm and returns the indices of the hull vertices in counter‑clockwise order.
         """
-        points: List[List[float]] = problem["points"]
-        if len(points) < 3:
-            return {"hull_vertices": list(range(len(points))), "hull_points": points}
+        # Pair points with their original indices
+        idx_pts = sorted(enumerate(points), key=lambda x: (x[1][0], x[1][1]))
 
-        # Attach original indices so we can return them later
-        indexed = [(x, y, i) for i, (x, y) in enumerate(points)]
+        def cross(o: Tuple[int, float, float], a: Tuple[int, float, float], b: Tuple[int, float, float]) -> float:
+            return (a[1] - o[1]) * (b[2] - o[2]) - (a[2] - o[2]) * (b[1] - o[1])
 
-        # Sort by (x, y)
-        indexed.sort(key=lambda p: (p[0], p[1]))
-
-        def cross(o, a, b):
-            return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
-
-        # Build lower hull
-        lower = []
-        for p in indexed:
-            while len(lower) >= 2 and cross(lower[-2], lower[-1], p) <= 0:
+        lower: List[Tuple[int, float, float]] = []
+        for idx, (x, y) in idx_pts:
+            while len(lower) >= 2 and cross(lower[-2], lower[-1], (idx, x, y)) <= 0:
                 lower.pop()
-            lower.append(p)
+            lower.append((idx, x, y))
 
-        # Build upper hull
-        upper = []
-        for p in reversed(indexed):
-            while len(upper) >= 2 and cross(upper[-2], upper[-1], p) <= 0:
+        upper: List[Tuple[int, float, float]] = []
+        for idx, (x, y) in reversed(idx_pts):
+            while len(upper) >= 2 and cross(upper[-2], upper[-1], (idx, x, y)) <= 0:
                 upper.pop()
-            upper.append(p)
+            upper.append((idx, x, y))
 
-        # Concatenate lower and upper to get full hull, removing duplicate endpoints
-        hull = lower[:-1] + upper[:-1]
+        # Concatenate lower and upper hulls, removing the last point of each
+        # because it is repeated at the beginning of the other list.
+        full = lower[:-1] + upper[:-1]
+        return [p[0] for p in full]
 
-        hull_vertices = [p[2] for p in hull]
-        hull_points = [[p[0], p[1]] for p in hull]
+    def solve(self, problem: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Solve the Convex Hull problem without using SciPy.
 
-        return {"hull_vertices": hull_vertices, "hull_points": hull_points}
+        :param problem: A dictionary with key 'points' mapping to a list of coordinate pairs.
+        :return: A dictionary with keys:
+                 "hull_vertices": List of indices of the points that form the convex hull.
+                 "hull_points": List of coordinates of the points that form the convex hull.
+        """
+        points = problem["points"]
+        # Ensure list of tuples for numeric operations
+        pts = [(float(x), float(y)) for x, y in points]
+        hull_indices = self._convex_hull(pts)
+        hull_points = [points[i] for i in hull_indices]
+        return {"hull_vertices": hull_indices, "hull_points": hull_points}

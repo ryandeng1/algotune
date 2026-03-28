@@ -1,78 +1,78 @@
-from typing import Any, List
+from typing import Any
 import numpy as np
+from ortools.sat.python import cp_model
+
 
 class Solver:
     def solve(self, problem: dict[str, Any]) -> dict[str, Any]:
         """
-        Fast heuristic solver for the Capacitated Facility Location Problem.
-        It assigns customers to the cheapest open facility with remaining capacity,
-        opening facilities on demand.
+        Solves the Capacitated Facility Location Problem using OR-Tools CP-SAT solver.
         """
-        # Extract data as numpy arrays for speed
-        fixed_costs = np.asarray(problem['fixed_costs'], dtype=np.float64)
-        capacities = np.asarray(problem['capacities'], dtype=np.int64)
-        demands = np.asarray(problem['demands'], dtype=np.float64)
-        c = np.asarray(problem['transportation_costs'], dtype=np.float64)
+        # Convert data to numpy arrays for convenience
+        fixed_costs = np.asarray(problem["fixed_costs"], dtype=int)
+        capacities = np.asarray(problem["capacities"], dtype=int)
+        demands = np.asarray(problem["demands"], dtype=int)
+        transportation_costs = np.asarray(problem["transportation_costs"], dtype=int)
 
-        n_facilities, n_customers = c.shape
+        n_facilities = fixed_costs.size
+        n_customers = demands.size
 
-        # Track remaining capacity per facility
-        remaining = capacities.copy()
-        # Track open facilities
-        opened = np.zeros(n_facilities, dtype=bool)
+        model = cp_model.CpModel()
 
-        # Prepare result matrix
-        assignments = np.zeros((n_facilities, n_customers), dtype=np.float64)
+        # Boolean variables y[i] and x[i][j]
+        y = [model.NewBoolVar(f"y_{i}") for i in range(n_facilities)]
+        x = [
+            [model.NewBoolVar(f"x_{i}_{j}") for j in range(n_customers)]
+            for i in range(n_facilities)
+        ]
 
-        # Precompute sorted columns (facilities) for each customer by cost
-        sorted_facilities = np.argsort(c, axis=0)
-
-        total_obj = 0.0
-
+        # Each customer must be assigned to exactly one facility
         for j in range(n_customers):
-            assigned = False
-            for i in sorted_facilities[:, j]:
-                # If facility not open yet, try opening it if capacity permits
-                if not opened[i]:
-                    if remaining[i] >= demands[j]:
-                        opened[i] = True
-                        total_obj += fixed_costs[i]
-                        remaining[i] -= demands[j]
-                        assignments[i, j] = 1.0
-                        total_obj += c[i, j] * demands[j]
-                        assigned = True
-                        break
-                    else:
-                        # cannot open this facility for this demand
-                        continue
-                else:
-                    # already open, check capacity
-                    if remaining[i] >= demands[j]:
-                        remaining[i] -= demands[j]
-                        assignments[i, j] = 1.0
-                        total_obj += c[i, j] * demands[j]
-                        assigned = True
-                        break
-                # if not enough capacity, continue to next facility
-            if not assigned:
-                # fallback: assign to most expensive open facility (should not happen)
-                # but to keep algorithm safe, assign to any facility with capacity
-                for i in range(n_facilities):
-                    if remaining[i] >= demands[j]:
-                        if not opened[i]:
-                            opened[i] = True
-                            total_obj += fixed_costs[i]
-                        remaining[i] -= demands[j]
-                        assignments[i, j] = 1.0
-                        total_obj += c[i, j] * demands[j]
-                        break
+            model.AddExactlyOne(x[i][j] for i in range(n_facilities))
 
-        # Convert boolean status and assignments to list format
-        facility_status = opened.tolist()
-        assignments_list = assignments.tolist()
+        # Capacity constraints and coupling between x and y
+        for i in range(n_facilities):
+            # If facility i is closed, no customers can be assigned
+            model.Add(sum(demands[j] * x[i][j] for j in range(n_customers)) <= capacities[i] * y[i])
+            for j in range(n_customers):
+                # customer assignment implies facility open
+                model.AddImplication(x[i][j], y[i])
+
+        # Objective: minimize total cost
+        total_cost = (
+            sum(fixed_costs[i] * y[i] for i in range(n_facilities))
+            + sum(
+                transportation_costs[i][j] * x[i][j]
+                for i in range(n_facilities)
+                for j in range(n_customers)
+            )
+        )
+        model.Minimize(total_cost)
+
+        solver = cp_model.CpSolver()
+        solver.parameters.max_time_in_seconds = 60.0  # optional timeout
+        solver.parameters.num_search_workers = 0  # use default parallelism
+        status = solver.Solve(model)
+
+        if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+            return {
+                "objective_value": float("inf"),
+                "facility_status": [False] * n_facilities,
+                "assignments": [[0.0] * n_customers for _ in range(n_facilities)],
+            }
+
+        # Extract solution
+        assign_matrix = []
+        for i in range(n_facilities):
+            row = []
+            for j in range(n_customers):
+                row.append(float(solver.Value(x[i][j])))
+            assign_matrix.append(row)
+
+        facility_status = [bool(solver.Value(y[i])) for i in range(n_facilities)]
 
         return {
-            'objective_value': float(total_obj),
-            'facility_status': facility_status,
-            'assignments': assignments_list
+            "objective_value": float(solver.ObjectiveValue()),
+            "facility_status": facility_status,
+            "assignments": assign_matrix,
         }

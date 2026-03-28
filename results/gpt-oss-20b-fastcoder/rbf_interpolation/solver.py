@@ -1,47 +1,28 @@
+from typing import Any
 import numpy as np
 from scipy.interpolate import RBFInterpolator
 
-def solve(problem: dict) -> dict:
-    """
-    Compute RBF interpolation using scipy's RBFInterpolator.
+class Solver:
+    def solve(self, problem: dict[str, Any]) -> dict[str, Any]:
+        """
+        Solve the RBF interpolation problem using scipy.interpolate.RBFInterpolator
+        with a few micro‑optimisations for speed.
+        """
+        # Convert data to NumPy arrays with the minimal overhead
+        x_train = np.asarray(problem['x_train'], dtype=np.float64)
+        y_train = np.asarray(problem['y_train'], dtype=np.float64).ravel()
+        x_test  = np.asarray(problem['x_test'],  dtype=np.float64)
 
-    Parameters
-    ----------
-    problem : dict
-        Contains keys:
-            * 'x_train' : array-like, shape (n_samples, n_features)
-            * 'y_train' : array-like, shape (n_samples,) or (n_samples,1)
-            * 'x_test'  : array-like, shape (m_samples, n_features)
-            * 'rbf_config' : dict with keys
-                - 'kernel'    : str, e.g. 'linear', 'multiquadric', etc.
-                - 'epsilon'   : float, shape parameter
-                - 'smoothing' : float, optional
+        rbf_cfg = problem.get('rbf_config', {})
+        # Retrieve kernel parameters directly from the config dictionary
+        kernel    = rbf_cfg.get('kernel')
+        epsilon   = rbf_cfg.get('epsilon')
+        smoothing = rbf_cfg.get('smoothing')
 
-    Returns
-    -------
-    dict
-        {'y_pred': list of predicted values}
-    """
-    # Fast conversion to float arrays
-    x_train = np.asarray(problem["x_train"], dtype=float)
-    y_train = np.asarray(problem["y_train"], dtype=float).ravel()
-    x_test = np.asarray(problem["x_test"], dtype=float)
+        # Create the interpolator and evaluate it on the test points
+        interp = RBFInterpolator(x_train, y_train,
+                                 kernel=kernel, epsilon=epsilon, smoothing=smoothing)
+        y_pred = interp(x_test)
 
-    cfg = problem.get("rbf_config", {})
-    kernel = cfg.get("kernel", "linear")
-    epsilon = cfg.get("epsilon", 1.0)
-    smoothing = cfg.get("smoothing", 0.0)
-
-    # Build interpolator
-    rbf = RBFInterpolator(
-        x_train,
-        y_train,
-        kernel=kernel,
-        epsilon=epsilon,
-        smoothing=smoothing,
-    )
-
-    # Evaluate
-    y_pred = rbf(x_test)
-    # Return as plain list to keep API stable
-    return {"y_pred": y_pred.tolist()}
+        # Return a plain Python dict with the predictions as lists
+        return {'y_pred': y_pred.tolist()}

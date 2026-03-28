@@ -1,28 +1,27 @@
 import numpy as np
-from numpy.typing import NDArray
 from typing import List
 
 class Solver:
-    def solve(self, problem: NDArray) -> List[List[complex]]:
+    def solve(self, problem: np.ndarray) -> List[List[complex]]:
         """
-        Solve the eigenvector problem for the given non‑symmetric matrix.
-        Eigenvalues and eigenvectors are obtained via np.linalg.eig.
-        Eigenpairs are sorted in descending order by the real part (then imaginary part)
-        of the eigenvalues.  The returned eigenvectors are column‑normalized.
+        Solve the eigenvector problem for a non-symmetric matrix.
+        Returns the eigenvectors sorted by descending real part
+        (and then imaginary part) of the eigenvalues, each normalized to unit norm.
         """
-        # Compute eigenvalues and eigenvectors
-        eigvals, eigvecs = np.linalg.eig(problem)
+        # Compute eigenvalues and right eigenvectors
+        eigenvalues, eigenvectors = np.linalg.eig(problem)
 
-        # Create ordering: sort by real, then imag (both descending)
-        order = np.lexsort((-eigvals.imag, -eigvals.real))
+        # Indices to sort by descending real part, then descending imaginary part
+        sort_idx = np.lexsort((-eigenvalues.imag, -eigenvalues.real))
 
-        # Reorder eigenvectors according to the sorting
-        sorted_vecs = eigvecs[:, order]
+        # Reorder vectors
+        vectors = eigenvectors[:, sort_idx]
 
-        # Normalize columns to unit length (avoid division by zero)
-        norms = np.linalg.norm(sorted_vecs, axis=0)
-        nonzero = norms > 1e-12
-        sorted_vecs[:, nonzero] /= norms[nonzero]
+        # Normalize columns
+        norms = np.linalg.norm(vectors, axis=0, keepdims=True)
+        # Avoid division by zero; norms that are zero stay as zero vector
+        inv_norms = np.where(norms != 0, 1.0 / norms, 1.0)
+        vectors = vectors * inv_norms
 
-        # Convert to list of lists of complex numbers
-        return [col.tolist() for col in sorted_vecs.T]
+        # Convert to list of lists (each column becomes a list)
+        return [vectors[:, i].tolist() for i in range(vectors.shape[1])]

@@ -1,36 +1,31 @@
-from typing import Any, Dict, List
+from typing import Any, List, Dict
 import numpy as np
 from scipy.optimize import linprog
 
 class Solver:
-
     def solve(self, problem: Dict[str, Any]) -> Dict[str, List[float]]:
         """
-        Solve the lp box problem using SciPy's high-performance linprog solver.
-
-        Parameters
-        ----------
-        problem : dict
-            Contains keys 'c', 'A', and 'b' which define the linear program:
-                min   cᵀx
-                s.t.  A x ≤ b
-                      0 ≤ x ≤ 1
-
-        Returns
-        -------
-        dict
-            {"solution": [x₁, x₂, …, xₙ]}
+        Solve the LP box problem using SciPy's linprog for maximum speed.
+        The problem is to minimize c^T x subject to:
+            A x <= b
+            0 <= x <= 1
         """
-        c = np.asarray(problem["c"], dtype=float)
-        A = np.asarray(problem["A"], dtype=float)
-        b = np.asarray(problem["b"], dtype=float)
+        c = np.asarray(problem["c"], dtype=np.float64)
+        A = np.asarray(problem["A"], dtype=np.float64)
+        b = np.asarray(problem["b"], dtype=np.float64)
 
-        # Bounds: 0 <= x_i <= 1 for all variables
-        bounds = [(0.0, 1.0)] * c.size
+        # `linprog` expects the objective in the form: minimize c^T x
+        # with bounds per variable. Here all variables have bounds (0,1).
+        bounds = [(0.0, 1.0)] * c.shape[0]
 
-        res = linprog(c, A_ub=A, b_ub=b, bounds=bounds, method="highs", options={"presolve": True})
+        # SciPy's linprog uses the "highs" solver by default (fast and robust).
+        res = linprog(c=c, A_ub=A, b_ub=b, bounds=bounds, method="highs")
 
-        if not res.success:
-            raise RuntimeError(f"Linear program did not converge: {res.message}")
-
-        return {"solution": res.x.tolist()}
+        if res.success:
+            # Ensure the solution is real and finite
+            x = np.asarray(res.x, dtype=np.float64)
+            # Clip tiny negative values due to numerical errors
+            x = np.clip(x, 0.0, 1.0)
+            return {"solution": x.tolist()}
+        else:
+            raise RuntimeError(f"LP optimization failed: {res.message}")

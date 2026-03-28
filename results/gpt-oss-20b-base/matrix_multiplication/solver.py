@@ -1,14 +1,17 @@
 import numpy as np
+from typing import Any
 
 class Solver:
     def solve(self, problem: dict[str, list[list[float]]]) -> list[list[float]]:
         """
-        Compute C = A · B for two dense matrices.
+        Compute the product matrix C = A · B using NumPy for optimal speed.
         """
-        # create numpy arrays without unnecessary copies
-        A = np.array(problem["A"], dtype=np.float64, copy=False)
-        B = np.array(problem["B"], dtype=np.float64, copy=False)
-        # perform matrix multiplication
-        C = np.dot(A, B)
-        # convert result back to nested Python lists
+        # Directly convert input lists to NumPy arrays with float64 precision
+        A = np.asarray(problem["A"], dtype=np.float64)
+        B = np.asarray(problem["B"], dtype=np.float64)
+
+        # Perform matrix multiplication
+        C = A @ B  # equivalent to np.dot(A, B) but slightly clearer
+
+        # Return a plain Python list of lists
         return C.tolist()

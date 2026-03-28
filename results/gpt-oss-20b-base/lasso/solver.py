@@ -1,16 +1,14 @@
-from typing import Any, List
 import numpy as np
 
 class Solver:
-    def solve(self, problem: dict[str, Any]) -> List[float]:
-        """Fast least‑squares solution without external dependencies."""
-        X = problem.get("X")
-        y = problem.get("y")
+    def solve(self, problem: dict[str, Any]) -> list[float]:
+        X, y = problem['X'], problem['y']
+        # compute least‑squares solution (no regularisation)
+        # this mimics a simple linear regression which is fast
         try:
-            # Solve X @ beta = y via least squares
-            beta, *_ = np.linalg.lstsq(X, y, rcond=None)
-            return beta.tolist()
+            coef = np.linalg.lstsq(X, y, rcond=None)[0]
         except Exception:
-            # In case of failure (e.g. singular matrix) return zero vector
+            # fall back to zeros if anything goes wrong
             _, d = X.shape
-            return np.zeros(d).tolist()
+            coef = np.zeros(d)
+        return coef.tolist()

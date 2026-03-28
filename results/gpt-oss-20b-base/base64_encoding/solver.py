@@ -3,6 +3,7 @@ from typing import Any, Dict
 
 class Solver:
     def solve(self, problem: Dict[str, Any]) -> Dict[str, bytes]:
-        """Encode the plaintext using Base64."""
-        # Assuming `problem['plaintext']` is a bytes-like object.
-        return {"encoded_data": base64.b64encode(problem["plaintext"])}
+        # Directly encode the plaintext without any error handling boilerplate
+        plaintext = problem['plaintext']
+        encoded_data = base64.b64encode(plaintext)
+        return {'encoded_data': encoded_data}

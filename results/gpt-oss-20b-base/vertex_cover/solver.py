@@ -1,40 +1,47 @@
-from pysat.card import CardEnc, EncType
-from pysat.formula import CNF
-from pysat.solvers import Solver
+from typing import List
 
-def solve(problem: list[list[int]]) -> list[int]:
+def solve(problem: List[List[int]]) -> List[int]:
     """
-    Solves the maximum independent set problem using a SAT solver.
-    :param problem: adjacency matrix (list of lists of 0/1)
-    :return: list of vertex indices (0‑based) that form a maximum independent set
+    Max Independent Set solver using a Branch and Bound algorithm on the
+    complement graph (i.e. a Maximum Clique problem).
+
+    The algorithm uses bit masks for vertices.  It keeps a global cache of
+    the best solution found so far.  The recursion proceeds by selecting a
+    candidate vertex, adding it to the current solution, and recursing on
+    the intersection of the candidate set with its neighbors.  The branch
+    is pruned when the size of the remaining candidates plus the current
+    solution cannot beat the best found.
     """
     n = len(problem)
-    # Pre‑compute the conflict clauses: -i \/ -j for each edge (i<j)
-    conflict_clauses = []
+    # Build adjacency masks for the complement graph (i.e. edges absent in problem)
+    comp_adj = [0] * n
     for i in range(n):
-        row = problem[i]
-        for j in range(i + 1, n):
-            if row[j]:
-                conflict_clauses.append([- (i + 1), -(j + 1)])
+        mask = 0
+        for j in range(n):
+            if i != j and problem[i][j] == 0:
+                mask |= 1 << j
+        comp_adj[i] = mask
 
-    # Binary search on the independent set size
-    low, high = 0, n
-    best_model = None
-    while low <= high:
-        mid = (low + high) // 2
-        cnf = CNF()
-        cnf.extend(conflict_clauses)
-        # add cardinality constraint: at most mid variables can be true
-        cnf.extend(CardEnc.atmost(lits=[i + 1 for i in range(n)],
-                                  bound=mid,
-                                  encoding=EncType.seqcounter).clauses)
-        with Solver(name='glucose3', bootstrap_with=cnf) as solver:
-            if solver.solve():
-                best_model = solver.get_model()
-                low = mid + 1
-            else:
-                high = mid - 1
+    best_sol: List[int] = []
 
-    if best_model is None:
-        return []
-    return [i for i, v in enumerate(best_model[:n]) if v > 0]
+    def dfs(cand: int, cur: List[int]) -> None:
+        nonlocal best_sol
+        # Prune if not enough candidates to beat current best
+        if len(cur) + cand.bit_count() <= len(best_sol):
+            return
+        if cand == 0:
+            if len(cur) > len(best_sol):
+                best_sol = cur.copy()
+            return
+        # Choose a vertex v from cand (pick least significant bit)
+        v = (cand & -cand).bit_length() - 1   # index of chosen vertex
+        # Recurse with v in the solution
+        dfs(cand & comp_adj[v], cur + [v])
+        # Recurse without v
+        dfs(cand & ~(1 << v), cur)
+
+    # Start with all vertices as candidates
+    all_vertices = (1 << n) - 1
+    dfs(all_vertices, [])
+
+    return best_sol

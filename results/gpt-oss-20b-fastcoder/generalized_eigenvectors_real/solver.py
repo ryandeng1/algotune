@@ -1,32 +1,34 @@
 import numpy as np
-from typing import Any, Tuple, List
 from numpy.typing import NDArray
 
 class Solver:
-    def solve(self, problem: Tuple[NDArray, NDArray]) -> Tuple[List[float], List[List[float]]]:
-        """
-        Solve the generalized eigenvalue problem A x = λ B x
-        for symmetric A and symmetric positive‑definite B.
-        Returns eigenvalues (descending) and corresponding eigenvectors.
-        """
+    def solve(self, problem: tuple[NDArray, NDArray]) -> tuple[list[float], list[list[float]]]:
+        """Fast solver for A x = λ B x with A symmetric, B SPD."""
         A, B = problem
-        n = A.shape[0]
 
-        # Cholesky of B: B = L Lᵀ
+        # Cholesky factorisation of B: B = L Lᵀ
         L = np.linalg.cholesky(B)
 
-        # Form Ã = L⁻¹ A (L⁻¹)ᵀ  without explicit inversion
-        inv_L = np.linalg.solve(L, np.eye(n))            # L⁻¹
-        A_tilde = inv_L @ A @ inv_L.T
+        # Solve L y = x for y instead of forming L⁻¹
+        # Compute Ã = L⁻¹ A L⁻T
+        y = np.linalg.solve(L, A)
+        Atilde = np.linalg.solve(L.T, y)
 
-        # Solve the standard symmetric eigenproblem
-        eigvals, eigvecs = np.linalg.eigh(A_tilde)
+        # Symmetric eigen–decomposition of Ã
+        eigenvalues, eigvecs = np.linalg.eigh(Atilde)
 
-        # Recover the eigenvectors of the generalized problem
-        V = inv_L.T @ eigvecs
+        # Transform back to eigenvectors of the original problem
+        eigvecs = np.linalg.solve(L.T, eigvecs)
 
-        # Reverse order: descending eigenvalues
-        eigvals = eigvals[::-1]
-        V = V[:, ::-1]
+        # Normalise eigenvectors to be B‑orthonormal:
+        #  vᵀ B v = ||Lᵀ v||²
+        Lt = L.T
+        norms = np.linalg.norm(Lt @ eigvecs, axis=0)
+        eigvecs /= norms
 
-        return (eigvals.tolist(), [V[:, i].tolist() for i in range(n)])
+        # Return in descending eigenvalue order
+        inds = np.argsort(eigenvalues)[::-1]
+        ev = eigenvalues[inds].tolist()
+        evs = eigvecs[:, inds].T.tolist()  # each eigenvector as a list
+
+        return ev, evs

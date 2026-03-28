@@ -1,19 +1,19 @@
+from typing import Any
 import numpy as np
 from numbers import Real
-from typing import Any
-from sklearn.exceptions import NotFittedError
 from sklearn.neighbors import KernelDensity
+from sklearn.exceptions import NotFittedError
 
 class Solver:
-    # Available kernels in sklearn.neighbors.KernelDensity
-    available_kernels = {
-        'gaussian', 'tophat', 'epanechnikov', 'exponential', 'linear', 'optimal'
-    }
+    available_kernels = ['gaussian', 'tophat', 'epanechnikov',
+                        'exponential', 'linear', 'cosine']
 
     def solve(self, problem: dict[str, Any]) -> dict[str, Any]:
         try:
-            X = np.asarray(problem['data_points'], dtype=float)
-            X_q = np.asarray(problem['query_points'], dtype=float)
+            X = np.asarray(problem['data_points'])
+            X_q = np.asarray(problem['query_points'])
+            kernel = problem['kernel']
+            bandwidth = problem['bandwidth']
 
             if X.ndim != 2 or X_q.ndim != 2:
                 raise ValueError('Data points or query points are not 2D arrays.')
@@ -27,18 +27,17 @@ class Solver:
             if X.shape[1] != X_q.shape[1]:
                 raise ValueError('Data points and query points have different dimensions.')
 
-            bandwidth = problem['bandwidth']
             if not isinstance(bandwidth, Real) or bandwidth <= 0:
                 raise ValueError('Bandwidth must be positive.')
             bandwidth = float(bandwidth)
 
-            kernel = problem['kernel']
             if kernel not in self.available_kernels:
                 raise ValueError(f'Unknown kernel: {kernel}')
 
             kde = KernelDensity(kernel=kernel, bandwidth=bandwidth)
             kde.fit(X)
             log_density = kde.score_samples(X_q)
+
             return {'log_density': log_density.tolist()}
 
         except KeyError as e:

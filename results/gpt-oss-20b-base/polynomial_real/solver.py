@@ -1,35 +1,33 @@
 import numpy as np
+from contextlib import nullcontext
 
-def solve(problem: list[float]) -> list[float]:
-    """
-    Find all real roots of a polynomial given by its coefficients
-    in descending order.
+def _single_thread_blas():
+    # Assume no external thread pool limiter; return a no-op context manager.
+    return nullcontext()
 
-    Parameters
-    ----------
-    problem : list[float]
-        Coefficients of the polynomial [aₙ, aₙ₋₁, …, a₀].
+class Solver:
+    def solve(self, problem):
+        """
+        Solve a polynomial with real coefficients.
 
-    Returns
-    -------
-    list[float]
-        Real roots sorted in descending order.
-    """
-    # Convert to ndarray once (avoid repeated conversions)
-    coeffs = np.asarray(problem, dtype=float)
+        Parameters
+        ----------
+        problem : list[float]
+            Coefficients [aₙ, aₙ₋₁, …, a₀] of the polynomial aₙxⁿ + … + a₀.
 
-    # Compute all roots (complex in general)
-    roots = np.roots(coeffs)
-
-    # Discard negligible imaginary parts
-    # `real_if_close` keeps the value as complex if the imag part is
-    # > tol; otherwise it casts to real.  The default tol works well for
-    # typical numerical noise.
-    roots = np.real_if_close(roots, tol=0.001)
-
-    # Extract only the real part (now guaranteed to be real)
-    roots = np.asarray(roots.real, dtype=float)
-
-    # Sort in descending order
-    roots.sort()
-    return roots[::-1].tolist()
+        Returns
+        -------
+        list[float]
+            Sorted real roots (descending order). Roots with
+            negligible imaginary part are cast to real.
+        """
+        # Convert to numpy array once
+        coeffs = np.array(problem, dtype=float)
+        # Avoid multi‑threaded BLAS for deterministic timing
+        with _single_thread_blas():
+            roots = np.roots(coeffs)
+        # Treat small imaginary parts as numerical noise
+        roots = np.real_if_close(roots, tol=1.0 / 1024)
+        # Extract real part and sort descending
+        real_roots = np.sort(roots.real)[::-1]
+        return real_roots.tolist()

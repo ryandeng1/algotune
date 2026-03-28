@@ -1,29 +1,44 @@
 import numpy as np
-from typing import List
+from contextlib import nullcontext
 
-def solve(problem: List[float]) -> List[float]:
-    """
-    Solve the polynomial problem by finding all real roots of the polynomial.
+# Detected if threadpool_limits is available; keep it optional
+try:
+    from threadpoolctl import threadpool_limits
+except Exception:
+    threadpool_limits = None
 
-    The polynomial is given as a list of coefficients [aₙ, aₙ₋₁, …, a₀],
-    representing:
-        p(x) = aₙxⁿ + aₙ₋₁xⁿ⁻¹ + … + a₀.
-    This method computes the roots, keeps only the real ones (treating
-    small imaginary parts as zero), and gives them sorted in decreasing order.
 
-    :param problem: A list of polynomial coefficients (real numbers) in descending order.
-    :return: A list of real roots of the polynomial, sorted in decreasing order.
-    """
-    # Compute roots with NumPy (uses efficient LAPACK routines)
-    roots = np.roots(problem)
+def _single_thread_blas():
+    """Ensure BLAS works in single‑thread mode."""
+    return nullcontext() if threadpool_limits is None else threadpool_limits(limits=1)
 
-    # Discard roots with significant imaginary parts
-    roots = np.real_if_close(roots, tol=0.001)
 
-    # Convert to a flat NumPy array of real values
-    roots = np.real(roots)
+class Solver:
+    def solve(self, problem: list[float]) -> list[float]:
+        """
+        Compute all real roots of a polynomial given by its coefficients.
 
-    # Sort in descending order
-    roots = np.sort(roots)[::-1]
+        Parameters
+        ----------
+        problem : list[float]
+            Coefficients [a_n, a_{n-1}, …, a_0] defining the polynomial
 
-    return roots.tolist()
+        Returns
+        -------
+        list[float]
+            Real roots sorted in decreasing order.
+        """
+        coeff = problem  # local alias
+        with _single_thread_blas():
+            roots = np.roots(coeff)
+
+        # Discard roots with significant imaginary parts
+        img = np.imag(roots)
+        if np.any(np.abs(img) > 0.001):
+            roots = roots[np.abs(img) <= 0.001].real
+        else:
+            roots = roots.real
+
+        # Sort descending
+        roots.sort()
+        return roots[::-1].tolist()

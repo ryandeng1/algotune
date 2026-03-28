@@ -1,51 +1,65 @@
-from typing import List, Tuple, Dict
+from typing import List
 
-class Solver:
-    def solve(self, problem: List[List[int]]) -> List[int]:
-        n = len(problem)
-        if n <= 1:
-            return [0, 0]
+def solve(problem: List[List[int]]) -> List[int]:
+    """
+    Solve the TSP problem with dynamic programming (Held‑Karp) in O(n^2 · 2ⁿ).
+    Works for n ≤ 20 comfortably and returns the optimal tour starting and
+    ending at city 0.
+    """
+    n = len(problem)
+    if n <= 1:
+        return [0, 0]
 
-        # Held‑Karp dynamic programming
-        END = 1 << (n - 1)      # mask for node 0
-        INF = 10 ** 18
+    # Pre‑allocate DP and predecessor arrays
+    NSTATE = 1 << n
+    INF = 10 ** 18
+    dp = [[INF] * n for _ in range(NSTATE)]
+    prev = [[-1] * n for _ in range(NSTATE)]
 
-        # dp[mask][i] = minimal cost to start at 0, visit nodes in mask, end at i
-        dp: List[Dict[int, int]] = [{} for _ in range(1 << n)]
-        parent: List[Dict[int, int]] = [{} for _ in range(1 << n)]
+    # Start from city 0, mask 1<<0
+    dp[1 << 0][0] = 0
 
-        dp[1 << 0][0] = 0  # start at node 0
+    # Iterate over all subsets that include city 0
+    for mask in range(NSTATE):
+        if not (mask & 1):
+            continue
+        for u in range(n):
+            if not (mask & (1 << u)):
+                continue
+            cur = dp[mask][u]
+            if cur == INF:
+                continue
+            # Try to go to next city v not in mask
+            not_mask = (~mask) & (NSTATE - 1)
+            v = not_mask
+            while v:
+                lsb = v & -v
+                v -= lsb
+                j = (lsb.bit_length() - 1)
+                new_mask = mask | lsb
+                cost = cur + problem[u][j]
+                if cost < dp[new_mask][j]:
+                    dp[new_mask][j] = cost
+                    prev[new_mask][j] = u
 
-        for mask in range(1 << n):
-            for u in dp[mask]:
-                cost_u = dp[mask][u]
-                for v in range(n):
-                    if mask & (1 << v):
-                        continue
-                    new_mask = mask | (1 << v)
-                    new_cost = cost_u + problem[u][v]
-                    if new_cost < dp[new_mask].get(v, INF):
-                        dp[new_mask][v] = new_cost
-                        parent[new_mask][v] = u
+    # Finish tour: return to city 0
+    full_mask = (1 << n) - 1
+    best = INF
+    last = -1
+    for u in range(1, n):
+        cost = dp[full_mask][u] + problem[u][0]
+        if cost < best:
+            best = cost
+            last = u
 
-        full_mask = (1 << n) - 1
-        min_cost = INF
-        last = -1
-        for v in range(1, n):
-            c = dp[full_mask].get(v, INF) + problem[v][0]
-            if c < min_cost:
-                min_cost = c
-                last = v
-
-        # reconstruct tour
-        tour = [0]
-        mask = full_mask
-        cur = last
-        while cur != 0:
-            tour.append(cur)
-            prev = parent[mask][cur]
-            mask ^= (1 << cur)
-            cur = prev
-        tour.append(0)
-        tour.reverse()
-        return tour
+    # Reconstruct path
+    path = [0] * (n + 1)
+    mask = full_mask
+    cur = last
+    for i in range(n, 0, -1):
+        path[i] = cur
+        cur = prev[mask][cur]
+        mask ^= (1 << cur)
+    path[0] = 0
+    path.append(0)
+    return path

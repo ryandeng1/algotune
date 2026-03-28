@@ -1,36 +1,50 @@
 import numpy as np
+from scipy.signal import fftconvolve
 
 class Solver:
-    def solve(self, problem: tuple) -> np.ndarray:
-        """
-        Compute the 2D convolution of arrays a and b using the FFT-based
-        algorithm. This is typically faster than direct convolution for large
-        arrays.
+    """
+    Compute the 2D convolution of arrays a and b.
+    Uses FFT‑based convolution for large inputs, and
+    direct convolution for very small inputs to avoid FFT overhead.
+    """
+    def __init__(self) -> None:
+        # tfilt: use 'full' mode and handle boundaries by zero‑padding (default of fftconvolve)
+        self.mode: str = "full"
 
-        :param problem: A tuple (a, b) of 2D numpy arrays.
-        :return: A 2D array containing the full convolution result.
+    def solve(self, problem: tuple[np.ndarray, np.ndarray]) -> np.ndarray:
+        """
+        Compute the 2D convolution of arrays a and b using FFT‑based convolution.
+        Parameters
+        ----------
+        problem : tuple
+            Tuple of two 2D NumPy arrays (a, b).
+
+        Returns
+        -------
+        np.ndarray
+            Convolution of a and b in full mode.
         """
         a, b = problem
-        if a.ndim != 2 or b.ndim != 2:
-            raise ValueError("Inputs must be 2D arrays")
+        # Ensure inputs are 2‑D float arrays for best FFT performance
+        a = np.asarray(a, dtype=np.float64, order="C")
+        b = np.asarray(b, dtype=np.float64, order="C")
 
-        # Determine shape of the full convolution
+        # De‑generate a very small array case to avoid FFT overhead
+        if a.size <= 64 or b.size <= 64:
+            return self._direct_convolution(a, b)
+
+        # For larger arrays use FFT‑based convolution (fastest in practice)
+        return fftconvolve(a, b, mode=self.mode)
+
+    @staticmethod
+    def _direct_convolution(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+        """
+        Direct convolution via nested loops (used only for tiny arrays).
+        """
         m, n = a.shape
         p, q = b.shape
-        out_shape = (m + p - 1, n + q - 1)
-
-        # Pad arrays to the output size
-        fft_shape = [2 ** int(np.ceil(np.log2(s))) for s in out_shape]
-        A = np.fft.rfft2(a, s=fft_shape)
-        B = np.fft.rfft2(b, s=fft_shape)
-
-        # Element-wise multiplication in frequency domain
-        C = A * B
-
-        # Inverse transform to spatial domain
-        conv = np.fft.irfft2(C, s=fft_shape)
-
-        # Trim to the exact size of the full convolution
-        conv = conv[:out_shape[0], :out_shape[1]]
-
-        return conv.astype(np.float64)
+        out = np.zeros((m + p - 1, n + q - 1), dtype=np.float64)
+        for i in range(m):
+            for j in range(n):
+                out[i : i + p, j : j + q] += a[i, j] * b
+        return out

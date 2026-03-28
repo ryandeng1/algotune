@@ -1,58 +1,55 @@
 import numpy as np
+from typing import Any, Dict
 
-def solve(problem: dict) -> dict:
-    """
-    Fast, approximate sparse PCA solver.
-    This implementation takes the top eigenvectors of the covariance matrix,
-    then promotes sparsity by keeping only the largest |α| entries of each component,
-    where α is a user‑defined sparsity parameter (between 0 and 1).
+class Solver:
+    def solve(self, problem: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Fast greedy sparse PCA by truncating the leading eigenvectors.
+        """
+        # Parse input
+        A = np.asarray(problem["covariance"], dtype=float)
+        n_components = int(problem["n_components"])
+        sparsity = float(problem["sparsity_param"])
 
-    :param problem: Dictionary with problem parameters
-    :returns: Dictionary with the sparse principal components and their explained variance
-    """
-    # Get inputs
-    A = np.asarray(problem["covariance"], dtype=float)
-    n_components = int(problem.get("n_components", 2))
-    sparsity_param = float(problem.get("sparsity_param", 0.1))
+        # Eigen-decomposition of the covariance matrix
+        eigvals, eigvecs = np.linalg.eigh(A)
+        # Keep only positive eigenvalues (noise filtering)
+        pos = eigvals > 0
+        eigvals = eigvals[pos]
+        eigvecs = eigvecs[:, pos]
+        # Sort by decreasing magnitude
+        order = np.argsort(eigvals)[::-1]
+        eigvals = eigvals[order]
+        eigvecs = eigvecs[:, order]
 
-    # Compute eigen‑decomposition
-    eigvals, eigvecs = np.linalg.eigh(A)
+        # Select the required number of components
+        n_used = min(len(eigvals), n_components)
+        components = eigvecs[:, :n_used]
 
-    # Keep only positive eigenvalues
-    pos = eigvals > 0
-    eigvals = eigvals[pos]
-    eigvecs = eigvecs[:, pos]
+        # Enforce sparsity by zeroing out small coefficients
+        # sparsity is interpreted as the proportion of non‑zero entries
+        n_nonzero = max(1, int(np.round(sparsity * A.shape[0])))
+        for j in range(components.shape[1]):
+            col = components[:, j]
+            # Find indices of the largest |coefficients|
+            idx = np.argsort(np.abs(col))[-n_nonzero:]
+            mask = np.zeros_like(col, dtype=bool)
+            mask[idx] = True
+            components[:, j] = col * mask
 
-    # Sort in decreasing eigenvalue order
-    idx = np.argsort(eigvals)[::-1]
-    eigvals = eigvals[idx]
-    eigvecs = eigvecs[:, idx]
+        # Ensure each component has unit norm (optional)
+        norms = np.linalg.norm(components, axis=0)
+        if np.any(norms > 0):
+            components = components / norms
 
-    # Number of components to retain
-    k = min(len(eigvals), n_components)
+        # Compute explained variance for each component
+        explained_variance = []
+        for j in range(components.shape[1]):
+            c = components[:, j]
+            var = float(c.T @ A @ c)
+            explained_variance.append(var)
 
-    # Build the initial dense components
-    components = eigvecs[:, :k] * np.sqrt(eigvals[:k])
-
-    # Sparsity step: keep only the largest |α| fraction of elements in each component,
-    # then renormalise to unit length (to mimic the constraints in the original CVXPY model)
-    n, _ = components.shape
-    for j in range(k):
-        col = components[:, j]
-        # Determine how many elements to keep
-        keep = max(1, int(np.ceil(sparsity_param * n)))
-        # Zero all but the keep largest absolute values
-        thresh = np.partition(np.abs(col), -keep)[-keep]
-        col[np.abs(col) < thresh] = 0.0
-        # Normalise to unit norm
-        norm = np.linalg.norm(col)
-        if norm > 0:
-            components[:, j] = col / norm
-
-    # Compute explained variance for each component
-    explained_variance = []
-    for j in range(k):
-        v = components[:, j]
-        explained_variance.append(float(v.T @ A @ v))
-
-    return {"components": components.tolist(), "explained_variance": explained_variance}
+        return {
+            "components": components.tolist(),
+            "explained_variance": explained_variance,
+        }

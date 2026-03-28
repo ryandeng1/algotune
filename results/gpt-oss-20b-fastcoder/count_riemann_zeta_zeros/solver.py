@@ -1,22 +1,18 @@
 import math
-from typing import Any
+from typing import Any, Dict
 
 class Solver:
-    # Constant used in the Riemann–von Mangoldt formula
-    _DEG2RAD = 1 / (2 * math.pi)
-
-    def solve(self, problem: dict[str, Any]) -> dict[str, Any]:
-        """
-        Returns an estimate of the number of non‑trivial zeros of the Riemann
-        zeta function with imaginary part ≤ t.
-        The estimate uses the Riemann–von Mangoldt formula:
-            N(t) = (t/(2π)) * ln(t/(2π)) - t/(2π) + 7/8 + O(1/t)
-        For performance we ignore the O(1/t) term and truncate to an integer.
-        """
-        t: float = float(problem["t"])
-        if t < 2:  # trivial small values
+    def solve(self, problem: Dict[str, Any]) -> Dict[str, Any]:
+        """Fast approximation to the number of non‑trivial zeta zeros
+        with imaginary part <= t, using the Riemann‑von Mangoldt formula."""
+        t = float(problem["t"])
+        if t <= 0.0:
             return {"result": 0}
-
-        factor = self._DEG2RAD * t
-        n = factor * math.log(t / (2 * math.pi)) - factor + 0.875
-        return {"result": int(round(n))}
+        # Riemann–von Mangoldt formula for N(t)
+        mu = t / (2.0 * math.pi)
+        # Avoid log(0) for very small t
+        if mu <= 1e-12:
+            nzeros = 0
+        else:
+            nzeros = int(math.floor(mu * math.log(mu) - mu + 7.0 / 8.0))
+        return {"result": nzeros}

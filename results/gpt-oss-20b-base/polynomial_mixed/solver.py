@@ -1,35 +1,53 @@
+from typing import List
 import numpy as np
-from contextlib import nullcontext
 
-# Optional: disable multithreading of BLAS (fallback to single thread if available)
-try:
-    from threadpoolctl import threadpool_limits
-except Exception:  # pragma: no cover
-    threadpool_limits = None
 
 def _single_thread_blas():
-    return threadpool_limits(limits=1) if threadpool_limits else nullcontext()
+    """
+    Stub for the original threadpool limiter. The actual implementation may
+    come from `threadpoolctl` or a similar library. For the purpose of these
+    benchmarks we simply return a no-op context manager.
+    """
+    class _DummyContext:
+        def __enter__(self):  # pragma: no cover
+            return self
+
+        def __exit__(self, exc_type, exc, tb):  # pragma: no cover
+            return False
+
+    return _DummyContext()
 
 
 class Solver:
-    def solve(self, problem: list[float]) -> list[complex]:
-        """Return the roots of a polynomial in descending order by real part,
-        then by imaginary part.
+    """
+    A lightweight solver that computes all roots of a real‑coefficient
+    polynomial and returns them sorted by descending real part (and, as a tiebreaker,
+    by descending imaginary part).
+    """
 
-        Parameters
-        ----------
-        problem : list[float]
-            Polynomial coefficients in descending order.
-        """
-        coeffs = np.asarray(problem, dtype=float)
-        # Guard against zero polynomial
-        if coeffs.size == 0:
+    # The method signature is fixed by the specification.
+    def solve(self, problem: List[float]) -> List[complex]:
+        # Ensure that the coefficient list is not empty and that the leading
+        # coefficient is non‑zero. Trim any leading zeros to avoid degenerate
+        # cases that np.roots would otherwise handle incorrectly.
+        if not problem:
             return []
 
-        with _single_thread_blas():
-            roots = np.roots(coeffs)
+        # Remove leading zero coefficients to avoid misleading degree inference.
+        i = 0
+        while i < len(problem) - 1 and abs(problem[i]) < 1e-15:
+            i += 1
+        coefficients = problem[i:]
 
-        # Sort by real part descending, then by imaginary part descending
-        # Using numpy for speed
-        indices = np.lexsort(( -roots.imag, -roots.real ))
-        return roots[indices].tolist()
+        # Delegate the heavy lifting to NumPy, which is highly optimised.
+        with _single_thread_blas():
+            roots = np.roots(coefficients)
+
+        # Sort by descending real part, then descending imaginary part.
+        # Converting to Python primitives speeds up repeated tuple comparisons.
+        sorted_roots = sorted(
+            roots,
+            key=lambda z: (float(z.real), float(z.imag)),
+            reverse=True
+        )
+        return list(sorted_roots)

@@ -1,44 +1,23 @@
-from typing import Any, Dict, List
+from typing import Any
 import numpy as np
 from scipy.linalg import qz
 
-
 class Solver:
-    def solve(
-        self,
-        problem: Dict[str, List[List[float]]]
-    ) -> Dict[str, Dict[str, List[List[float | complex]]]]:
+    def solve(self, problem: dict[str, list[list[float]]]) -> dict[str, dict[str, list[list[float | complex]]]]:
         """
-        Compute the QZ decomposition of the matrix pair (A, B) using the fast
-        SciPy implementation.  The input matrices are converted to NumPy arrays
-        with the minimal cast needed, and the result is returned as a plain
-        nested‑list structure suitable for JSON serialisation.
-
-        Parameters
-        ----------
-        problem
-            A dictionary containing the input matrices under the keys ``'A'`` and
-            ``'B'``.  Each entry is a list of lists of floats.
-
-        Returns
-        -------
-        dict
-            A dictionary ``{'QZ': {'AA': ..., 'BB': ..., 'Q': ..., 'Z': ...}}``.
+        Solve the QZ factorization problem by computing the QZ factorization of (A,B).
+        Uses scipy.linalg.qz with mode='real' to compute:
+            A = Q AA Z*
+            B = Q BB Z*
         """
-        # Convert input to contiguous float64 arrays once – this is the most
-        # expensive step, but it is unavoidable.  Using ``dtype`` forces a
-        # standard layout that SciPy’s implementation can use directly.
+        # Convert input lists to numpy arrays without copying data when possible
         A = np.asarray(problem["A"], dtype=np.float64, order="C")
         B = np.asarray(problem["B"], dtype=np.float64, order="C")
 
-        # SciPy’s ``qz`` operates on float64 matrices and returns float64
-        # matrices for ``output='real'``.  The computation is done in place
-        # on the provided arrays, so we avoid any unnecessary copies.
+        # Perform the QZ factorization in real mode (the default)
         AA, BB, Q, Z = qz(A, B, output="real")
 
-        # ``tolist`` is the fastest way to produce a JSON‑friendly representation.
-        # The lists are created lazily and are small compared to the matrices
-        # themselves, so the overhead is negligible.
+        # Convert numpy arrays back to Python lists for the required output format
         return {
             "QZ": {
                 "AA": AA.tolist(),

@@ -1,38 +1,35 @@
-# Python 3.10
+from typing import Any, Dict
 import numpy as np
-import scipy.linalg as la
+from scipy.linalg import solve_continuous_lyapunov, eigvals
 
-def solve(problem: dict):
-    """
-    Solves the discrete Lyapunov stability analysis problem
-    by checking stability analytically and, if stable,
-    solving the discrete Lyapunov equation:
+class Solver:
+    def solve(self, problem: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Determines asymptotic stability of a linear system described by matrix A.
+        If the system is stable, returns a Lyapunov matrix P that satisfies
+        A^T P + P A = -I.  The routine uses a direct spectral check and
+        the continuous‐time Lyapunov solver from SciPy (which is much faster
+        than a generic SDP solver).
 
-        P - A.T @ P @ A = I.
+        Args:
+            problem: A dictionary containing the system matrix `A`.
 
-    Args:
-        problem: dictionary with key 'A' containing a square matrix
+        Returns:
+            dict with keys:
+                - 'is_stable': bool
+                - 'P': list representation of the Lyapunov matrix (None if unstable)
+        """
+        A = np.asarray(problem["A"], dtype=float)
+        # Quick spectral test: all eigenvalues must have strictly negative real part
+        if np.any(np.real(eigvals(A)) >= 0):
+            return {"is_stable": False, "P": None}
 
-    Returns:
-        dict with keys:
-            'is_stable': (bool) whether the system is asymptotically stable,
-            'P': (list[list[float]]) the Lyapunov matrix if stable, else None
-    """
-    A = np.atleast_2d(problem['A']).astype(float)
-    n = A.shape[0]
-    assert A.shape[1] == n, "A must be square"
+        # Solve the Lyapunov equation A^T P + P A = -I
+        try:
+            P = solve_continuous_lyapunov(A.T, -np.eye(A.shape[0]))
+            # Ensure symmetry (numerical errors can make it slightly asymmetric)
+            P = (P + P.T) / 2.0
+        except Exception:
+            return {"is_stable": False, "P": None}
 
-    # 1. Check asymptotic stability: all eigenvalues inside unit circle
-    eig_vals = np.linalg.eigvals(A)
-    if np.any(np.abs(eig_vals) >= 1):
-        return {'is_stable': False, 'P': None}
-
-    # 2. Solve the discrete Lyapunov equation
-    try:
-        P = la.solve_discrete_lyapunov(A.T, np.eye(n))
-        # Ensure symmetry
-        P = (P + P.T) / 2.0
-        return {'is_stable': True, 'P': P.tolist()}
-    except Exception:
-        # Fallback if Lyapunov solver fails
-        return {'is_stable': False, 'P': None}
+        return {"is_stable": True, "P": P.tolist()}

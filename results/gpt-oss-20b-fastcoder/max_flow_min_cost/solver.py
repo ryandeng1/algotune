@@ -1,56 +1,73 @@
-import numpy as np
-from scipy.optimize import linear_sum_assignment
 from typing import Any, List
 
 def solve(problem: dict[str, Any]) -> List[List[Any]]:
     """
-    Solves the minimum weight assignment problem.
-
-    The input `problem` is a dictionary containing the keys
-    ``capacity`` – a square matrix where the value indicates the
-    allowable flow (must be 1 for assignment edges, otherwise 0)
-    and ``cost`` – a square matrix of the same size with edge
-    costs.  The keys ``s`` and ``t`` are ignored because the
-    assignment problem is bipartite and does not require a
-    source/sink representation.
-
-    The function returns an `n x n` matrix `flow` where
-    ``flow[i][j] == 1`` means there is a unit of flow from vertex *i*
-    to vertex *j*, and ``0`` otherwise.
-
-    This implementation uses `scipy.optimize.linear_sum_assignment`,
-    which runs in O(n^3) time and is heavily optimised in C,
-    making it faster than a pure‑Python NetworkX flow algorithm.
+    Minimum‑cost perfect assignment using the Hungarian algorithm.
+    The input `capacity` matrix only indicates whether an edge can be used (1 = allowed, 0 = forbidden).
+    `cost` gives the cost for each allowed edge.
+    Returns an `n x n` matrix of flows (0 or 1).
     """
-    try:
-        capacity = np.array(problem["capacity"])
-        cost = np.array(problem["cost"])
+    n = len(problem['capacity'])
+    INF = 10 ** 12
 
-        # Ensure that the assignment graph is bipartite with
-        # allowed edges where capacity > 0.
-        n = capacity.shape[0]
-        allowed = capacity > 0
+    # Build cost matrix with INF for forbidden edges
+    cost = [[INF] * n for _ in range(n)]
+    for i in range(n):
+        for j in range(n):
+            if problem['capacity'][i][j]:
+                cost[i][j] = problem['cost'][i][j]
 
-        # For forbidden edges we assign a very high cost so that
-        # they will never be chosen.  We use a large number that
-        # is larger than any possible sum of real costs.
-        INF = int(cost.max() * n + 1)
-        cost_for_assignment = np.where(allowed, cost, INF)
+    # Hungarian algorithm (O(n^3))
+    u = [0] * (n + 1)
+    v = [0] * (n + 1)
+    p = [0] * (n + 1)
+    way = [0] * (n + 1)
 
-        # Perform the Hungarian algorithm (linear sum assignment)
-        row_ind, col_ind = linear_sum_assignment(cost_for_assignment)
+    for i in range(1, n + 1):
+        p[0] = i
+        j0 = 0
+        minv = [INF] * (n + 1)
+        used = [False] * (n + 1)
+        while True:
+            used[j0] = True
+            i0 = p[j0]
+            delta = INF
+            j1 = 0
+            for j in range(1, n + 1):
+                if not used[j]:
+                    cur = cost[i0 - 1][j - 1] - u[i0] - v[j]
+                    if cur < minv[j]:
+                        minv[j] = cur
+                        way[j] = j0
+                    if minv[j] < delta:
+                        delta = minv[j]
+                        j1 = j
+            for j in range(n + 1):
+                if used[j]:
+                    u[p[j]] += delta
+                    v[j] -= delta
+                else:
+                    minv[j] -= delta
+            j0 = j1
+            if p[j0] == 0:
+                break
+        # augmenting
+        while True:
+            j1 = way[j0]
+            p[j0] = p[j1]
+            j0 = j1
+            if j0 == 0:
+                break
 
-        # Build the flow matrix
-        flow = np.zeros((n, n), dtype=int)
-        flow[row_ind, col_ind] = 1
+    # p[j] - assigned row for column j
+    assigned = [(0, 0)] * n
+    for j in range(1, n + 1):
+        if p[j] != 0:
+            assigned[j - 1] = (p[j] - 1, j - 1)
 
-        # If the graph is not fully matchable (e.g. some rows
-        # have no outgoing edges), return a zero matrix.
-        if flow.sum() < n:
-            return [[0] * n for _ in range(n)]
-
-        return flow.tolist()
-
-    except Exception:
-        n = len(problem.get("capacity", []))
-        return [[0] * n for _ in range(n)]
+    # Build flow matrix
+    flow = [[0] * n for _ in range(n)]
+    for i, j in assigned:
+        if cost[i][j] < INF:
+            flow[i][j] = 1
+    return flow

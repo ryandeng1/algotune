@@ -1,20 +1,34 @@
-from typing import List
 import numpy as np
 from scipy.linalg import solve_toeplitz
 
 class Solver:
-    def solve(self, problem: dict[str, List[float]]) -> List[float]:
+    """
+    Fast Toeplitz system solver.
+    """
+    def solve(self, problem: dict[str, list[float]]) -> list[float]:
         """
-        Solve the Toeplitz linear system Tx = b using the efficient
-        scipy implementation, minimizing Python overhead.
-        """
-        # Convert inputs to contiguous NumPy arrays once
-        c = np.asarray(problem['c'], dtype=np.float64, order='C')
-        r = np.asarray(problem['r'], dtype=np.float64, order='C')
-        b = np.asarray(problem['b'], dtype=np.float64, order='C')
+        Solve Tx = b using the Toeplitz solver from SciPy.
 
-        # Solve the Toeplitz system
+        Parameters
+        ----------
+        problem : dict[str, list[float]]
+            A dictionary containing the Toeplitz system components:
+            - 'c': first column of T (as list)
+            - 'r': first row  of T (as list)
+            - 'b': right‑hand side vector (as list)
+
+        Returns
+        -------
+        list[float]
+            The solution vector x.
+        """
+        # Convert lists to 1‑D NumPy arrays (no copy if already)
+        c = np.asarray(problem['c'], dtype=float, order='C')
+        r = np.asarray(problem['r'], dtype=float, order='C')
+        b = np.asarray(problem['b'], dtype=float, order='C')
+
+        # Solve (T) x = b
         x = solve_toeplitz((c, r), b)
 
-        # Return a Python list to match the expected interface
+        # Return python list for API compatibility
         return x.tolist()

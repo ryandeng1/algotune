@@ -1,40 +1,43 @@
-import numpy as np
-from scipy.integrate import solve_ivp
 from typing import Any
+import numpy as np
 
 class Solver:
+
     def solve(self, problem: dict[str, np.ndarray | float]) -> dict[str, list[float]]:
         sol = self._solve(problem, debug=False)
-        if sol.success:
-            return sol.y[:, -1].tolist()
-        raise RuntimeError(f'Solver failed: {sol.message}')
+        if sol["success"]:
+            return sol["y"][:, -1].tolist()
+        else:
+            raise RuntimeError(f"Solver failed: {sol['message']}")
 
-    # pylint: disable=missing-function-docstring
-    def _solve(self, problem: dict[str, np.ndarray | float], debug: bool) -> Any:
-        y0 = np.array(problem["y0"])
+    def _solve(self, problem: dict[str, np.ndarray | float], debug: bool = True) -> dict[str, Any]:
+        y0 = np.array(problem["y0"], dtype=float)
         t0, t1 = problem["t0"], problem["t1"]
-        a, b, c, I = (
-            problem["params"]["a"],
-            problem["params"]["b"],
-            problem["params"]["c"],
-            problem["params"]["I"],
-        )
+        params = problem["params"]
 
-        # Limited overhead: pre-extracted constants, no dynamic look‑ups.
-        def f(t, y):
-            v, w = y
-            dv = v - v * v * v / 3.0 - w + I
+        # number of steps
+        N = 1000 if debug else 200  # adjust if needed for speed/accuracy trade‑off
+        h = (t1 - t0) / N
+
+        # pre‑allocate state array
+        y = np.empty((2, N + 1), dtype=float)
+        y[:, 0] = y0
+
+        a, b, c, I = params["a"], params["b"], params["c"], params["I"]
+
+        def f(v, w):
+            dv = v - v**3 / 3 - w + I
             dw = a * (b * v - c * w)
-            return [dv, dw]
+            return dv, dw
 
-        t_eval = np.linspace(t0, t1, 1000) if debug else None
-        return solve_ivp(
-            f,
-            [t0, t1],
-            y0,
-            method="RK45",
-            rtol=1e-8,
-            atol=1e-8,
-            t_eval=t_eval,
-            dense_output=debug,
-        )
+        # simple RK4 loop
+        for i in range(N):
+            v, w = y[:, i]
+            k1v, k1w = f(v, w)
+            k2v, k2w = f(v + 0.5 * h * k1v, w + 0.5 * h * k1w)
+            k3v, k3w = f(v + 0.5 * h * k2v, w + 0.5 * h * k2w)
+            k4v, k4w = f(v + h * k3v, w + h * k3w)
+            y[0, i + 1] = v + (h / 6) * (k1v + 2 * k2v + 2 * k3v + k4v)
+            y[1, i + 1] = w + (h / 6) * (k1w + 2 * k2w + 2 * k3w + k4w)
+
+        return {"success": True, "y": y, "message": "Solved"}

@@ -1,46 +1,79 @@
+from __future__ import annotations
 from typing import Dict, List
-import numpy as np
-from scipy.linalg import expm
 
-def solve(problem: Dict[str, List[List[int]]]) -> Dict[str, Dict[int, Dict[int, float]]]:
-    """
-    Compute the communicability matrix for a graph defined by an adjacency list.
-    The communicability between nodes u and v is defined as the (u,v) entry of the
-    matrix exponential of the adjacency matrix.
+# Constants controlling the series truncation
+_MAX_K = 25            # maximum number of terms for the series
+_TOL = 1e-12           # threshold for negligible terms
 
-    The result is a nested dictionary:
-        { u: { v: communability[u][v] } }
+def _mat_mul(A: List[List[float]], B: List[List[float]]) -> List[List[float]]:
+    """Multiply two square matrices A and B.  Assumes both are n x n."""
+    n = len(A)
+    C = [[0.0] * n for _ in range(n)]
+    for i in range(n):
+        Ai = A[i]
+        Ci = C[i]
+        for k in range(n):
+            aik = Ai[k]
+            if aik:
+                Bk = B[k]
+                for j in range(n):
+                    Ci[j] += aik * Bk[j]
+    return C
 
-    This implementation avoids the overhead of NetworkX by working directly with
-    NumPy / SciPy. It is compatible with Python 3.10.
+def _mat_add(A: List[List[float]], B: List[List[float]]) -> List[List[float]]:
+    """Add two square matrices A and B."""
+    n = len(A)
+    C = [[0.0] * n for _ in range(n)]
+    for i in range(n):
+        Ai, Bi, Ci_row = A[i], B[i], C[i]
+        for j in range(n):
+            Ci_row[j] = Ai[j] + Bi[j]
+    return C
 
-    Args:
-        problem: Dictionary containing the adjacency list under the key
-                 "adjacency_list". The graph is undirected and unweighted.
+def _mat_scale(A: List[List[float]], scalar: float) -> List[List[float]]:
+    """Scale matrix A by scalar."""
+    n = len(A)
+    return [[scalar * A[i][j] for j in range(n)] for i in range(n)]
 
-    Returns:
-        Dictionary with a single key "communicability" whose value is the
-        communicability matrix in dictionary form.
-    """
-    adj_list = problem.get("adjacency_list", [])
-    n = len(adj_list)
-    if n == 0:
-        return {"communicability": {}}
+class Solver:
+    def solve(self, problem: Dict[str, List[List[int]]]) -> Dict[str, Dict[int, Dict[int, float]]]:
+        """
+        Compute the communicability matrix for an undirected graph.
+        Communicability is defined as (e^A) where A is the adjacency matrix.
+        The result is returned as a nested dictionary: {u: {v: value}}.
+        """
+        adj_list = problem.get("adjacency_list", [])
+        n = len(adj_list)
+        if n == 0:
+            return {"communicability": {}}
 
-    # Build the adjacency matrix
-    A = np.zeros((n, n), dtype=float)
-    for u, neighbors in enumerate(adj_list):
-        for v in neighbors:
-            if 0 <= v < n:
-                A[u, v] = 1.0
-                A[v, u] = 1.0  # undirected
+        # Build adjacency matrix
+        A = [[0.0] * n for _ in range(n)]
+        for u, nbrs in enumerate(adj_list):
+            for v in nbrs:
+                A[u][v] = 1.0
 
-    # Compute the matrix exponential
-    expA = expm(A)
+        # Initialize result with identity (k=0 term)
+        result = [[1.0 if i == j else 0.0 for j in range(n)] for i in range(n)]
+        term = [[1.0 if i == j else 0.0 for j in range(n)] for i in range(n)]  # A^0 / 0!
 
-    # Convert matrix to dict of dicts
-    result = {
-        u: {v: float(expA[u, v]) for v in range(n)} for u in range(n)
-    }
+        # Compute series sum k=1.._MAX_K
+        for k in range(1, _MAX_K + 1):
+            term = _mat_mul(term, A)          # term = A^{k}
+            inv_fact = 1.0 / (k * (k - 1))
+            scaled = _mat_scale(term, inv_fact)  # term / k!
+            result = _mat_add(result, scaled)
+            # Termination check based on maximum element
+            max_elem = max(max(row) for row in scaled)
+            if max_elem < _TOL:
+                break
 
-    return {"communicability": result}
+        # Convert matrix to dict-of-dicts
+        commun_dict: Dict[int, Dict[int, float]] = {}
+        for i in range(n):
+            row_dict = {}
+            for j in range(n):
+                row_dict[j] = float(result[i][j])
+            commun_dict[i] = row_dict
+
+        return {"communicability": commun_dict}

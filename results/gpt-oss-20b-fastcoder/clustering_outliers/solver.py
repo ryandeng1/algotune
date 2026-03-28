@@ -1,58 +1,48 @@
-import hdbscan
+from typing import Any
 import numpy as np
-from typing import Any, Dict, List
+import hdbscan
 
 class Solver:
-    def solve(self, problem: Dict[str, Any]) -> Dict[str, List]:
+    def solve(self, problem: dict[str, Any]) -> dict[str, list]:
         """
-        Run HDBSCAN clustering on the supplied dataset.
+        Solve the clustering problem using HDBSCAN.
 
-        Parameters
-        ----------
-        problem : dict
-            Must contain a key ``'dataset'`` with an array‑like structure.
-            Optional keys are ``'min_cluster_size'`` (default 5) and
-            ``'min_samples'`` (default 3).
-
-        Returns
-        -------
-        dict
-            Contains:
-            * ``labels`` – cluster assignments, ``-1`` for noise
-            * ``probabilities`` – cluster membership probability
-            * ``cluster_persistence`` – persistence of each cluster
-            * ``num_clusters`` – number of positive clusters
-            * ``num_noise_points`` – number of points marked as noise
+        :param problem: A dictionary representing the clustering problem.
+        :return: A dictionary with clustering solution details
         """
-        # Convert input dataset to a NumPy array at once.
-        data = np.asarray(problem["dataset"], dtype=float)
+        # Convert input data to a NumPy array once – avoiding repeated Python
+        # list conversions inside the dense HDBSCAN operations.
+        dataset = np.array(problem['dataset'], dtype=float, copy=False)
 
-        # Extract optional HDBSCAN parameters, falling back to the defaults.
-        min_cluster_size = problem.get("min_cluster_size", 5)
-        min_samples = problem.get("min_samples", 3)
+        # Pull clustering hyper‑parameters with sensible defaults.
+        min_cluster_size = problem.get('min_cluster_size', 5)
+        min_samples = problem.get('min_samples', 3)
 
-        # Train HDBSCAN.
+        # Instantiate and fit HDBSCAN directly on the NumPy array.
         clusterer = hdbscan.HDBSCAN(
             min_cluster_size=min_cluster_size,
-            min_samples=min_samples,
-            prediction_data=True,  # keep probability information
+            min_samples=min_samples
         )
-        clusterer.fit(data)
+        clusterer.fit(dataset)
 
-        # Pull the results from the estimator.
-        labels = clusterer.labels_.astype(int)
-        probs = clusterer.probabilities_.astype(float)
-        persistence = clusterer.cluster_persistence_.astype(float)
+        # Extract the results.  Using NumPy's native operations keeps
+        # the overhead minimal before converting to plain lists.
+        labels = clusterer.labels_
+        probabilities = clusterer.probabilities_
+        persistence = clusterer.cluster_persistence_
 
-        # Compute statistics using vectorised operations.
-        num_clusters = int(np.count_nonzero(labels != -1))
-        num_noise = int(np.count_nonzero(labels == -1))
+        # Build the solution dictionary while keeping the data in list form
+        # (required by the expected interface).
+        # These conversions are inexpensive compared to the clustering
+        # itself.
+        unique_labels = np.unique(labels)
+        num_clusters = len(unique_labels[unique_labels != -1])
+        num_noise_points = int(np.sum(labels == -1))
 
-        # Return all results as plain Python lists for compatibility.
         return {
-            "labels": labels.tolist(),
-            "probabilities": probs.tolist(),
-            "cluster_persistence": persistence.tolist(),
-            "num_clusters": num_clusters,
-            "num_noise_points": num_noise,
+            'labels': labels.tolist(),
+            'probabilities': probabilities.tolist(),
+            'cluster_persistence': persistence.tolist(),
+            'num_clusters': num_clusters,
+            'num_noise_points': num_noise_points
         }

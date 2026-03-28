@@ -1,31 +1,26 @@
-from typing import Any
+from typing import List, Dict
 import numpy as np
-from heapq import nsmallest
 
 class Solver:
-    def solve(self, problem: dict[str, list[list[float]]]) -> list[float]:
+
+    def solve(self, problem: Dict[str, List[List[float]]]) -> List[float]:
         """
-        Efficiently find the two eigenvalues closest to zero of a symmetric matrix.
-
-        Uses numpy to compute all eigenvalues once and then retrieves the two with
-        the smallest absolute value without fully sorting the array.
-
-        Args:
-            problem: Dict with key 'matrix' containing a list of lists of floats.
-
-        Returns:
-            List of the two eigenvalues closest to zero, sorted by increasing absolute value.
+        Find the two eigenvalues of a symmetric matrix that are closest to zero.
+        The function is optimized to avoid Python‑level sorting and to use
+        NumPy's efficient C‑level routines.
         """
-        # Convert to a NumPy array once (the input can be a list of lists)
-        matrix = np.array(problem['matrix'], dtype=float)
+        # Convert to a NumPy array (memory‑efficient; dtype=float already)
+        matrix = np.asarray(problem['matrix'], dtype=float)
 
-        # Compute all eigenvalues (for symmetric matrices use the efficient routine)
-        eigs = np.linalg.eigvalsh(matrix)
+        # Compute all eigenvalues of the symmetric matrix (fast on CPU)
+        eig_vals = np.linalg.eigvalsh(matrix)
 
-        # Retrieve the two eigenvalues with the smallest absolute value
-        # without fully sorting:  use nsmallest from heapq
-        two_smallest = nsmallest(2, eigs, key=abs)
+        # Find indices of the two eigenvalues with smallest absolute value
+        # Using np.argpartition gives order‑independent access in O(n)
+        abs_vals = np.abs(eig_vals)
+        idx = np.argpartition(abs_vals, 2)[:2]
 
-        # Ensure they are returned sorted by absolute value
-        two_smallest.sort(key=abs)
-        return two_smallest
+        # Extract them and sort by absolute value for deterministic output
+        result = eig_vals[idx]
+        result.sort(key=lambda x: abs(x))
+        return result.tolist()

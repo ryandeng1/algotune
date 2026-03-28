@@ -1,14 +1,15 @@
-import numpy as np
 from numpy.typing import NDArray
+import numpy as np
 
 class Solver:
     """
-    Compute the N-dimensional FFT using NumPy's highly optimised FFT routines.
-    This implementation replaces the slower SciPy FFTpack with NumPy's
-    implementation that usually binds to an FFTW or MKL backend,
-    yielding a significant speed boost for typical problems.
+    Fast N‑dimensional FFT using NumPy's FFT implementation.
     """
+
     def solve(self, problem: NDArray) -> NDArray:
-        # NumPy's fftn is fast and memory‑friendly; it in‑place
-        # computes the FFT directly on the input array.
-        return np.fft.fftn(problem)
+        """
+        Compute the N‑dimensional FFT of *problem*.
+        """
+        # Ensure the input is a NumPy array (supports typing, also handles list/tuple)
+        arr = np.asarray(problem, dtype=np.complex128)
+        return np.fft.fftn(arr)

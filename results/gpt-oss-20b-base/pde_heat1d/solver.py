@@ -1,50 +1,42 @@
+from typing import Any
 import numpy as np
-from typing import Any, Dict, List
+from scipy.integrate import solve_ivp
 
 class Solver:
-
-    def solve(self, problem: Dict[str, Any]) -> Dict[str, List[float]]:
+    def solve(self, problem: dict[str, np.ndarray | float]) -> dict[str, list[float]]:
         sol = self._solve(problem, debug=False)
         if sol.success:
             return sol.y[:, -1].tolist()
-        else:
-            raise RuntimeError(f'Solver failed: {sol.message}')
+        raise RuntimeError(f"Solver failed: {sol.message}")
 
-    def _solve(self, problem: Dict[str, Any], debug: bool = True) -> Any:
-        # Extract problem data
+    # -------------------------------------------------------------
+    def _solve(self, problem: dict[str, np.ndarray | float], debug: bool = True) -> Any:
+        # Extract data once for speed
         y0 = np.asarray(problem["y0"], dtype=np.float64)
         t0, t1 = problem["t0"], problem["t1"]
         params = problem["params"]
-        alpha = params["alpha"]
-        dx = params["dx"]
+        alpha, dx = params["alpha"], params["dx"]
 
-        # Discretization parameters
-        steps = 1000 if debug else 100  # adjustable for speed vs precision
-        dt = (t1 - t0) / steps
-        n = y0.size
+        # Pre‑allocate padded array structure to avoid reallocating in each step
+        m = y0.size
+        padded = np.empty(m + 2, dtype=np.float64)
 
-        # Helper to compute RHS of heat equation
-        def rhs(u: np.ndarray) -> np.ndarray:
-            u_xx = np.empty_like(u)
-            # interior points
-            u_xx[1:-1] = (u[2:] - 2 * u[1:-1] + u[:-2]) / dx**2
-            # boundaries with Dirichlet BCs (u=0 outside)
-            u_xx[0] = (u[1] - 2 * u[0]) / dx**2
-            u_xx[-1] = (-2 * u[-1] + u[-2]) / dx**2
+        def heat_eq(t: float, u: np.ndarray) -> np.ndarray:
+            # Apply fixed Dirichlet BCs (u[0] = u[-1] = 0) via padding
+            padded[0], padded[1:-1], padded[-1] = 0.0, u, 0.0
+            u_xx = (padded[2:] - 2 * padded[1:-1] + padded[:-2]) / (dx * dx)
             return alpha * u_xx
 
-        # RK4 loop
-        u = y0.copy()
-        for _ in range(steps):
-            k1 = rhs(u)
-            k2 = rhs(u + 0.5 * dt * k1)
-            k3 = rhs(u + 0.5 * dt * k2)
-            k4 = rhs(u + dt * k3)
-            u += dt / 6.0 * (k1 + 2 * k2 + 2 * k3 + k4)
-
-        # Mimic the structure of solve_ivp result
-        class Result:
-            success = True
-            message = ""
-            y = np.column_stack([u])
-        return Result()
+        rtol, atol = 1e-6, 1e-6
+        method = "RK45"
+        t_eval = np.linspace(t0, t1, 1000) if debug else None
+        return solve_ivp(
+            heat_eq,
+            (t0, t1),
+            y0,
+            method=method,
+            rtol=rtol,
+            atol=atol,
+            t_eval=t_eval,
+            dense_output=debug,
+        )

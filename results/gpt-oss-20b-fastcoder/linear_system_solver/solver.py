@@ -4,24 +4,24 @@ from typing import Any, List
 class Solver:
     def solve(self, problem: dict[str, Any]) -> List[float]:
         """
-        Solve the linear system Ax = b using NumPy's fast solver.
+        Solve the linear system Ax = b using NumPy's optimized solver.
 
         Parameters
         ----------
         problem : dict
-            Dictionary containing the matrix `A` and right‑hand side `b`.
+            Dictionary containing the keys 'A' and 'b', which describe the
+            linear system.  The values are expected to be array‑like.
 
         Returns
         -------
-        List[float]
-            Solution vector as a plain Python list.
+        list[float]
+            The solution vector x.
         """
-        # Convert to numpy arrays without unnecessary copies
-        A = np.asarray(problem["A"], dtype=float, order="C")
-        b = np.asarray(problem["b"], dtype=float, order="C")
+        # Use ``np.asarray`` instead of ``np.array`` to avoid an unnecessary
+        # copy when the input is already a NumPy array.
+        A = np.asarray(problem["A"])
+        b = np.asarray(problem["b"])
 
-        # Directly solve using the highly optimised LAPACK routine
-        x = np.linalg.solve(A, b)
-
-        # Convert result to list only once
-        return x.tolist()
+        # ``np.linalg.solve`` is the fastest routine for solving square systems.
+        # It returns a NumPy array; ``tolist`` converts it to a plain Python list.
+        return np.linalg.solve(A, b).tolist()

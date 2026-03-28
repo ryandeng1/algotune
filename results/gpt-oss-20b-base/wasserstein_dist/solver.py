@@ -1,24 +1,27 @@
-from typing import List, Dict
+from typing import Any
 
 class Solver:
-    def solve(self, problem: Dict[str, List[float]]) -> float:
+    def solve(self, problem: dict[str, list[float]]) -> float:
         """
-        Compute the 1‑dimensional Wasserstein distance
-        for two distributions defined on the discrete grid 1…n.
-        The distances are given by their probability mass functions in
-        problem['u'] and problem['v'].
-        """
-        u = problem.get("u")
-        v = problem.get("v")
-        if not u or not v or len(u) != len(v):
-            return float(len(u) if u else 0)
+        Compute the 1‑D Wasserstein distance between two distributions
+        `u` and `v` defined on the same support {1, …, n}.
 
-        # cumulative sums
+        The distance equals the L1 distance between the cumulative
+        distribution functions, which can be computed in O(n) time
+        without external libraries.
+        """
+        u = problem.get('u', [])
+        v = problem.get('v', [])
+        n = len(u)
+        if n == 0 or n != len(v):
+            return float(n)
+
         cum_u = 0.0
         cum_v = 0.0
         dist = 0.0
-        for pu, pv in zip(u, v):
-            cum_u += pu
-            cum_v += pv
+        for i in range(n):
+            cum_u += u[i]
+            cum_v += v[i]
             dist += abs(cum_u - cum_v)
+
         return dist

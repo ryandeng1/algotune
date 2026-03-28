@@ -1,35 +1,25 @@
-from typing import Any, Dict, List
 import numpy as np
-from scipy.spatial import Voronoi
+from scipy.spatial import Voronoi as ScipyVoronoi
 
-def solve(problem: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Compute a Voronoi diagram for a set of points using scipy.spatial.Voronoi
-    and return the data structures in the format required by the benchmark.
+class Solver:
+    def solve(self, problem: dict[str, any]) -> dict[str, any]:
+        points = np.asarray(problem['points'], dtype=np.float64)
+        vor = ScipyVoronoi(points)
 
-    :param problem: Dictionary with key 'points' containing a 2‑D ndarray or list of points.
-    :return: Dictionary containing vertices, regions, point_region, ridge_points,
-             and ridge_vertices.
-    """
-    # Ensure the points are in a NumPy array for optimal performance
-    points = np.asarray(problem["points"], dtype=np.float64)
+        # Build the solution dictionary in a compact way
+        vertices = vor.vertices.tolist()
+        regions = [list(r) for r in vor.regions]
+        point_region = vor.point_region.tolist()
+        ridge_points = vor.ridge_points.tolist()
+        ridge_vertices = vor.ridge_vertices.tolist()
 
-    # Build the Voronoi diagram
-    vor = Voronoi(points)
+        # Reorder regions according to the point_region mapping
+        regions = [regions[i] for i in point_region]
 
-    # `vor.point_region` already maps each input point to its region.
-    # Construct the region list in the same order.
-    regions = [vor.regions[idx] for idx in vor.point_region]
-
-    # Convert ndarray objects to plain Python lists only where necessary.
-    # The outermost list structures are small, converting the vertices once
-    # is the main cost; the remaining lists are thin.
-    solution = {
-        "vertices": vor.vertices.tolist(),
-        "regions": [list(r) for r in regions],
-        "point_region": list(vor.point_region),
-        "ridge_points": vor.ridge_points.tolist(),
-        "ridge_vertices": vor.ridge_vertices.tolist(),
-    }
-
-    return solution
+        return {
+            'vertices': vertices,
+            'regions': regions,
+            'point_region': point_region,
+            'ridge_points': ridge_points,
+            'ridge_vertices': ridge_vertices,
+        }

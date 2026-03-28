@@ -1,37 +1,25 @@
 import numpy as np
+from typing import Any
 
 class Solver:
     def solve(self, problem: list) -> list:
-        """
-        Compute the upfirdn operation for each problem definition in the list
-        without relying on scipy, using efficient NumPy operations.
-        """
+        """Compute the upfirdn operation for each problem definition in the list."""
         results = []
-
         for h, x, up, down in problem:
-            # ensure arrays
-            h = np.asarray(h, dtype=float)
-            x = np.asarray(x, dtype=float)
+            # Convert inputs to NumPy arrays (ensuring contiguous memory)
+            h = np.asarray(h)
+            x = np.asarray(x)
 
-            # --- upsample ---
-            if up == 1:
-                x_up = x
-            else:
-                # insert (up-1) zeros between samples
-                n = x.size
-                n_up = n * up
-                x_up = np.empty(n_up, dtype=x.dtype)
-                x_up[::up] = x
+            # Up-sample `x` by inserting zeros.
+            up_len = len(x) * up
+            upx = np.empty(up_len, dtype=x.dtype)
+            upx.fill(0)
+            upx[::up] = x
 
-            # --- convolution ---
-            y = np.convolve(h, x_up)
+            # Full convolution of upsampled `x` with filter `h`.
+            conv = np.convolve(upx, h, mode="full")
 
-            # --- downsample ---
-            if down == 1:
-                y_down = y
-            else:
-                y_down = y[::down]
-
-            results.append(y_down)
+            # Down-sample the convolution result.
+            results.append(conv[::down])
 
         return results

@@ -1,28 +1,21 @@
-from typing import Dict, Any
+from typing import Any
 import numpy as np
 
 class Solver:
-    # Use __slots__ to reduce per-instance memory overhead
-    __slots__ = ()
-
-    def solve(self, problem: Dict[str, np.ndarray]) -> Dict[str, Dict[str, list]]:
+    def solve(self, problem: dict[str, np.ndarray]) -> dict[str, dict[str, list[list[float]]]]:
         """
-        Compute the Cholesky decomposition of a symmetric positive‑definite matrix.
+        Compute the Cholesky factorization of a symmetric positive‑definite matrix.
 
         Parameters
         ----------
-        problem
-            Dictionary containing the key 'matrix' mapped to a NumPy
-            ndarray of shape (n, n).
+        problem : dict[str, np.ndarray]
+            Dictionary containing a single key ``'matrix'`` with the input matrix.
 
         Returns
         -------
-        dict
-            Contains a single key 'Cholesky' whose value is another
-            dictionary with key 'L' pointing to a list of lists that
-            represent the lower‑triangular Cholesky factor.
+        dict[str, dict[str, list[list[float]]]]
+            Dictionary with the lower triangular factor ``L``.
         """
-        A = problem["matrix"]
-        # NumPy's LAPACK routine is highly optimised for this operation.
-        L = np.linalg.cholesky(A).tolist()
+        # Directly compute the Cholesky factor; no extra copies or loops.
+        L = np.linalg.cholesky(problem['matrix'])
         return {"Cholesky": {"L": L}}

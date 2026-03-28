@@ -1,40 +1,38 @@
-from typing import Any
 import numpy as np
-import scipy.sparse as sp
-from scipy.sparse import csr_matrix, diags
+import scipy.sparse
+import scipy.sparse.csgraph
 
-class Solver:
+def solve(problem: dict):
+    """
+    Computes the graph Laplacian using scipy.sparse.csgraph.laplacian.
+    The result is returned as CSR components.
+    """
+    # Build CSR matrix from the input data
+    try:
+        data   = np.asarray(problem['data'])
+        indices= np.asarray(problem['indices'])
+        indptr = np.asarray(problem['indptr'])
+        shape  = tuple(problem['shape'])
+        graph_csr = scipy.sparse.csr_matrix((data, indices, indptr), shape=shape)
+        normed   = bool(problem.get('normed', False))
+    except Exception:
+        return {'laplacian': {'data': [], 'indices': [], 'indptr': [], 'shape': shape}}
 
-    def solve(self, problem: dict[str, Any]) -> dict[str, dict[str, Any]]:
-        """
-        Compute the graph Laplacian directly: L = D - A.
-        ``A`` is the input CSR graph. ``D`` is the diagonal degree matrix.
-        The result is returned in CSR format components.
-        """
-        try:
-            # Build CSR matrix from provided data
-            A = csr_matrix(
-                (problem["data"], problem["indices"], problem["indptr"]),
-                shape=problem["shape"],
-            )
-            # Compute node degrees (sum of rows)
-            deg = np.ravel(A.sum(axis=1))
-            # Build diagonal degree matrix
-            D = diags(deg, offsets=0, shape=A.shape, format="csr")
-            # Laplacian: L = D - A
-            L = D - A
-            # Remove explicit zeros
-            L.eliminate_zeros()
-        except Exception:
-            shape = problem.get("shape", (0, 0))
-            return {"laplacian": {"data": [], "indices": [], "indptr": [], "shape": shape}}
+    # Compute the Laplacian
+    try:
+        L_csr = scipy.sparse.csgraph.laplacian(graph_csr, normed=normed)
+        if not isinstance(L_csr, scipy.sparse.csr_matrix):
+            L_csr = L_csr.tocsr()
+        L_csr.eliminate_zeros()
+    except Exception:
+        return {'laplacian': {'data': [], 'indices': [], 'indptr': [], 'shape': shape}}
 
-        # Return CSR components as lists
-        return {
-            "laplacian": {
-                "data": L.data.tolist(),
-                "indices": L.indices.tolist(),
-                "indptr": L.indptr.tolist(),
-                "shape": L.shape,
-            }
+    # Convert to lists for the expected output format
+    return {
+        'laplacian': {
+            'data':   L_csr.data.tolist(),
+            'indices':L_csr.indices.tolist(),
+            'indptr': L_csr.indptr.tolist(),
+            'shape':  L_csr.shape
         }
+    }

@@ -1,23 +1,40 @@
+from typing import Any
 import numpy as np
+import scipy.linalg as la
 from numpy.typing import NDArray
-from scipy.linalg import eig
 
 class Solver:
     def solve(self, problem: tuple[NDArray, NDArray]) -> tuple[list[complex], list[list[complex]]]:
+        """
+        Solve the generalized eigenvalue problem A · x = λ B · x
+        and return sorted eigenvalues together with corresponding unit-norm eigenvectors.
+        """
         A, B = problem
-        scale = np.sqrt(np.linalg.norm(B, ord='fro'))  # use frobenius norm for better scaling
-        A /= scale
-        B /= scale
 
-        eigvals, eigvecs = eig(A, B, left=False, select='a')
+        # Scale both matrices to reduce numerical problems
+        scale = np.sqrt(np.linalg.norm(B))
+        A_scaled = A / scale
+        B_scaled = B / scale
 
-        # Normalise eigenvectors
-        norms = np.linalg.norm(eigvecs, axis=0, keepdims=True)
-        eigvecs = eigvecs / np.where(norms > 1e-15, norms, 1)
+        # Compute eigenpairs (A_over_B)
+        eigvals, eigvecs = la.eig(A_scaled, B_scaled)
 
-        # Sort by real then imaginary part descending
-        idx = np.lexsort((-eigvals.imag, -eigvals.real))  # lexsort takes keys from last to first
-        eigvals = eigvals[idx]
-        eigvecs = eigvecs[:, idx]
+        # Normalise eigenvectors to unit Euclidean norm
+        norms = np.linalg.norm(eigvecs, axis=0)
+        # Avoid divide-by-zero (unlikely for legitimate problems)
+        mask = norms > 1e-15
+        eigvecs[:, mask] = eigvecs[:, mask] / norms[mask]
 
-        return (list(eigvals), [list(col) for col in eigvecs.T])
+        # Sort by real part, then imaginary part, descending
+        order = np.argsort(
+            np.lexsort((-eigvals.imag, -eigvals.real)),
+            kind="quicksort",
+        )
+        eigvals = eigvals[order]
+        eigvecs = eigvecs[:, order]
+
+        # Convert to python lists
+        eigvals_list = [complex(v) for v in eigvals]
+        eigvecs_list = [list(row) for row in eigvecs.T]
+
+        return eigvals_list, eigvecs_list

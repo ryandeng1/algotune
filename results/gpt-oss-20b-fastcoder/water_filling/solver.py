@@ -1,55 +1,67 @@
+#!/usr/bin/env python3
 from typing import Any, Dict, List
 import numpy as np
 
-class Solver:
-    def solve(self, problem: Dict[str, Any]) -> Dict[str, Any]:
-        alpha_raw = problem.get('alpha')
-        P_total_raw = problem.get('P_total')
+def solve(problem: Dict[str, Any]) -> Dict[str, Any]:
+    """Fast analytical solution to the log‑sum maximisation problem."""
+    # Extract data
+    alpha = np.asarray(problem["alpha"], dtype=np.float64)
+    P_total = float(problem["P_total"])
+    n = alpha.size
 
-        try:
-            alpha = np.asarray(alpha_raw, dtype=float)
-            P_total = float(P_total_raw)
-        except Exception:
-            return {'x': [float('nan')] * (len(alpha_raw) if alpha_raw else 0),
-                    'Capacity': float('nan')}
+    # Input checks
+    if n == 0 or P_total <= 0 or not np.all(alpha > 0):
+        return {"x": [float("nan")] * n, "Capacity": float("nan")}
 
-        n = alpha.size
-        if n == 0 or P_total <= 0 or not np.all(alpha > 0):
-            return {'x': [float('nan')] * n, 'Capacity': float('nan')}
+    # Sort alphas ascending; keep indices to restore order later
+    order = np.argsort(alpha)
+    alpha_sorted = alpha[order]
 
-        # Water‑filling via Lagrange multiplier
-        idx = np.argsort(alpha)
-        a_sorted = alpha[idx]
-        cum_sum = np.cumsum(a_sorted)
+    # Pre‑compute cumulative sums of alphas
+    cum_alpha = np.cumsum(alpha_sorted, dtype=np.float64)
+    # We need to find lambda such that sum max(0, 1/lambda - alpha_i) = P_total
+    # For a given λ, define m = number of i with alpha_i < 1/λ
+    # Then sum = m/λ - cum_alpha[m-1]
+    # Since the function is decreasing in λ we can binary‑search λ on (0,∞)
 
-        k = None
-        for i in range(n):
-            tot = P_total + cum_sum[i]
-            lam = 1.0 / (tot / (i + 1))   # candidate lambda
-            if lam <= 1.0 / a_sorted[i]:
-                k = i + 1
-                break
-        if k is None:
-            k = n
-            lam = 1.0 / ((P_total + cum_sum[n-1]) / n)
+    # Helper: compute residual for given λ
+    def residual(lam: float) -> float:
+        if lam == 0:
+            return float("inf")
+        inv_lam = 1.0 / lam
+        # Find the last index where alpha < inv_lam
+        m = np.searchsorted(alpha_sorted, inv_lam, side="right")
+        if m == 0:
+            return -P_total  # all terms negative, sum 0
+        return m * inv_lam - cum_alpha[m - 1] - P_total
 
-        x_sorted = np.zeros(n)
-        valid_mask = a_sorted < 1.0 / lam
-        x_sorted[valid_mask] = 1.0 / lam - a_sorted[valid_mask]
+    # Bisection bounds
+    lo, hi = 1e-12, 1e12  # λ bounds
+    # Adjust hi to ensure residual(hi) < 0
+    while residual(hi) > 0:
+        hi *= 2
+    # Binary search
+    for _ in range(80):  # 80 iterations give >1e-24 accuracy
+        mid = (lo + hi) / 2
+        if residual(mid) > 0:
+            lo = mid
+        else:
+            hi = mid
+    lam_star = (lo + hi) / 2
 
-        # Convert back to original order
-        x = np.empty(n, dtype=float)
-        x[idx] = x_sorted
+    inv_lam = 1.0 / lam_star
+    x_sorted = np.maximum(inv_lam - alpha_sorted, 0.0)
 
-        # Numerical safety
-        if np.any(x < 0):
-            x = np.maximum(x, 0.0)
-        current_sum = x.sum()
-        if current_sum > 1e-12:
-            x *= P_total / current_sum
+    # Restore original order
+    x = np.empty_like(x_sorted)
+    x[order] = x_sorted
 
-        capacity = np.sum(np.log(alpha + x))
-        if not np.isfinite(capacity):
-            capacity = float('nan')
+    # Numerical corrections (ensure sum constraint)
+    cur_sum = x.sum()
+    if cur_sum > 1e-9:
+        x *= P_total / cur_sum
 
-        return {'x': x.tolist(), 'Capacity': float(capacity)}
+    # Capacity
+    capacity = np.sum(np.log(alpha + x))
+
+    return {"x": x.tolist(), "Capacity": float(capacity)}

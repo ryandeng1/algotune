@@ -1,18 +1,25 @@
-from typing import Any, Dict
+from typing import Dict, List
 import numpy as np
 from scipy.linalg import expm
 
 class Solver:
-    def solve(self, problem: Dict[str, np.ndarray]) -> Dict[str, Any]:
+    def solve(self, problem: Dict[str, np.ndarray]) -> Dict[str, List[List[float]]]:
         """
-        Compute the matrix exponential of A efficiently using SciPy.
-        
-        :param problem: Dictionary with key 'matrix' holding the input ndarray.
-        :return: Dictionary with key 'exponential' containing the result as
-                 a nested list of floats.
+        Compute the matrix exponential of the given square matrix A.
+
+        Parameters
+        ----------
+        problem : dict
+            Dictionary containing one key 'matrix' with a 2‑D numpy array as its value.
+
+        Returns
+        -------
+        dict
+            Dictionary with key 'exponential' holding the matrix exponential
+            represented as a plain list of lists of floats.
         """
-        A = problem["matrix"]
-        # SciPy's expm is already highly optimized; just compute it once.
+        A = problem['matrix']
+        # Compute exp(A) using the highly‑optimized SciPy routine.
         expA = expm(A)
-        # Convert to a plain Python list of lists for compatibility.
+        # Convert the NumPy array to a plain list of lists for the required output format.
         return {"exponential": expA.tolist()}

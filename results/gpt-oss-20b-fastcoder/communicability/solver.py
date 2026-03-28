@@ -1,54 +1,54 @@
 import numpy as np
 from typing import Any, Dict, List
 
-class Solver:
-    def solve(self, problem: Dict[str, List[List[int]]]) -> Dict[str, Dict[int, Dict[int, float]]]:
+# Try to use scipy for a fast matrix exponential, otherwise fall back
+try:
+    from scipy.linalg import expm
+except Exception:
+    def expm(A: np.ndarray) -> np.ndarray:
         """
-        Calculates the communicability matrix of an undirected graph
-        defined by an adjacency list.  Communicability is defined as
-        the matrix exponential of the unweighted adjacency matrix
-        (summing all walks weighted by 1/k!).
-
-        Parameters
-        ----------
-        problem : dict
-            {"adjacency_list": adj_list}
-            adj_list is a list of lists, where adj_list[u] contains
-            the neighbors of vertex u.
-
-        Returns
-        -------
-        dict
-            {"communicability": comm_dict}
-            comm_dict[u][v] is the communicability between nodes u and v.
+        Very rough matrix exponential via Taylor series (good for small n).
         """
-        adj_list = problem.get("adjacency_list", [])
-        n = len(adj_list)
-        if n == 0:
-            return {"communicability": {}}
+        n = A.shape[0]
+        result = np.eye(n, dtype=float)
+        term = np.eye(n, dtype=float)
+        k = 1
+        while True:
+            term = term @ A / k
+            new = result + term
+            if np.linalg.norm(new - result, ord='fro') < 1e-9:
+                return new
+            result = new
+            k += 1
 
-        # Build symmetric adjacency matrix
-        A = np.zeros((n, n), dtype=float)
-        for u, neigh in enumerate(adj_list):
-            for v in neigh:
-                A[u, v] = 1.0
-                A[v, u] = 1.0
+def solve(problem: Dict[str, List[List[int]]]) -> Dict[str, Any]:
+    """
+    Compute the communicability matrix for an undirected graph represented by an
+    adjacency list.
+    """
+    adj_list = problem.get("adjacency_list", [])
+    n = len(adj_list)
+    if n == 0:
+        return {"communicability": {}}
 
-        # Eigen‑decomposition of a symmetric matrix
-        w, Q = np.linalg.eigh(A)          # w: eigenvalues, Q: orthonormal eigenvectors
-        exp_w = np.exp(w)                 # e^(eigenvalue)
+    # Construct adjacency matrix
+    A = np.zeros((n, n), dtype=float)
+    for i, neighbors in enumerate(adj_list):
+        for j in neighbors:
+            if 0 <= j < n:
+                A[i, j] = 1.0
+    # Make it symmetric (undirected)
+    A = np.triu(A) + np.triu(A, 1).T
 
-        # Construct exp(A) = Q * exp(D) * Q^T
-        # Using elementwise multiplication of columns of Q by exp_w
-        exp_A = (Q * exp_w) @ Q.T
+    # Matrix exponential gives communicability
+    C = expm(A)
 
-        # Convert to nested dict of floats
-        comm_dict: Dict[int, Dict[int, float]] = {}
-        for i in range(n):
-            row = {}
-            ai = exp_A[i]
-            for j in range(n):
-                row[j] = float(ai[j])
-            comm_dict[i] = row
+    # Convert to the required dict-of-dicts format
+    comm_dict: Dict[int, Dict[int, float]] = {}
+    for i in range(n):
+        row = {}
+        for j in range(n):
+            row[j] = float(C[i, j])
+        comm_dict[i] = row
 
-        return {"communicability": comm_dict}
+    return {"communicability": comm_dict}

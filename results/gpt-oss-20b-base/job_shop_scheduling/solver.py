@@ -1,51 +1,56 @@
 from ortools.sat.python import cp_model
+from typing import Any, List
 
 class Solver:
-    def solve(self, problem: dict) -> list[list[int]]:
-        """Solve JSSP with CP-SAT, returning start times per job."""
+    def solve(self, problem: dict[str, Any]) -> List[List[int]]:
+        """Solve Job Shop Scheduling with CP‑SAT."""
         M = problem["num_machines"]
         jobs = problem["jobs"]
-        n_jobs = len(jobs)
 
-        # Compute horizon once
         horizon = sum(p for job in jobs for _, p in job)
-
         model = cp_model.CpModel()
 
-        # Prepare data structures
-        starts = [[None] * len(job) for job in jobs]
-        ends = [[None] * len(job) for job in jobs]
+        # Keep intervals per machine for NoOverlap
         machine_intervals = [[] for _ in range(M)]
+        # Store start vars for result extraction
+        start_vars = {}
 
         for j, job in enumerate(jobs):
             prev_end = None
-            for k, (m, p) in enumerate(job):
-                s = model.NewIntVar(0, horizon, f"s_{j}_{k}")
-                e = model.NewIntVar(0, horizon, f"e_{j}_{k}")
-                interval = model.NewIntervalVar(s, p, e, f"int_{j}_{k}")
-                starts[j][k] = s
-                ends[j][k] = e
+            for k, (m, dur) in enumerate(job):
+                start = model.NewIntVar(0, horizon, f"s_{j}_{k}")
+                end = model.NewIntVar(0, horizon, f"e_{j}_{k}")
+                interval = model.NewIntervalVar(start, dur, end, f"i_{j}_{k}")
                 machine_intervals[m].append(interval)
+                start_vars[(j, k)] = start
                 if prev_end is not None:
-                    model.Add(s >= prev_end)
-                prev_end = e
+                    model.Add(start >= prev_end)
+                prev_end = end
 
-        # No overlapping on each machine
-        for m in range(M):
-            model.AddNoOverlap(machine_intervals[m])
+        for intervals in machine_intervals:
+            if intervals:
+                model.AddNoOverlap(intervals)
 
-        # Makespan minimization
+        # Makespan
         makespan = model.NewIntVar(0, horizon, "makespan")
-        final_end = [ends[j][len(job) - 1] for j, job in enumerate(jobs)]
-        model.AddMaxEquality(makespan, final_end)
+        last_ends = [model.NewIntVar(0, horizon, f"end_{j}") for j in range(len(jobs))]
+        for j, job in enumerate(jobs):
+            _, end_var, _ = start_vars[(j, len(job) - 1)]
+            model.Add(last_ends[j] == end_var)
+        model.AddMaxEquality(makespan, last_ends)
         model.Minimize(makespan)
 
+        # Solve
         solver = cp_model.CpSolver()
+        solver.parameters.max_time_in_seconds = 30.0  # avoid infinite time
         status = solver.Solve(model)
-
-        if status != cp_model.OPTIMAL:
+        if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
             return []
 
-        # Build solution
-        solution = [[int(solver.Value(starts[j][k])) for k in range(len(jobs[j]))] for j in range(n_jobs)]
+        # Extract start times
+        solution: List[List[int]] = []
+        for j, job in enumerate(jobs):
+            job_start = [solver.Value(start_vars[(j, k)]) for k in range(len(job))]
+            solution.append(job_start)
+
         return solution

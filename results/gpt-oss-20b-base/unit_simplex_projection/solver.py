@@ -1,37 +1,36 @@
-from typing import Any, Dict, List
-
-def _simplex_projection(y: List[float]) -> List[float]:
-    """
-    Project the vector `y` onto the probability simplex.
-    Implements the O(n log n) algorithm from
-    https://arxiv.org/pdf/1309.1541.
-    """
-    # sort in decreasing order
-    u = sorted(y, reverse=True)
-    v = 0.0
-    theta = 0.0
-    for i, ui in enumerate(u, start=1):
-        v += ui
-        # check if current threshold satisfies the condition
-        if ui > (v - 1) / i:
-            continue
-        else:
-            theta = (v - 1) / i
-            break
-    else:
-        # all elements satisfy, theta = (v - 1)/len(u)
-        theta = (v - 1) / len(u)
-
-    return [max(yi - theta, 0.0) for yi in y]
+from typing import Any
 
 class Solver:
-    def solve(self, problem: Dict[str, Any]) -> Dict[str, List[float]]:
-        """
-        Solve the Euclidean projection onto the probability simplex.
+    def solve(self, problem: dict[str, Any]) -> dict[str, list]:
+        y = problem["y"]
+        # Ensure a 1‑D NumPy array for vectorised operations
+        y_arr = (y if isinstance(y, (list, tuple)) else y).copy()
+        if not hasattr(y_arr, "__len__"):
+            y_arr = [y_arr]
 
-        :param problem: A dictionary containing the key 'y' with the input vector.
-        :return: A dictionary with key 'solution' containing the projected vector.
-        """
-        y = list(problem.get('y', []))
-        solution = _simplex_projection(y)
-        return {'solution': solution}
+        y_arr = y_arr if isinstance(y_arr, list) else y_arr.tolist()
+        n = len(y_arr)
+
+        # Fast projection onto the probability simplex
+        # 1. Sort in descending order
+        # 2. Find the largest k such that y_sorted[k] > (sum(y_sorted[:k+1]) - 1) / (k+1)
+        # 3. Compute theta and project
+        import numpy as np
+        y_np = np.array(y_arr, dtype=float)
+        # descending sort
+        idx = np.argsort(-y_np)
+        y_sorted = y_np[idx]
+        # cumulative sum offset by -1
+        cumsum = np.cumsum(y_sorted) - 1.0
+        # create divisor array
+        div = np.arange(1, n + 1, dtype=float)
+        # boolean mask where condition holds
+        mask = y_sorted > cumsum / div
+        # last true index
+        rho = mask.argmax() if not mask.all() else n - 1
+        # compute theta
+        theta = cumsum[rho] / (rho + 1.0)
+        # projection
+        proj = y_np - theta
+        proj[proj < 0] = 0.0
+        return {"solution": proj.tolist()}

@@ -1,53 +1,43 @@
 from collections import deque
-from typing import List, Dict
+from typing import Dict, List
 
-class Solver:
-    def solve(self, problem: Dict[str, List[List[int]]]) -> Dict[str, float]:
-        """
-        Calculates the global efficiency of the graph without external
-        libraries. The efficiency is computed as the average of the
-        reciprocal shortest path lengths between all unordered pairs of
-        distinct nodes.
+def solve(problem: Dict[str, List[List[int]]]) -> Dict[str, float]:
+    """
+    Computes the global efficiency of an undirected graph without using NetworkX.
+    Global efficiency = (1 / (n*(n-1))) * sum_{i!=j} 1/d(i,j) where d(i,j) is the shortest
+    path length between i and j.  Pairs with no path are ignored in the sum.
 
-        Args:
-            problem: A dictionary containing the adjacency list of the
-                     graph as {"adjacency_list": adj_list}
-                     where adj_list is a list of lists of integers.
+    The adjacency list is 0-indexed.
+    """
+    adj = problem['adjacency_list']
+    n = len(adj)
+    if n <= 1:
+        return {'global_efficiency': 0.0}
 
-        Returns:
-            A dictionary containing the global efficiency as
-            {"global_efficiency": efficiency_value}.
-        """
-        adj = problem["adjacency_list"]
-        n = len(adj)
-        if n <= 1:
-            return {"global_efficiency": 0.0}
+    # Preprocess adjacency lists to ensure each neighbor set is a list (already is)
+    # Prepare a list of neighbors for faster iteration
+    neighbors = adj  # alias
 
-        # Ensure the adjacency list is symmetric and contains unique neighbors
-        for i, nb in enumerate(adj):
-            adj[i] = set(nb)
+    total_inv = 0.0  # sum of 1/d(i,j)
 
-        total = 0.0
-        pair_count = n * (n - 1)
+    # For each source node, run BFS to compute distances
+    for s in range(n):
+        dist = [-1] * n
+        dist[s] = 0
+        q = deque([s])
+        while q:
+            u = q.popleft()
+            d_u = dist[u] + 1
+            for w in neighbors[u]:
+                if dist[w] == -1:
+                    dist[w] = d_u
+                    q.append(w)
+        # accumulate 1/d for all j > s to avoid double counting
+        for t in range(s + 1, n):
+            d = dist[t]
+            if d > 0:
+                total_inv += 2.0 / d  # contribute both (s,t) and (t,s)
 
-        for src in range(n):
-            # BFS to compute shortest distances from src
-            dist = [-1] * n
-            dist[src] = 0
-            q = deque([src])
-            while q:
-                u = q.popleft()
-                for v in adj[u]:
-                    if dist[v] == -1:
-                        dist[v] = dist[u] + 1
-                        q.append(v)
-
-            # Accumulate reciprocals of distances for pairs (src, j)
-            for j in range(src + 1, n):
-                d = dist[j]
-                if d > 0:
-                    total += 1.0 / d
-                # If d == 0 (disconnected), contribute 0
-
-        global_efficiency = total * 2.0 / pair_count
-        return {"global_efficiency": global_efficiency}
+    denom = n * (n - 1)
+    efficiency = total_inv / denom if denom else 0.0
+    return {'global_efficiency': float(efficiency)}

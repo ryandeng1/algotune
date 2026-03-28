@@ -1,44 +1,48 @@
 from typing import Any, Dict, List
 
 class Solver:
-    def solve(self, problem: dict[str, Any]) -> dict[str, List[int]]:
-        """
-        Find articulation points in an undirected graph using Tarjan's algorithm.
-        """
-        n = problem['num_nodes']
-        adj = [[] for _ in range(n)]
-        for u, v in problem['edges']:
+    """
+    Find articulation points in an undirected graph using Tarjan's algorithm.
+    Complexity: O(V + E)
+    """
+
+    def solve(self, problem: Dict[str, Any]) -> Dict[str, List[int]]:
+        n: int = problem["num_nodes"]
+        edges = problem["edges"]
+
+        # Build adjacency list
+        adj: List[List[int]] = [[] for _ in range(n)]
+        for u, v in edges:
             adj[u].append(v)
             adj[v].append(u)
 
-        discovery = [0] * n
+        disc = [-1] * n   # discovery times
         low = [0] * n
-        parent = [-1] * n
+        time = 0
         ap = [False] * n
-        time = 1
 
-        def dfs(u: int):
+        def dfs(u: int, parent: int) -> None:
             nonlocal time
-            discovery[u] = low[u] = time
+            disc[u] = low[u] = time
             time += 1
             children = 0
+
             for v in adj[u]:
-                if not discovery[v]:
-                    parent[v] = u
+                if disc[v] == -1:
                     children += 1
-                    dfs(v)
-                    low[u] = low[u] if low[u] < low[v] else low[v]
-                    if parent[u] == -1 and children > 1:
+                    dfs(v, u)
+                    low[u] = min(low[u], low[v])
+
+                    if parent == -1 and children > 1:
                         ap[u] = True
-                    if parent[u] != -1 and low[v] >= discovery[u]:
+                    if parent != -1 and low[v] >= disc[u]:
                         ap[u] = True
-                elif v != parent[u]:
-                    low[u] = low[u] if low[u] < discovery[v] else discovery[v]
+                elif v != parent:
+                    low[u] = min(low[u], disc[v])
 
         for i in range(n):
-            if not discovery[i]:
-                dfs(i)
+            if disc[i] == -1:
+                dfs(i, -1)
 
-        result = [i for i, is_ap in enumerate(ap) if is_ap]
-        result.sort()
-        return {'articulation_points': result}
+        result = [i for i, flag in enumerate(ap) if flag]
+        return {"articulation_points": result}

@@ -2,38 +2,41 @@ import numpy as np
 import cvxpy as cp
 
 class Solver:
-    beta: float | None = None
-    kappa: float | None = None
+    def __init__(self):
+        self.beta = 0.95
+        self.kappa = 0.1
 
     def solve(self, problem: dict) -> dict:
         """
         Compute the projection onto the CVaR constraint set.
 
-        :param problem: Dictionary containing 'x0', 'loss_scenarios', 'beta', 'kappa'.
-        :return: Dictionary with the projected point ('x_proj').
+        :param problem: Dictionary containing the point to project, loss scenarios, and parameters
+        :return: Dictionary containing the projected point
         """
-        # Extract data
+        # Convert inputs to NumPy arrays once
         x0 = np.asarray(problem["x0"], dtype=float)
         A = np.asarray(problem["loss_scenarios"], dtype=float)
+
+        # Retrieve beta and kappa, with defaults if missing
         beta = float(problem.get("beta", self.beta))
         kappa = float(problem.get("kappa", self.kappa))
 
         n_scenarios, n_dims = A.shape
-        k = int(np.floor((1 - beta) * n_scenarios))
-        if k <= 0:
-            return {"x_proj": x0.tolist()}
-
+        k = int((1.0 - beta) * n_scenarios)
         alpha = kappa * k
 
-        # CVaR constraint: sum of largest k elements of A*x <= alpha
+        # Define the variable and objective
         x = cp.Variable(n_dims)
         objective = cp.Minimize(cp.sum_squares(x - x0))
-        constraint = cp.sum_largest(A @ x, k) <= alpha
 
-        prob = cp.Problem(objective, [constraint])
-        prob.solve(solver=cp.SCS, verbose=False, eps=1e-6)
+        # Build the CVaR constraint: sum of largest k elements of A*x <= alpha
+        constraints = [cp.sum_largest(A @ x, k) <= alpha]
 
-        if prob.status not in {cp.OPTIMAL, cp.OPTIMAL_INACCURATE} or x.value is None:
-            return {"x_proj": []}
+        # Solve the problem
+        prob = cp.Problem(objective, constraints)
+        prob.solve(solver=cp.ECOS, warm_start=True, verbose=False)
 
-        return {"x_proj": x.value.tolist()}
+        # Return the result if solved successfully, otherwise return empty list
+        if prob.status in (cp.OPTIMAL, cp.OPTIMAL_INACCURATE) and x.value is not None:
+            return {"x_proj": x.value.tolist()}
+        return {"x_proj": []}

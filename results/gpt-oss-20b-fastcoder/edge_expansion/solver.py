@@ -1,46 +1,27 @@
-from typing import Any
+from typing import Any, Dict, List, Set
 
-def solve(problem: dict[str, Any]) -> dict[str, float]:
-    """
-    Compute the directed edge expansion of the subset S in the given graph.
 
-    The edge expansion is defined as:
-        |E(S, V\S)| / |S|
-    where:
-        - E(S, V\S) is the set of directed edges with tail in S and head in the complement of S.
-        - |S| is the number of nodes in S.
+class Solver:
+    def solve(self, problem: Dict[str, Any]) -> Dict[str, float]:
+        """Compute the edge expansion of a directed graph for the given subset S."""
+        adj_list: List[List[int]] = problem["adjacency_list"]
+        nodes_s_list: List[int] = problem["nodes_S"]
 
-    If S is empty or contains all nodes, the expansion is defined to be 0.0.
+        n = len(adj_list)
+        if n == 0:
+            return {"edge_expansion": 0.0}
 
-    Parameters
-    ----------
-    problem : dict[str, Any]
-        Should contain:
-        - 'adjacency_list': a list of lists of out-neighbor indices.
-        - 'nodes_S': a list of indices representing the subset S.
+        nodes_s: Set[int] = set(nodes_s_list)
+        if not nodes_s or len(nodes_s) == n:
+            return {"edge_expansion": 0.0}
 
-    Returns
-    -------
-    dict[str, float]
-        Dictionary with a single key 'edge_expansion' mapping to the computed value.
-    """
-    adj = problem.get("adjacency_list", [])
-    nodes_S = problem.get("nodes_S", [])
+        # Count edges leaving S
+        out_edges = 0
+        for u in nodes_s:
+            for v in adj_list[u]:
+                if v not in nodes_s:
+                    out_edges += 1
 
-    n = len(adj)
-    if n == 0 or not nodes_S:
-        return {"edge_expansion": 0.0}
-
-    S_set = set(nodes_S)
-    if len(S_set) == n:
-        return {"edge_expansion": 0.0}
-
-    # Count edges from S to its complement
-    out_edges = 0
-    for u in S_set:
-        for v in adj[u]:
-            if v not in S_set:
-                out_edges += 1
-
-    expansion = out_edges / len(S_set)
-    return {"edge_expansion": float(expansion)}
+        # Edge expansion: |∂S| / |S|
+        expansion = out_edges / len(nodes_s)
+        return {"edge_expansion": float(expansion)}

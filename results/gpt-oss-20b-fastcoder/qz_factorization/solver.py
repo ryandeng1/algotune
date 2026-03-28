@@ -1,25 +1,27 @@
-from typing import Any
 import numpy as np
 from scipy.linalg import qz
 
-class Solver:
-    def solve(self, problem: dict[str, list[list[float]]]) -> dict[str, dict[str, list[list[float | complex]]]]:
-        """
-        Compute the QZ factorization of a pair of real matrices (A, B) using
-        ``scipy.linalg.qz`` with ``output='real'``.
-        """
-        A = np.array(problem['A'], dtype=float, copy=False)
-        B = np.array(problem['B'], dtype=float, copy=False)
+def solve(problem: dict[str, list[list[float]]]) -> dict[str, dict[str, list[list[float | complex]]]]:
+    """
+    Compute the real QZ factorization of (A, B):
+        A = Q @ AA @ Z.T
+        B = Q @ BB @ Z.T
+    The inputs are lists of lists; the output is nested lists as required by the
+    specification.
+    """
+    # Convert inputs to NumPy arrays in a single call for speed
+    A = np.array(problem["A"], dtype=float, copy=False)
+    B = np.array(problem["B"], dtype=float, copy=False)
 
-        # Compute factorization
-        AA, BB, Q, Z = qz(A, B, output='real')
+    # Perform the QZ factorization
+    AA, BB, Q, Z = qz(A, B, output="real")
 
-        # Convert to plain Python lists for the expected return format
-        return {
-            'QZ': {
-                'AA': AA.tolist(),
-                'BB': BB.tolist(),
-                'Q': Q.tolist(),
-                'Z':   Z.tolist()
-            }
+    # Convert the results back to plain Python lists
+    return {
+        "QZ": {
+            "AA": AA.tolist(),
+            "BB": BB.tolist(),
+            "Q": Q.tolist(),
+            "Z": Z.tolist(),
         }
+    }

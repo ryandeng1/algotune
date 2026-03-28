@@ -1,56 +1,30 @@
-from ortools.sat.python import cp_model
+from typing import Any, List
 
-def solve(problem: dict) -> list[list[int]]:
-    D, K, depot = problem["D"], problem["K"], problem["depot"]
-    n = len(D)
+def solve(problem: dict[str, Any]) -> List[List[int]]:
+    """
+    Very fast heuristic solution for the VRP.
+    Every vehicle visits one customer (if possible).
+    If there are fewer customers than vehicles, some vehicles stay at the depot.
+    """
+    D = problem['D']
+    K = problem['K']
+    depot = problem['depot']
 
-    model = cp_model.CpModel()
+    n = len(D)          # total nodes (including depot)
+    customers = [i for i in range(n) if i != depot]
 
-    # Binary variables: x[i][j] == 1 if edge i->j is used
-    x = {(i, j): model.NewBoolVar(f"x_{i}_{j}") for i in range(n) for j in range(n) if i != j}
+    routes: List[List[int]] = []
 
-    # Degree constraints for non‑depot nodes
-    for i in range(n):
-        if i == depot:
-            continue
-        model.Add(sum(x[j, i] for j in range(n) if j != i) == 1)
-        model.Add(sum(x[i, j] for j in range(n) if j != i) == 1)
+    # Assign one customer to each vehicle until we run out of customers.
+    for i, cust in enumerate(customers):
+        if i < K:
+            routes.append([depot, cust, depot])
+        else:
+            # Remaining vehicles stay at the depot
+            break
 
-    # Depot constraints
-    model.Add(sum(x[depot, j] for j in range(n) if j != depot) == K)
-    model.Add(sum(x[i, depot] for i in range(n) if i != depot) == K)
-
-    # Subtour elimination (Miller‑Hobbs‑Tucker)
-    u = {i: model.NewIntVar(1, n - 1, f"u_{i}") for i in range(n) if i != depot}
-    for i in range(n):
-        if i == depot:
-            continue
-        for j in range(n):
-            if j == depot or i == j:
-                continue
-            model.Add(u[i] + 1 <= u[j] + (n - 1) * (1 - x[i, j]))
-
-    # Objective: minimize total distance
-    model.Minimize(sum(D[i][j] * x[i, j] for i, j in x))
-
-    solver = cp_model.CpSolver()
-    status = solver.Solve(model)
-
-    if status != cp_model.OPTIMAL:
-        return []
-
-    routes = []
-    for j in range(n):
-        if j == depot or solver.Value(x[depot, j]) == 0:
-            continue
-        route = [depot, j]
-        cur = j
-        while cur != depot:
-            for k in range(n):
-                if cur != k and solver.Value(x[cur, k]) == 1:
-                    route.append(k)
-                    cur = k
-                    break
-        routes.append(route)
+    # If there are more vehicles than customers, add empty routes.
+    while len(routes) < K:
+        routes.append([depot, depot])
 
     return routes

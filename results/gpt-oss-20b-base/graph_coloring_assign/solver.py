@@ -1,44 +1,49 @@
-def solve(self, problem: list[list[int]]) -> list[int]:
+def solve(problem: list[list[int]]) -> list[int]:
     """
-    Fast graph coloring using a DSATUR (Degree of Saturation) heuristic.
+    Fast heuristic graph coloring for a 0-1 adjacency matrix.
 
-    :param problem: 2D adjacency matrix of the graph.
-    :return: A list of colors (1‑based) for each vertex.
+    The algorithm uses the Welsh–Powell ordering (descending degree)
+    followed by a basic greedy color assignment.  This is much faster
+    than the previous CP‑SAT approach while still producing a valid
+    coloring using a small number of colors.
+
+    :param problem: 2‑D list representing the adjacency matrix of a graph
+    :return: List of colors (1‑based) for each vertex
     """
     n = len(problem)
-    # Build adjacency lists
-    neigh = [set() for _ in range(n)]
+    if n == 0:
+        return []
+
+    # Build adjacency lists and compute degrees
+    adjacency: list[list[int]] = [[] for _ in range(n)]
+    degree = [0] * n
     for i in range(n):
         row = problem[i]
-        for j, val in enumerate(row):
-            if val and i != j:
-                neigh[i].add(j)
+        for j in range(i + 1, n):
+            if row[j]:
+                adjacency[i].append(j)
+                adjacency[j].append(i)
+                degree[i] += 1
+                degree[j] += 1
 
-    # DSATUR algorithm
-    uncolored = set(range(n))
-    color_of = [0] * n
-    sat_degree = [0] * n          # number of different colors in neighbors
-    neighbor_colors = [set() for _ in range(n)]
+    # Welsh–Powell ordering: sort by decreasing degree
+    order = sorted(range(n), key=lambda v: -degree[v])
 
-    while uncolored:
-        # choose vertex with highest saturation degree, break ties by highest node degree
-        v = max(uncolored, key=lambda x: (sat_degree[x], len(neigh[x])))
-        # assign the smallest available color
-        used = set(color_of[u] for u in neigh[v] if color_of[u])
-        new_color = 1
-        while new_color in used:
-            new_color += 1
-        color_of[v] = new_color
-        uncolored.remove(v)
+    colors = [0] * n
+    for v in order:
+        # Determine colors used by neighbors
+        used = 0
+        for u in adjacency[v]:
+            c = colors[u]
+            if c:
+                used |= 1 << (c - 1)
 
-        # update saturation of neighbors
-        for u in neigh[v]:
-            if color_of[u] == 0:
-                if new_color not in neighbor_colors[u]:
-                    neighbor_colors[u].add(new_color)
-                    sat_degree[u] = len(neighbor_colors[u])
+        # Find the first available color (smallest unused)
+        color = 1
+        mask = 1
+        while used & mask:
+            color += 1
+            mask <<= 1
+        colors[v] = color
 
-    # remap colors to be consecutive starting at 1
-    distinct = sorted(set(color_of))
-    remap = {c: i + 1 for i, c in enumerate(distinct)}
-    return [remap[c] for c in color_of]
+    return colors

@@ -1,46 +1,38 @@
 import math
-from typing import Dict
+from collections import defaultdict
 
 class Solver:
-    def solve(self, problem: Dict[str, int]) -> Dict[str, int]:
-        """
-        Solve the discrete logarithm problem g^x ≡ h (mod p)
-        using the Baby‑Step Giant‑Step algorithm.
-        The function returns a dictionary with the key "x" set to the
-        smallest non‑negative solution.
-        """
-        p = problem["p"]
-        g = problem["g"]
-        h = problem["h"]
+    """Fast baby‑step giant‑step discrete logarithm solver."""
 
-        # Trivial cases
+    def solve(self, problem: dict[str, int]) -> dict[str, int]:
+        """Return x such that g**x ≡ h (mod p)."""
+        p, g, h = problem["p"], problem["g"], problem["h"]
+
+        # Special cases
         if h % p == 1:
             return {"x": 0}
         if g % p == 0:
-            # g == 0 modulo p only works if h == 0
-            return {"x": 1 if h % p == 0 else -1}
+            return {"x": 1}  # only possible when h ≡ 0 (mod p)
 
-        # Find m = ceil(sqrt(p-1)) for the algorithm
-        m = math.isqrt(p - 1) + 1
+        m = int(math.isqrt(p - 1)) + 1
 
-        # Baby steps: store g^j for j in [0, m-1]
+        # Baby steps: g^j mod p, j = 0 .. m-1
         baby = {}
         cur = 1
         for j in range(m):
-            if cur not in baby:
+            if cur not in baby:          # keep the smallest exponent
                 baby[cur] = j
             cur = (cur * g) % p
 
-        # Compute g^{-m} modulo p
-        inv_g_m = pow(g, (p - 1) - (m % (p - 1)), p)
+        # Compute g^{-m} mod p
+        inv_g = pow(g, p - 2, p)          # Fermat's little theorem
+        factor = pow(inv_g, m, p)
 
-        # Giant steps
-        gamma = h % p
+        cur = h
         for i in range(m):
-            if gamma in baby:
-                x = i * m + baby[gamma]
-                return {"x": x}
-            gamma = (gamma * inv_g_m) % p
+            if cur in baby:
+                return {"x": i * m + baby[cur]}
+            cur = (cur * factor) % p
 
-        # No solution found (should not happen for prime modulus with primitive root)
-        return {"x": -1}
+        # No solution found
+        return {"x": None}

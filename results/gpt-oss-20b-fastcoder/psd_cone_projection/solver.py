@@ -1,19 +1,18 @@
-import numpy as np
 from typing import Any, Dict
+import numpy as np
 
 class Solver:
-    """Fast projection of a symmetric matrix onto the PSD cone."""
     def solve(self, problem: Dict[str, np.ndarray]) -> Dict[str, Any]:
-        # Use eigh (optimal for symmetric matrices) and avoid unnecessary copies
-        A = problem["A"]
+        """
+        Project a symmetric matrix onto the positive semidefinite cone by
+        clamping negative eigenvalues to zero.
+        """
+        A = np.asarray(problem["A"], dtype=float)
+        # Since A is symmetric, use eigh for better performance and stability.
         eigvals, eigvecs = np.linalg.eigh(A)
-
-        # Zero out negative eigenvalues in-place for speed
-        eigvals[eigvals < 0] = 0.0
-
-        # Scale eigenvectors by the eigenvalues
-        # This uses broadcasting and eliminates an explicit diag matrix
-        proj = eigvecs * eigvals
-        X = proj @ eigvecs.T
-
+        # Clamp negative eigenvalues to zero.
+        eigvals = np.clip(eigvals, 0, None)
+        # Reconstruct the projected matrix without forming a diagonal matrix.
+        # (eigvecs @ (eigvecs.T * eigvals)) is equivalent to V @ diag(eigvals) @ V.T
+        X = eigvecs @ (eigvecs.T * eigvals)
         return {"X": X}

@@ -1,34 +1,53 @@
 import numpy as np
-from sklearn.cluster import SpectralClustering
+from numpy.linalg import eigh
+from sklearn.cluster import KMeans
 
 class Solver:
-    def solve(self, problem: dict[str, any]) -> dict[str, any]:
-        sm = problem["similarity_matrix"]
+    def solve(self, problem: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
+        """
+        Fast spectral clustering using NumPy and scikit‑learn's KMeans.
+
+        Parameters
+        ----------
+        problem : dict
+            Must contain:
+                - 'similarity_matrix' : square numpy array
+                - 'n_clusters'       : positive integer
+
+        Returns
+        -------
+        dict
+            {'labels': labels_array}
+        """
+        W = problem["similarity_matrix"]
         k = problem["n_clusters"]
 
-        # Basic validation
-        if not isinstance(sm, np.ndarray) or sm.ndim != 2 or sm.shape[0] != sm.shape[1]:
-            raise ValueError("similarity_matrix must be a square 2‑D numpy array")
-        if not isinstance(k, int) or k < 1:
-            raise ValueError("n_clusters must be a positive integer")
-
-        n = sm.shape[0]
+        n = W.shape[0]
         if n == 0:
-            return {"labels": np.array([], dtype=int)}
+            return {"labels": np.empty((0,), dtype=int)}
+
+        # Sanity checks (minimal)
+        if W.shape[0] != W.shape[1] or k < 1:
+            raise ValueError("Invalid input")
+
         if k >= n:
             return {"labels": np.arange(n)}
 
-        # Spectral clustering with minimal overhead
-        model = SpectralClustering(
-            n_clusters=k,
-            affinity="precomputed",
-            assign_labels="kmeans",
-            random_state=42,
-            n_init=1  # reduce random initialisations
-        )
-        try:
-            labels = model.fit_predict(sm)
-        except Exception:
-            labels = np.zeros(n, dtype=int)
+        # Construct unnormalized Laplacian L = D - W
+        D = np.sum(W, axis=1)
+        L = np.diag(D) - W
+
+        # Compute first k eigenvectors of L
+        # eigh returns ascending order
+        _, eigvecs = eigh(L, subset_by_index=[0, k-1])
+        # normalize rows to unit length (for consistency)
+        norm = np.linalg.norm(eigvecs, axis=1, keepdims=True)
+        norm[norm == 0] = 1
+        X = eigvecs / norm
+
+        # k-means clustering on the eigenvector embedding
+        # Use deterministic seed for reproducibility
+        km = KMeans(n_clusters=k, n_init=10, random_state=42, algorithm='elkan')
+        labels = km.fit_predict(X)
 
         return {"labels": labels}

@@ -1,34 +1,47 @@
 import numpy as np
 
-def solve(problem: dict):
+def solve(problem):
     alpha = np.asarray(problem['alpha'], dtype=float)
-    P_total = float(problem.get('P_total', 0.0))
+    P_total = float(problem['P_total'])
     n = alpha.size
 
-    # Basic validation
+    # Quick checks
     if n == 0 or P_total <= 0 or not np.all(alpha > 0):
         return {'x': [float('nan')] * n, 'Capacity': float('nan')}
 
-    # Binary search for lambda such that sum(max(0, 1/lambda - alpha)) = P_total
-    # lambdas > 0
-    lo, hi = 1e-12, max(1.0 / (alpha + 1e-12))  # upper bound when P_total=0
-    # Ensure hi is large enough
-    while True:
-        mid = (lo + hi) / 2.0
-        x = np.where(alpha < 1.0 / mid, 1.0 / mid - alpha, 0.0)
-        s = x.sum()
-        if s > P_total:
-            lo = mid
-        else:
-            hi = mid
-        if hi - lo < 1e-14:
-            break
-    lam = (lo + hi) / 2.0
-    x = np.where(alpha < 1.0 / lam, 1.0 / lam - alpha, 0.0)
-    # Normalize to P_total in case of numerical drift
-    s = x.sum()
-    if s > 1e-12:
-        x = x * (P_total / s)
+    # Water-filling style solution (KKT for maximizing sum log(alpha + x))
+    # sort alphas and remember original indices
+    idx = np.argsort(alpha)
+    alpha_sorted = alpha[idx]
+    cum_alpha = np.cumsum(alpha_sorted)
 
-    capacity = np.sum(np.log(alpha + x))
-    return {'x': x.tolist(), 'Capacity': float(capacity)}
+    # Find the largest k such that the corresponding lambda <= 1/alpha_k
+    sol = None
+    for k in range(1, n + 1):
+        lambda_val = k / (P_total + cum_alpha[k - 1])
+        if lambda_val <= 1.0 / alpha_sorted[k - 1]:
+            x_temp = 1.0 / lambda_val - alpha_sorted
+            # other entries beyond k are zero
+            x_temp[k:] = 0.0
+            sol = x_temp
+            break
+
+    if sol is None:
+        # All entries saturated to zero if lambda too large
+        sol = np.zeros(n)
+
+    # Restore to original order
+    x = np.empty_like(sol)
+    x[idx] = sol
+
+    # Ensure feasibility (numerical robustness)
+    x = np.maximum(x, 0.0)
+    x = x * P_total / np.maximum(np.sum(x), 1e-12)
+
+    # Compute capacity
+    if np.any(np.isnan(x)) or np.any(np.isinf(x)):
+        capacity = float('nan')
+    else:
+        capacity = float(np.sum(np.log(alpha + x)))
+
+    return {'x': x.tolist(), 'Capacity': capacity}

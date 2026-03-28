@@ -1,27 +1,21 @@
 import numpy as np
-from scipy.linalg import eigvals
+import scipy.linalg as la
 from numpy.typing import NDArray
 
 class Solver:
     def solve(self, problem: tuple[NDArray, NDArray]) -> list[complex]:
         """
-        Solve the generalized eigenvalue problem A·x = λ B·x for real matrices A and B.
-        The eigenvalues are returned sorted by descending real part, then descending
-        imaginary part.
+        Solve the generalized eigenvalue problem for the given matrices A and B.
+
+        The problem is defined as: A · x = λ B · x.
+        Eigenvalues are computed directly from ``scipy.linalg.eigvals`` for better speed.
+        The result list is sorted in descending order by real part, then imaginary part.
+
+        :param problem: Tuple (A, B) with n × n real matrices.
+        :return: Sorted list of eigenvalues (complex numbers).
         """
         A, B = problem
-
-        # Scale both matrices with the Frobenius norm of B for stability.
-        scale_B = np.linalg.norm(B, ord='fro')
-        if scale_B == 0:
-            # In case B is zero we fall back on the ordinary eigenvalue problem.
-            eig = np.linalg.eigvals(A)
-        else:
-            factor = 1.0 / scale_B
-            A_s = A * factor
-            B_s = B * factor
-            eig = eigvals(A_s, B_s, check_finite=True)
-
-        # Sort by real part descending, then imaginary part descending.
-        inds = np.lexsort((-eig.imag, -eig.real))
-        return eig[inds].tolist()
+        # Compute only eigenvalues of the generalized problem.
+        eigenvalues = la.eigvals(A, B)
+        # Sort by descending real part, then descending imaginary part.
+        return sorted(eigenvalues.tolist(), key=lambda x: (-x.real, -x.imag))

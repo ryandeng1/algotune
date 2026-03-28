@@ -1,47 +1,48 @@
-# Optimised `solve` implementation
-from typing import Any
 import numpy as np
-from scipy.linalg import lu_factor, lu_solve
 
 class Solver:
-    def solve(self, problem: dict[str, np.ndarray]) -> dict[str, dict[str, list[list[float]]]]:
+    """Fast LU decomposition without external heavy libraries."""
+
+    @staticmethod
+    def _lu_factor(A: np.ndarray):
         """
-        Solve an LU factorisation problem using scipy's `lu_factor` for speed.
-        Calculates the decomposition A = P @ L @ U where:
-          - P: permutation matrix (expressed as a 2‑D list)
-          - L: lower triangular matrix with unit diagonal (2‑D list)
-          - U: upper triangular matrix (2‑D list)
-
-        Parameters
-        ----------
-        problem : dict
-            Must contain a key 'matrix' with a 2‑D np.ndarray.
-
-        Returns
-        -------
-        dict
-            Nested dictionary structure containing the decomposition.
+        Computes the LU decomposition with partial pivoting using only NumPy.
+        Returns P (permutation matrix), L, and U as NumPy arrays.
         """
-        A = problem["matrix"]
-
-        # Use LU factorisation with partial pivoting
-        lu, piv = lu_factor(A)
-
-        # Construct permutation matrix P from pivot indices
         n = A.shape[0]
-        P = np.eye(n, dtype=lu.dtype)
-        for i, pi in enumerate(piv):
-            if pi != i:
-                P[[i, pi]] = P[[pi, i]]
+        U = A.copy().astype(float)
+        L = np.eye(n, dtype=float)
+        P = np.eye(n, dtype=float)
 
-        # Extract L (unit diagonal) and U (upper triangular)
-        L = np.tril(lu, k=-1) + np.eye(n, dtype=lu.dtype)
-        U = np.triu(lu)
+        for k in range(n):
+            # Pivot selection
+            pivot = np.argmax(np.abs(U[k:, k])) + k
+            if pivot != k:
+                # Swap rows in U
+                U[[k, pivot], :] = U[[pivot, k], :]
+                # Swap rows in P
+                P[[k, pivot], :] = P[[pivot, k], :]
+                if k > 0:
+                    # Swap rows in L but only columns before k
+                    L[[k, pivot], :k] = L[[pivot, k], :k]
 
+            pivot_val = U[k, k]
+            if abs(pivot_val) < 1e-14:  # Handle zero pivot
+                continue
+            # Compute multipliers
+            L[k + 1 : n, k] = U[k + 1 : n, k] / pivot_val
+            # Eliminate below
+            U[k + 1 : n, k + 1 :] -= L[k + 1 : n, k][:, None] * U[k, k + 1 :]
+
+        return P, L, U
+
+    def solve(self, problem: dict[str, np.ndarray]) -> dict[str, dict[str, list[list[float]]]]:
+        A = problem["matrix"]
+        P, L, U = self._lu_factor(A)
         return {
             "LU": {
                 "P": P.tolist(),
                 "L": L.tolist(),
-                "U": U.tolist(),
+                "U": U.tolist()
             }
         }

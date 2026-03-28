@@ -1,17 +1,13 @@
 import numpy as np
 
-def solve(problem: dict[str, list[list[float]]]) -> list[float]:
-    """
-    Return the two eigenvalues of the given symmetric matrix that are
-    closest to zero by absolute value.
-    """
-    # Convert to a numpy array (dtype float32 for speed if not needed precision)
-    matrix = np.asarray(problem["matrix"], dtype=np.float32, order="K")
-    # Compute all eigenvalues (efficient for symmetric matrices)
-    eig_vals = np.linalg.eigvalsh(matrix)
-    # Find indices of the two smallest absolute eigenvalues without full sort
-    idx_small = np.argpartition(np.abs(eig_vals), 2)[:2]
-    # Extract and sort those two eigenvalues by absolute value
-    res = eig_vals[idx_small]
-    res_sorted = res[np.argsort(np.abs(res))]
-    return res_sorted.tolist()
+class Solver:
+    def solve(self, problem: dict[str, list[list[float]]]) -> list[float]:
+        """Return the two eigenvalues of the symmetric matrix closest to zero."""
+        # convert to a contiguous float array
+        matrix = np.asarray(problem["matrix"], dtype=float)
+        # compute all eigenvalues (sorted by value, not by absolute value)
+        eigs = np.linalg.eigvalsh(matrix)
+        # find the indices of the two eigenvalues with the smallest absolute values
+        idx = np.argpartition(np.abs(eigs), 2)[:2]
+        # retrieve and sort them by absolute value
+        return sorted(eigs[idx], key=lambda x: abs(x))

@@ -1,45 +1,48 @@
+from collections import defaultdict
 from ortools.sat.python import cp_model
-from typing import NamedTuple, Iterable, List, Tuple, Union
+from typing import NamedTuple
 
 class Instance(NamedTuple):
     n: int
-    sets: List[List[int]]
-    conflicts: List[List[int]]
+    sets: list[list[int]]
+    conflicts: list[list[int]]
 
 class Solver:
-    def solve(self, problem: Union[Instance, Tuple[int, List[List[int]], List[List[int]]]]) -> List[int]:
+    def solve(self, problem: Instance | tuple) -> list[int] | None:
+        """
+        Solve the set cover with conflicts problem.
+
+        Returns a list of selected set indices or None if no solution exists.
+        """
         if not isinstance(problem, Instance):
             problem = Instance(*problem)
-
         n, sets, conflicts = problem
-        m = len(sets)
 
-        # Pre-compute which sets cover each object
-        covers: List[List[int]] = [[] for _ in range(n)]
-        for i, s in enumerate(sets):
+        # Precompute which sets cover each object
+        obj_to_sets = [[] for _ in range(n)]
+        for idx, s in enumerate(sets):
             for obj in s:
-                covers[obj].append(i)
+                obj_to_sets[obj].append(idx)
 
         model = cp_model.CpModel()
-        set_vars = [model.NewBoolVar(f'set_{i}') for i in range(m)]
-
-        # Coverage constraints
-        for obj_covers in covers:
-            if obj_covers:  # avoid empty
-                model.Add(sum(set_vars[i] for i in obj_covers) >= 1)
-
+        set_vars = [model.NewBoolVar(f'set_{i}') for i in range(len(sets))]
+        # Cover constraints
+        for obj, sup in enumerate(obj_to_sets):
+            if sys.getsizeof(sup) == 0:
+                return None  # impossible to cover
+            model.Add(sum(set_vars[i] for i in sup) >= 1)
         # Conflict constraints
-        for conflict in conflicts:
-            if len(conflict) > 1:
-                model.AddAtMostOne(set_vars[i] for i in conflict)
+        for conf in conflicts:
+            if len(conf) <= 1:
+                continue
+            model.AddAtMostOne([set_vars[i] for i in conf])
 
         model.Minimize(sum(set_vars))
 
         solver = cp_model.CpSolver()
-        solver.parameters.max_time_in_seconds = 60.0
-        solver.parameters.num_search_workers = 8
-
+        solver.parameters.random_seed = 0  # reproducible
         status = solver.Solve(model)
+
         if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-            return [i for i in range(m) if solver.Value(set_vars[i])]
-        raise ValueError('No feasible solution found.')
+            return [i for i, v in enumerate(set_vars) if solver.Value(v)]
+        return None

@@ -1,18 +1,22 @@
-import numpy as np
 from typing import Any, Dict
+import numpy as np
 
 class Solver:
     def solve(self, problem: Dict[str, np.ndarray]) -> Dict[str, Any]:
         """
-        Projects a symmetric matrix A onto the cone of positive semi‑definite matrices.
+        Efficiently projects the symmetric matrix A onto the positive semidefinite cone.
         """
-        # Ensure we have a NumPy array (copy if needed)
-        A = np.asarray(problem["A"])
-        # Use the efficient Hermitian eigendecomposition
+        # Ensure A is a contiguous float64 array
+        A = np.asarray(problem["A"], dtype=np.float64, order="C")
+
+        # Solve symmetric eigenvalue problem (cheaper than general eig)
         eigvals, eigvecs = np.linalg.eigh(A)
-        # Set negative eigenvalues to zero (projection onto PSD)
-        eigvals = np.where(eigvals > 0, eigvals, 0.0)
-        # Reconstruct the projected matrix: V * diag(eigvals) * V^T
-        # Avoid constructing an explicit diagonal matrix
-        X = (eigvecs * eigvals) @ eigvecs.T
+
+        # Zero out negative eigenvalues (in-place for speed)
+        np.maximum(eigvals, 0, out=eigvals)
+
+        # Reconstruct X = V * Λ * V^T efficiently:
+        #   (V * Λ) @ V^T   where multiplication is element‑wise
+        X = (eigvecs * eigvals).dot(eigvecs.T)
+
         return {"X": X}

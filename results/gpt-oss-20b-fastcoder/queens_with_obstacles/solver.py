@@ -1,77 +1,97 @@
 import numpy as np
-from functools import lru_cache
-from typing import List, Tuple
+from ortools.sat.python import cp_model
 
-def _bit_positions(bits: int, n: int, m: int) -> List[Tuple[int, int]]:
-    """Return list of (row, col) for set bits in flattened board."""
-    pos = []
-    idx = 0
-    while bits:
-        t = bits & -bits
-        r = idx + (t.bit_length() - 1)
-        pos.append((r // m, r % m))
-        idx += t.bit_length()
-        bits ^= t
-    return pos
-
-def solve(problem: np.ndarray) -> List[Tuple[int, int]]:
+def solver(problem: np.ndarray) -> list[tuple[int, int]]:
     """
-    Solve the Queens with Obstacles Problem using a fast recursive search
-    with bit masks. The board is flattened into a single integer bit mask
-    where a 1-bit represents an *available* square (not an obstacle).
+    Solve the maximum independent set on the chessboard graph where edges connect
+    two cells on the same row, column or diagonal without an obstacle between them.
+
+    Parameters
+    ----------
+    problem : np.ndarray
+        Boolean grid: 0 for empty, 1 for obstacle.
+
+    Returns
+    -------
+    list[tuple[int, int]]
+        Positions of queens in an optimal placement.
     """
     n, m = problem.shape
-    all_mask = 0
-    for r in range(n):
-        for c in range(m):
-            if not problem[r, c]:
-                all_mask |= 1 << (r * m + c)
+    model = cp_model.CpModel()
 
-    # Pre‑compute attack masks for every position
-    attack = {}
-    directions = [(-1, -1), (-1, 0), (-1, 1),
-                  (0, -1),          (0, 1),
-                  (1, -1),  (1, 0), (1, 1)]
+    # Boolean variables for each cell
+    queens = [[model.NewBoolVar(f'q_{r}_{c}') for c in range(m)] for r in range(n)]
+
+    # Impose zero on obstacle cells
     for r in range(n):
         for c in range(m):
             if problem[r, c]:
-                continue
-            mask = 0
-            for dr, dc in directions:
-                nr, nc = r + dr, c + dc
-                while 0 <= nr < n and 0 <= nc < m:
-                    if problem[nr, nc]:
-                        break
-                    mask |= 1 << (nr * m + nc)
-                    nr += dr
-                    nc += dc
-            attack[r * m + c] = mask
+                model.Add(queens[r][c] == 0)
 
-    @lru_cache(maxsize=None)
-    def dfs(available: int) -> Tuple[int, int]:
-        """Return (best_count, best_mask) for the given available squares."""
-        if available == 0:
-            return 0, 0
+    # Helper to add "at most one" constraints along segments
+    def add_at_most_one(indices):
+        if indices:
+            vars_ = [queens[i] for i in indices]
+            model.Add(sum(vars_) <= 1)
 
-        # Choose first available square as a pivot
-        pivot = (available & -available).bit_length() - 1
-        best_cnt, best = 0, 0
+    # Rows
+    for r in range(n):
+        seg = []
+        for c in range(m):
+            if problem[r, c]:
+                add_at_most_one(seg)
+                seg = []
+            else:
+                seg.append((r, c))
+        add_at_most_one(seg)
 
-        # Branch 1: put queen at pivot
-        new_avail = available & ~((1 << pivot) | attack[pivot])
-        cnt1, mask1 = dfs(new_avail)
-        cnt1 += 1
-        mask1 |= 1 << pivot
-        if cnt1 > best_cnt:
-            best_cnt, best = cnt1, mask1
+    # Columns
+    for c in range(m):
+        seg = []
+        for r in range(n):
+            if problem[r, c]:
+                add_at_most_one(seg)
+                seg = []
+            else:
+                seg.append((r, c))
+        add_at_most_one(seg)
 
-        # Branch 2: skip pivot
-        new_avail = available & ~(1 << pivot)
-        cnt2, mask2 = dfs(new_avail)
-        if cnt2 > best_cnt:
-            best_cnt, best = cnt2, mask2
+    # Diagonals (top-left to bottom-right)
+    for k in range(-n + 1, m):
+        seg = []
+        for r in range(n):
+            c = r + k
+            if 0 <= c < m:
+                if problem[r, c]:
+                    add_at_most_one(seg)
+                    seg = []
+                else:
+                    seg.append((r, c))
+        add_at_most_one(seg)
 
-        return best_cnt, best
+    # Anti-diagonals (top-right to bottom-left)
+    for k in range(n + m - 1):
+        seg = []
+        for r in range(n):
+            c = k - r
+            if 0 <= c < m:
+                if problem[r, c]:
+                    add_at_most_one(seg)
+                    seg = []
+                else:
+                    seg.append((r, c))
+        add_at_most_one(seg)
 
-    _, bestmask = dfs(all_mask)
-    return _bit_positions(bestmask, n, m)
+    # Objective: maximize number of queens
+    model.Maximize(sum(queens[r][c] for r in range(n) for c in range(m)))
+
+    # Solve
+    solver = cp_model.CpSolver()
+    solver.parameters.max_time_in_seconds = 30.0
+    status = solver.Solve(model)
+
+    if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+        return [(r, c) for r in range(n) for c in range(m) if solver.Value(queens[r][c])]
+    return []
+
+# Example usage:  solve(np.array([[0,0,1],[0,0,0],[1,0,0]]))

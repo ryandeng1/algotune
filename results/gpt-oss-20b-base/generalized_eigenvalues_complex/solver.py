@@ -1,25 +1,25 @@
 import numpy as np
-from typing import Any, List, Tuple
+import scipy.linalg as la
 from numpy.typing import NDArray
 
 class Solver:
-    def solve(self, problem: Tuple[NDArray[np.float64], NDArray[np.float64]]) -> List[complex]:
+    def solve(self, problem: tuple[NDArray, NDArray]) -> list[complex]:
         """
-        Solve the generalized eigenvalue problem A·x = λ B·x for real matrices A and B.
-        Returns the eigenvalues sorted by descending real part, then by descending imaginary part.
+        Solve the generalized eigenvalue problem A · x = λ B · x.
+
+        The solution is a list of eigenvalues sorted first by real part,
+        then by imaginary part, both in descending order.
         """
         A, B = problem
-        # Scale B and A by the Frobenius norm of B for numerical stability.
-        scale = np.linalg.norm(B, ord='fro')
-        if scale == 0:
-            scale = 1.0
-        A_scaled = A / scale
+        # Scale matrices to improve numerical stability
+        scale = np.linalg.norm(B) ** 0.5
         B_scaled = B / scale
+        A_scaled = A / scale
 
-        # Solve the generalized eigenvalue problem using NumPy's linear algebra routine.
-        eigvals, _ = np.linalg.eig(A_scaled, B_scaled)
+        # Compute eigenvalues
+        eigs, _ = la.eig(A_scaled, B_scaled)
 
-        # Sort by real part descending, then imaginary part descending.
-        # Negative values are used for descending order.
-        idx = np.lexsort((-eigvals.imag, -eigvals.real))
-        return list(eigvals[idx])
+        # Efficiently sort by real part descending, then imaginary part descending
+        # `np.lexsort` sorts by the last key first, so we provide (-imag, -real)
+        idx = np.lexsort((-eigs.imag, -eigs.real))
+        return eigs[idx].tolist()

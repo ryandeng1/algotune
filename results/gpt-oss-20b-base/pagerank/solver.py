@@ -1,40 +1,70 @@
-def solve(problem: dict[str, list[list[int]]]) -> dict[str, list[float]]:
-    # PageRank implementation (power iteration, without networkx)
-    adj = problem['adjacency_list']
-    n = len(adj)
-    if n == 0:
-        return {'pagerank_scores': []}
-    if n == 1:
-        return {'pagerank_scores': [1.0]}
+from typing import List, Dict
 
-    # Build out‑degree and incoming edges for each node
-    out_deg = [len(lst) for lst in adj]
-    incoming = [[] for _ in range(n)]
-    for u, neigh in enumerate(adj):
-        for v in neigh:
-            incoming[v].append(u)
+class Solver:
+    def __init__(self):
+        self.alpha = 0.85
+        self.max_iter = 100
+        self.tol = 1e-06
 
-    alpha = getattr(solve, "alpha", 0.85)   # damping factor
-    max_iter = getattr(solve, "max_iter", 100)
-    tol = getattr(solve, "tol", 1e-6)
+    def solve(self, problem: Dict[str, List[List[int]]]) -> Dict[str, List[float]]:
+        """
+        Calculate PageRank scores for the directed graph specified by an adjacency list,
+        without using NetworkX.  The algorithm is a standard power‑iteration
+        implementation with a damping factor.
 
-    # Initial rank vector (uniform)
-    rank = [1.0 / n] * n
-    teleport = (1.0 - alpha) / n
+        Parameters
+        ----------
+        problem : dict
+            {"adjacency_list": adj_list}
+        Returns
+        -------
+        dict
+            {"pagerank_scores": [score0, score1, ...]}
+        """
+        adj_list: List[List[int]] = problem["adjacency_list"]
+        n: int = len(adj_list)
 
-    for _ in range(max_iter):
-        new_rank = [teleport] * n
-        # Expected score from incoming edges
-        for v in range(n):
-            s = 0.0
-            for u in incoming[v]:
-                s += rank[u] / out_deg[u] if out_deg[u] else 0.0
-            new_rank[v] += alpha * s
-        # Check convergence
-        diff = sum(abs(new_rank[i] - rank[i]) for i in range(n))
-        if diff < tol:
-            break
-        rank = new_rank
+        # Trivial cases
+        if n == 0:
+            return {"pagerank_scores": []}
+        if n == 1:
+            return {"pagerank_scores": [1.0]}
 
-    # Ensure each score is a Python float
-    return {'pagerank_scores': [float(r) for r in rank]}
+        # Pre‑compute outgoing‑link counts for efficiency
+        out_counts = [len(neigh) for neigh in adj_list]
+        # Create reverse adjacency list: inbound neighbors for each node
+        inbound = [[] for _ in range(n)]
+        for u, neigh in enumerate(adj_list):
+            for v in neigh:
+                if 0 <= v < n:          # ignore dangling references
+                    inbound[v].append(u)
+
+        # Initialise rank uniformly
+        vec = [1.0 / n] * n
+        new_vec = [0.0] * n
+        teleport = (1.0 - self.alpha) / n
+
+        for _ in range(self.max_iter):
+            # Reset new_vec
+            for i in range(n):
+                new_vec[i] = teleport
+
+            # Contributions from inbound edges
+            for v in range(n):
+                if out_counts[v] == 0:
+                    # dangling node: distribute its rank uniformly
+                    for i in range(n):
+                        new_vec[i] += self.alpha * vec[v] / n
+                    continue
+                share = self.alpha * vec[v] / out_counts[v]
+                for u in inbound[v]:
+                    new_vec[u] += share
+
+            # Check convergence
+            diff = sum(abs(new_vec[i] - vec[i]) for i in range(n))
+            if diff < self.tol:
+                vec, new_vec = new_vec, vec
+                break
+            vec, new_vec = new_vec, vec
+
+        return {"pagerank_scores": vec}
