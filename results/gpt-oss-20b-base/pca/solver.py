@@ -1,22 +1,19 @@
 import numpy as np
-from typing import Any
-
+from typing import Any, List
 
 class Solver:
-    def solve(self, problem: dict[str, Any]) -> list[list[float]]:
-        X = np.array(problem["X"])
-        n_components = problem["n_components"]
-        # center the data
-        Xc = X - np.mean(X, axis=0, keepdims=True)
-        try:
-            # compute SVD of the centered data
-            # use full_matrices=False to get compact form
-            u, s, vt = np.linalg.svd(Xc, full_matrices=False)
-            # vᵀ has shape (d, min(n,d)); take first n_components rows
-            V = vt[:n_components, :].T
-            return V
-        except Exception:
-            # fall back to identity matrix of appropriate shape
-            n, d = X.shape
-            V = np.eye(n_components, n)
-            return V
+    def solve(self, problem: dict[str, Any]) -> List[List[float]]:
+        X = np.asarray(problem["X"], dtype=np.float64)
+        n_components = int(problem["n_components"])
+
+        # Center the data
+        X -= X.mean(axis=0)
+
+        # Perform thin SVD
+        U, _, Vt = np.linalg.svd(X, full_matrices=False)
+
+        # Take the first n_components principal components
+        components = Vt[:n_components]
+
+        # Convert to list of lists (float) for consistency with expected output
+        return components.tolist()

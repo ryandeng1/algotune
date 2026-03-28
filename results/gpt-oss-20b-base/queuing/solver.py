@@ -1,69 +1,100 @@
-from typing import Any
-import cvxpy as cp
 import numpy as np
+from scipy.optimize import minimize
 
+__all__ = ['Solver']
 
 class Solver:
-    def solve(self, problem: dict[str, Any]) -> dict[str, Any]:
-        # Convert inputs to NumPy arrays of doubles
-        w_max = np.asarray(problem["w_max"], dtype=np.float64)
-        d_max = np.asarray(problem["d_max"], dtype=np.float64)
-        q_max = np.asarray(problem["q_max"], dtype=np.float64)
-        λ_min = np.asarray(problem["λ_min"], dtype=np.float64)
-        μ_max = float(problem["μ_max"])
-        γ = np.asarray(problem["γ"], dtype=np.float64)
+    """Fast convex solver for the M/M/1 queue optimization problem."""
+    def solve(self, problem: dict[str, any]) -> dict[str, any]:
+        """
+        Parameters
+        ----------
+        problem : dict
+            Dictionary containing all problem data.
+            Keys are the same as in the cvxpy version.
 
-        n = γ.size
+        Returns
+        -------
+        dict
+            {'μ': μ_opt, 'λ': λ_opt, 'objective': obj_val}
+        """
+        # ---------- Data ---------- #
+        w_max = np.asarray(problem['w_max'], dtype=float)
+        d_max = np.asarray(problem['d_max'], dtype=float)
+        q_max = np.asarray(problem['q_max'], dtype=float)
+        λ_min = np.asarray(problem['λ_min'], dtype=float)
+        μ_max = float(problem['μ_max'])
+        γ   = np.asarray(problem['γ'], dtype=float)
+        n    = γ.size
 
-        # Decision variables
-        μ = cp.Variable(n, pos=True)
-        λ = cp.Variable(n, pos=True, name="lambda")
-        ρ = λ / μ  # server load
+        # ---------- Helper functions ----------
+        def objective(x):
+            """μ/λ weighted sum."""
+            μ = x[:n]
+            λ = x[n:]
+            return np.dot(γ, μ / λ)
 
-        # M/M/1 formulae
-        q = cp.square(ρ) / (1 - ρ)
-        w = q / λ + 1 / μ
-        d = 1 / (μ - λ)
+        def weight_constraint(x):
+            μ = x[:n]
+            λ = x[n:]
+            ρ   = λ / μ
+            q   = ρ**2 / (1 - ρ)
+            w   = q / λ + 1 / μ
+            return w - w_max
 
-        # Constraints set
-        constraints = [
-            w <= w_max,
-            d <= d_max,
-            q <= q_max,
-            λ >= λ_min,
-            cp.sum(μ) <= μ_max,
+        def delay_constraint(x):
+            μ = x[:n]
+            λ = x[n:]
+            return 1 / (μ - λ) - d_max
+
+        def queue_constraint(x):
+            μ = x[:n]
+            λ = x[n:]
+            ρ   = λ / μ
+            q   = ρ**2 / (1 - ρ)
+            return q - q_max
+
+        def lambda_lower(x):
+            λ = x[n:]
+            return λ - λ_min
+
+        def mu_sum(x):
+            μ = x[:n]
+            return μ.sum() - μ_max
+
+        # ---------- Initial guess ----------
+        μ0 = np.full(n, μ_max / n)
+        λ0 = np.copy(λ_min)
+        # make sure λ < μ
+        λ0 = np.minimum(λ0, μ0 - 1e-2)
+        x0  = np.concatenate([μ0, λ0])
+
+        # ---------- Constraints ----------
+        cons = [
+            {'type': 'ineq', 'fun': weight_constraint},
+            {'type': 'ineq', 'fun': delay_constraint},
+            {'type': 'ineq', 'fun': queue_constraint},
+            {'type': 'ineq', 'fun': lambda_lower},
+            {'type': 'ineq', 'fun': mu_sum},
         ]
 
-        # Objective: weighted sum of momentary loads
-        obj = cp.Minimize(γ @ (μ / λ))
+        bounds = [(1e-8, None)] * (2 * n)  # μ, λ > 0
 
-        # Problem definition
-        prob = cp.Problem(obj, constraints)
+        # ---------- Solve ----------
+        res = minimize(
+            objective,
+            x0,
+            method='SLSQP',
+            bounds=bounds,
+            constraints=cons,
+            options={'ftol': 1e-9, 'gtol': 1e-9, 'maxiter': 5000}
+        )
 
-        # --- solve ---
-        # 1) try geometric programming first (fast on convex GP)
-        try:
-            prob.solve(gp=True, solver=cp.SCS, verbose=False,
-                       max_iters=2000, eps=1e-4)
-        except cp.error.DGPError:
-            # 2) fall back to canonical convex (DCP) solver
-            try:
-                prob.solve(solver=cp.SCS, verbose=False,
-                           max_iters=2000, eps=1e-4)
-            except cp.error.DCPError:
-                # 3) heuristic fallback: λ = λ_min, μ = μ_max/n
-                λ_val = λ_min
-                μ_val = np.full(n, μ_max / n, dtype=np.float64)
-                obj_val = float(γ @ (μ_val / λ_val))
-                return {"μ": μ_val, "λ": λ_val, "objective": obj_val}
+        if not res.success:
+            raise RuntimeError(f"Optimization failed: {res.message}")
 
-        # Validation
-        if prob.status not in {cp.OPTIMAL, cp.OPTIMAL_INACCURATE}:
-            raise ValueError(f"Solver failed with status {prob.status}")
+        μ_opt = res.x[:n]
+        λ_opt = res.x[n:]
+        obj_val = objective(res.x)
 
-        # Return optimized decision variables
-        return {
-            "μ": μ.value,
-            "λ": λ.value,
-            "objective": float(prob.value),
-        }
+        return {'μ': μ_opt, 'λ': λ_opt, 'objective': float(obj_val)}

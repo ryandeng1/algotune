@@ -1,61 +1,56 @@
-from typing import Any, Dict, List
 import numpy as np
 import hdbscan
+from typing import Any, Dict, List
 
+class Solver:
+    def solve(self, problem: Dict[str, Any]) -> Dict[str, List]:
+        """
+        Fit an HDBSCAN clustering model and return key results.
 
-def solve(problem: Dict[str, Any]) -> Dict[str, List]:
-    """
-    Solve the clustering problem using HDBSCAN.
+        Parameters
+        ----------
+        problem : dict
+            Dictionary containing the dataset and optional parameters
+            for the clustering algorithm.
 
-    Parameters
-    ----------
-    problem : dict
-        Dictionary containing:
-            - "dataset": 2‑D array‑like of shape (n_samples, n_features)
-            - (optional) "min_cluster_size": int
-            - (optional) "min_samples": int
+        Returns
+        -------
+        dict
+            Contains cluster labels, per-point probabilities,
+            cluster persistence, count of clusters and noise points.
+        """
+        # Convert the input dataset to a NumPy array of the most efficient
+        # dtype for hdbscan.  The default dtype (float64) is typically the
+        # fastest for numerical work in C extensions.
+        dataset = np.asarray(problem["dataset"], dtype=np.float64)
 
-    Returns
-    -------
-    dict
-        Mapping with keys:
-            - "labels": List[int] of cluster labels
-            - "probabilities": List[float] of label probabilities
-            - "cluster_persistence": List[float] of cluster persistence values
-            - "num_clusters": int, number of clusters found (excl. noise)
-            - "num_noise_points": int, number of points labelled as noise (-1)
-    """
-    # Convert dataset to a NumPy array once and share the memory
-    dataset = np.asarray(problem["dataset"], dtype=float)
+        # Pull hyper‑parameters, falling back to HDBSCAN defaults if missing.
+        min_cluster_size = problem.get("min_cluster_size", 5)
+        min_samples = problem.get("min_samples", 3)
 
-    # Pull hyper‑parameters with sane defaults
-    min_cluster_size = int(problem.get("min_cluster_size", 5))
-    min_samples = int(problem.get("min_samples", 3))
+        # Run HDBSCAN once.  Instantiating and fitting in a single call
+        # reduces Python‑level overhead compared to separate steps.
+        clusterer = hdbscan.HDBSCAN(
+            min_cluster_size=min_cluster_size,
+            min_samples=min_samples
+        )
+        clusterer.fit(dataset)
 
-    # Instantiate and fit the HDBSCAN model
-    clusterer = hdbscan.HDBSCAN(
-        min_cluster_size=min_cluster_size,
-        min_samples=min_samples,
-    )
-    clusterer.fit(dataset)
+        # Extract results
+        labels = clusterer.labels_
+        probabilities = clusterer.probabilities_
+        persistence = clusterer.cluster_persistence_
 
-    # Extract results in the fastest possible manner
-    labels = clusterer.labels_
-    probabilities = clusterer.probabilities_
-    persistence = clusterer.cluster_persistence_
+        # Compute cluster statistics directly on the NumPy arrays
+        # (no Python loops).
+        num_clusters = int(np.count_nonzero(labels != -1))
+        num_noise_points = int(np.sum(labels == -1))
 
-    # Count clusters and noise via NumPy for speed
-    non_noise = labels != -1
-    # np.unique is faster than a Python set for large arrays
-    num_clusters = int(np.unique(labels[non_noise]).size if non_noise.any() else 0)
-    num_noise_points = int(np.count_nonzero(labels == -1))
-
-    # Build the solution with minimal Python overhead
-    solution = {
-        "labels": labels.tolist(),
-        "probabilities": probabilities.tolist(),
-        "cluster_persistence": persistence.tolist(),
-        "num_clusters": num_clusters,
-        "num_noise_points": num_noise_points,
-    }
-    return solution
+        # Convert NumPy arrays to Python lists for JSON serialisation
+        return {
+            "labels": labels.tolist(),
+            "probabilities": probabilities.tolist(),
+            "cluster_persistence": persistence.tolist(),
+            "num_clusters": num_clusters,
+            "num_noise_points": num_noise_points,
+        }

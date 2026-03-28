@@ -1,25 +1,25 @@
-from typing import Any
+import numpy as np
 from scipy import sparse
-from scipy.sparse.linalg import expm
-
+from scipy.linalg import expm as lec_expm
 
 class Solver:
+    """
+    Solver that computes the matrix exponential of a sparse matrix.
+    For small matrices a dense implementation is used for speed,
+    otherwise the scipy sparse implementation is employed.
+    """
+    # Empirical threshold: matrices with <= 5000 elements are treated as small
+    _SMALL_MATRIX_LIMIT = 5000
+
     def solve(self, problem: dict[str, sparse.spmatrix]) -> sparse.spmatrix:
-        """
-        Computes the matrix exponential of the sparse matrix `problem["matrix"]`.
-        The function coerces the input to CSR format if necessary (the most efficient
-        format for the underlying implementation) and then calls
-        `scipy.sparse.linalg.expm` to perform the computation.
-
-        Args:
-            problem: A dictionary with a key `"matrix"` whose value is a
-                     `scipy.sparse.spmatrix` representing the matrix to exponentiate.
-
-        Returns:
-            The matrix exponential as a sparse matrix.
-        """
         A = problem["matrix"]
-        # Ensure the matrix is in CSR format for optimal performance.
-        if not sparse.isspmatrix_csr(A):
-            A = A.tocsr()
-        return expm(A)
+        # Ensure matrix is square
+        if A.shape[0] != A.shape[1]:
+            raise ValueError("Matrix must be square for exponential")
+        # Small matrices: convert to dense, use scipy.linalg.expm, convert back
+        if int(A.shape[0] * A.shape[1]) <= self._SMALL_MATRIX_LIMIT:
+            dense = A.toarray()
+            exp_dense = lec_expm(dense)
+            return sparse.csc_matrix(exp_dense)
+        # Large matrices: use sparse implementation
+        return sparse.linalg.expm(A)

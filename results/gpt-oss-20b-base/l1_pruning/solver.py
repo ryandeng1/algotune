@@ -1,35 +1,34 @@
 from typing import Any, Dict, List
 import numpy as np
 
-
 class Solver:
     def solve(self, problem: Dict[str, Any]) -> Dict[str, List[float]]:
         """
-        Solve the l1-pruning problem in O(n log n).
+        Optimized solver for the L1–pruning problem.
         """
-        v = np.asarray(problem["v"], dtype=float).ravel()
+        # Extract data
+        v = np.asarray(problem["v"], dtype=np.float64).ravel()
         k = float(problem["k"])
 
-        # Subproblem solver using vectorised operations
-        def subproblem_sol(vn: np.ndarray, z: float) -> np.ndarray:
-            # Sorted descending
-            mu = np.sort(vn)[::-1]
-            cs = np.cumsum(mu)
-            idx = np.arange(len(mu))
-            rhs = (cs - z) / (idx + 1)
-            # Find first index where mu < rhs
-            mask = mu < rhs
-            if not np.any(mask):
-                theta = 0.0
-            else:
-                j = mask.argmax()
-                theta = rhs[j]
-            w = np.maximum(vn - theta, 0.0)
-            return w
-
+        # Absolute values and sorting (descending)
         u = np.abs(v)
-        b = subproblem_sol(u, k)
-        new_v = b * np.sign(v)
+        mu = np.sort(u, kind="mergesort")[::-1]
+        n = mu.size
 
-        solution = {"solution": new_v.tolist()}
-        return solution
+        # Cumulative sums and candidate thresholds
+        cumsum = np.cumsum(mu)
+        idx = np.arange(1, n + 1)
+        theta_candidates = (cumsum - k) / idx
+
+        # Find first index where mu < theta_candidate
+        mask = mu < theta_candidates
+        if mask.any():
+            theta = theta_candidates[mask.argmax()]
+        else:
+            theta = 0.0
+
+        # Compute solution vector
+        w = np.maximum(u - theta, 0.0)
+        pruned = w * np.sign(v)
+
+        return {"solution": pruned.tolist()}

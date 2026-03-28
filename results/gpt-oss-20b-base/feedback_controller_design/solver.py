@@ -1,64 +1,40 @@
 import numpy as np
 import cvxpy as cp
-from typing import Any
-
 
 class Solver:
-    def solve(self, problem: dict[str, Any]) -> dict[str, Any]:
-        """
-        Solves the feedback controller design problem using semidefinite programming.
+    def solve(self, problem: dict[str, np.ndarray]) -> dict[str, np.ndarray | None]:
+        """Design a state‑feedback controller using an SDP.
 
-        Args:
-            problem: A dictionary containing the system matrices A and B.
-
-        Returns:
-            A dictionary containing:
-                - K: The feedback gain matrix
-                - P: The Lyapunov matrix
+        The problem solved is:
+            minimize 0
+            subject to
+              [ Q          Q Aᵀ + Lᵀ Bᵀ ]
+              [ A Q + B L   Q        ]  ⪰ I_{2n}
+              Q ⪰ I_n
+        where Q  is a symmetric n×n matrix and L is an m×n matrix.
+        If the problem is feasible, the feedback gain K = L Q⁻¹ is returned
+        together with the Lyapunov matrix P = Q⁻¹ and a status flag.
         """
-        A: np.ndarray = np.asarray(problem["A"])
-        B: np.ndarray = np.asarray(problem["B"])
+        A = np.asarray(problem["A"])
+        B = np.asarray(problem["B"])
         n, m = A.shape[0], B.shape[1]
 
-        # Decision variables
         Q = cp.Variable((n, n), symmetric=True)
         L = cp.Variable((m, n))
 
-        # Build the left‑hand side of the block matrix once as a python expression
-        AB = A @ Q + B @ L
-        AQ_T = Q @ A.T + L.T @ B.T
-        top_row = cp.hstack([Q, AQ_T])
-        bot_row = cp.hstack([AB, Q])
-        blk = cp.vstack([top_row, bot_row])
+        # Block matrix inequality
+        block = cp.bmat([[Q, Q @ A.T + L.T @ B.T],
+                         [A @ Q + B @ L, Q]])
+        constraints = [block >> np.eye(2 * n), Q >> np.eye(n)]
 
-        # Constraints
-        constraints = [
-            blk >> np.eye(2 * n),   # LMI
-            Q >> np.eye(n),         # Strictly positive definite
-        ]
-
-        # Solve (use a fast, robust solver; SCS is usually available)
         prob = cp.Problem(cp.Minimize(0), constraints)
-        try:
-            prob.solve(solver=cp.SCS, eps=1e-10, verbose=False, max_iters=5000)
-        except Exception:
+        prob.solve(solver=cp.CLARABEL, warm_start=True)
+
+        if prob.status in {"optimal", "optimal_inaccurate"}:
+            Q_val = np.array(Q.value)
+            L_val = np.array(L.value)
+            K = L_val @ np.linalg.inv(Q_val)
+            P = np.linalg.inv(Q_val)
+            return {"is_stabilizable": True, "K": K.tolist(), "P": P.tolist()}
+        else:
             return {"is_stabilizable": False, "K": None, "P": None}
-
-        if prob.status not in ("optimal", "optimal_inaccurate"):
-            return {"is_stabilizable": False, "K": None, "P": None}
-
-        Q_val = Q.value
-        L_val = L.value
-
-        # Compute K = L * Q^{-1} more stably with solve
-        try:
-            K_val = L_val @ np.linalg.solve(Q_val, np.eye(n))
-            P_val = np.linalg.solve(Q_val, np.eye(n))
-        except Exception:
-            return {"is_stabilizable": False, "K": None, "P": None}
-
-        return {
-            "is_stabilizable": True,
-            "K": K_val.tolist(),
-            "P": P_val.tolist(),
-        }

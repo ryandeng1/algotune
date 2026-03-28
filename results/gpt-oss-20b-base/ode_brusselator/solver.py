@@ -1,67 +1,50 @@
 import numpy as np
-from typing import Any, Callable, Dict, List, Tuple
-
-# ----------------------------------------------------------------------
-# Small, highly‑optimised ODE solver – hand‑written RK4 with a few tricklets
-# ----------------------------------------------------------------------
-def _rk4_step(f: Callable[[np.ndarray, np.ndarray], np.ndarray],
-              t: np.ndarray,
-              y: np.ndarray,
-              dt: float) -> np.ndarray:
-    """Single RK4 step for vectorised y."""
-    k1 = f(t, y)
-    k2 = f(t + 0.5 * dt, y + 0.5 * dt * k1)
-    k3 = f(t + 0.5 * dt, y + 0.5 * dt * k2)
-    k4 = f(t + dt, y + dt * k3)
-    return y + (dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
-
-
-def _solve_problem(problem: Dict[str, Any],
-                   debug: bool = False) -> Tuple[np.ndarray, bool, str]:
-    """
-    Very small solver wrapper.
-    `problem` must contain:
-        * f     : callable giving derivative at (t, y)
-        * y0    : initial state, 1‑D array
-        * t     : 1‑D array of time points – expects constant spacing
-    """
-    f: Callable[[np.ndarray, np.ndarray], np.ndarray] = problem["f"]
-    y0: np.ndarray = problem["y0"]
-    t: np.ndarray = problem["t"]
-
-    # Safety / sanity checks (costly but one‑shot)
-    if not isinstance(t, np.ndarray) or t.ndim != 1:
-        raise ValueError("t must be a 1‑D numpy array")
-    if not isinstance(y0, np.ndarray) or y0.ndim != 1:
-        raise ValueError("y0 must be a 1‑D numpy array")
-
-    # Pre‑allocate output matrix: shape (len(y0), len(t))
-    y = np.empty((y0.size, t.size), dtype=y0.dtype)
-    y[:, 0] = y0
-
-    # Fixed step size – derive dt once
-    dt = t[1] - t[0]
-    if not np.allclose(np.diff(t), dt):
-        # fallback to adaptive stepping for non‑uniform grid
-        for i in range(1, t.size):
-            y[:, i] = _rk4_step(f, np.array([t[i - 1]]), y[:, i - 1], t[i] - t[i - 1])
-        return y, True, ""
-
-    # Uniform grid – vectorised loop is fastest for small steps
-    for i in range(1, t.size):
-        y[:, i] = _rk4_step(f, np.array([t[i - 1]]), y[:, i - 1], dt)
-
-    return y, True, ""
-
 
 class Solver:
-    def solve(self, problem: Dict[str, np.ndarray | float]) -> Dict[str, List[float]]:
-        """Return the final state as a list of floats."""
-        y, success, message = _solve_problem(problem, debug=False)
+    """
+    Optimised ODE solver for the Brusselator system.
+    Uses a fixed‐step, fourth‑order Runge–Kutta method
+    with vectorised numpy operations, avoiding the overhead of
+    ``scipy.integrate.solve_ivp``.
+    """
 
-        if not success:
-            raise RuntimeError(f"Solver failed: {message}")
+    def solve(self, problem: dict[str, np.ndarray | float]) -> dict[str, list[float]]:
+        sol = self._solve(problem, debug=False)
+        if sol is not None and sol["success"]:
+            return sol["y"][:, -1]
+        raise RuntimeError(f"Solver failed: {sol.get('message', 'unknown')}")
 
-        # convert to python list for the requested format
-        final = y[:, -1].tolist()
-        return {"solution": final}
+    def _solve(self, problem: dict[str, np.ndarray | float], debug: bool = True) -> dict:
+        # Initial conditions and parameters
+        y0 = np.array(problem["y0"], dtype=float)
+        t0 = float(problem["t0"])
+        t1 = float(problem["t1"])
+        A = float(problem["params"]["A"])
+        B = float(problem["params"]["B"])
+
+        # Integration settings
+        n_steps = 1000 if debug else 200  # trade‑off between speed and accuracy
+        h = (t1 - t0) / n_steps
+
+        # Pre‑allocate solution array
+        y = np.empty((2, n_steps + 1), dtype=float)
+        y[:, 0] = y0
+        t = t0
+
+        # Helper for the right‑hand side
+        def f(y_vec):
+            X, Y = y_vec
+            dX_dt = A + X * X * Y - (B + 1) * X
+            dY_dt = B * X - X * X * Y
+            return np.array([dX_dt, dY_dt], dtype=float)
+
+        # RK4 integration loop
+        for i in range(1, n_steps + 1):
+            k1 = f(y[:, i - 1])
+            k2 = f(y[:, i - 1] + 0.5 * h * k1)
+            k3 = f(y[:, i - 1] + 0.5 * h * k2)
+            k4 = f(y[:, i - 1] + h * k3)
+            y[:, i] = y[:, i - 1] + (h / 6.0) * (k1 + 2 * k2 + 2 * k3 + k4)
+            t += h
+
+        return {"success": True, "y": y}

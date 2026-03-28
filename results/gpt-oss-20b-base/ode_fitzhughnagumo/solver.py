@@ -1,26 +1,40 @@
 import numpy as np
+from scipy.integrate import solve_ivp
+from typing import Any
 
 class Solver:
-    """
-    Fixed‐to‑fast implementation of `solve`.  
-    It expects *problem* to contain a key ``"y"`` holding a 2‑D numpy array
-    representing the time evolution of the system.  The solver simply extracts
-    the final state (last column) and returns it as a plain Python list.
-    """
-    def solve(self, problem: dict[str, np.ndarray]) -> dict[str, list[float]]:
-        # Retrieve the state array (`y`) from the problem dictionary.
-        y = problem["y"]
+    def solve(self, problem: dict[str, np.ndarray | float]) -> dict[str, list[float]]:
+        sol = self._solve(problem, debug=False)
+        if sol.success:
+            return sol.y[:, -1].tolist()
+        raise RuntimeError(f'Solver failed: {sol.message}')
 
-        # Ensure we are dealing with a NumPy array; conversion is cheap if already one.
-        y = np.asarray(y, dtype=float)
+    # pylint: disable=missing-function-docstring
+    def _solve(self, problem: dict[str, np.ndarray | float], debug: bool) -> Any:
+        y0 = np.array(problem["y0"])
+        t0, t1 = problem["t0"], problem["t1"]
+        a, b, c, I = (
+            problem["params"]["a"],
+            problem["params"]["b"],
+            problem["params"]["c"],
+            problem["params"]["I"],
+        )
 
-        # Check that the array has the expected 2‑D shape.
-        if y.ndim != 2:
-            raise ValueError("Expected a 2‑D array for key 'y'.")
+        # Limited overhead: pre-extracted constants, no dynamic look‑ups.
+        def f(t, y):
+            v, w = y
+            dv = v - v * v * v / 3.0 - w + I
+            dw = a * (b * v - c * w)
+            return [dv, dw]
 
-        # Extract the final state without copying (view).  Converting to list
-        # forces a cheap copy of the last column only.
-        final_state = y[:, -1].tolist()
-
-        # Return in the required format.
-        return {"state": final_state}
+        t_eval = np.linspace(t0, t1, 1000) if debug else None
+        return solve_ivp(
+            f,
+            [t0, t1],
+            y0,
+            method="RK45",
+            rtol=1e-8,
+            atol=1e-8,
+            t_eval=t_eval,
+            dense_output=debug,
+        )

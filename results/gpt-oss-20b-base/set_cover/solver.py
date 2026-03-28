@@ -1,94 +1,67 @@
-from __future__ import annotations
-
-from typing import List, Set
-
 from pysat.card import CardEnc, EncType
 from pysat.formula import CNF
 from pysat.solvers import Solver
+from typing import List
 
 
 class Solver:
-    """Optimised solver for the minimum set‑cover problem using a SAT back‑end."""
 
-    # ---------------------------------------------------------------------
-    # Helper: Pre–compute the universe and a mapping from elements to the
-    #      subsets that contain them.  This work is done once per problem
-    #      instance and speeds up the SAT encoding dramatically.
-    # ---------------------------------------------------------------------
-    @staticmethod
-    def _preprocess(subsets: List[List[int]]) -> tuple[Set[int], List[List[int]]]:
-        universe: Set[int] = set()
-        element_to_sets: List[Set[int]] = []
-
-        # Build the mapping element → set indices
-        for idx, subset in enumerate(subsets):
-            universe.update(subset)
-
-        # Reverse mapping: for each element in the universe, collect the indices
-        elem_to_subset: dict[int, List[int]] = {e: [] for e in universe}
-        for idx, subset in enumerate(subsets):
-            for e in subset:
-                elem_to_subset[e].append(idx + 1)        # 1‑based variables
-
-        # Convert dict values to lists for faster iteration
-        element_to_sets = [elem_to_subset[e] for e in sorted(universe)]
-        return universe, element_to_sets
-
-    # ---------------------------------------------------------------------
-    # Encode the set‑cover problem as a CNF formula with an upper bound `k`
-    # on the number of selected subsets.
-    # ---------------------------------------------------------------------
-    @staticmethod
-    def _encode(subsets: List[List[int]],
-                element_to_sets: List[List[int]],
-                k: int) -> CNF:
-        cnf = CNF()
-
-        # Coverage constraints – one clause per element
-        for subset_list in element_to_sets:
-            cnf.append(subset_list)
-
-        # Cardinality constraint – at most `k` subsets can be selected
-        num_subsets = len(subsets)
-        lits = list(range(1, num_subsets + 1))
-        atmost_k = CardEnc.atmost(lits=lits, bound=k, encoding=EncType.seqcounter)
-        cnf.extend(atmost_k.clauses)
-
-        return cnf
-
-    # ---------------------------------------------------------------------
-    # Main API – find a minimal set of subset indices (1‑based) covering the universe.
-    # ---------------------------------------------------------------------
     def solve(self, problem: List[List[int]]) -> List[int]:
+        """
+        Solve the minimum set‑cover instance by a binary search on the number of
+        chosen subsets and a single SAT query for each mid‑value.
+        The SAT instance is built in a very cache‑friendly way to keep the
+        critical path short.
+
+        :param problem: list of subsets (each subset is a list of ints)
+        :return: list of 1‑indexed subset indices that achieve the cover
+        """
+        # Pre‑process the input once: set representations and max element
+        subsets = [set(s) for s in problem]
+        max_elem = max((max(s) for s in subsets if s), default=0)
         m = len(problem)
-        if not m:
-            return []
 
-        # Pre‑process once
-        _, element_to_sets = self._preprocess(problem)
+        # Build a mapping from elements to the list of subsets that cover it
+        cover_map: dict[int, List[int]] = {}
+        for idx, subset in enumerate(subsets, start=1):
+            for e in subset:
+                cover_map.setdefault(e, []).append(idx)
 
-        left, right = 1, m          # k ∈ [1, m]
-        best_k = m
-        best_solution: List[int] | None = None
+        def build_cnf(k: int) -> CNF:
+            """
+            Return a CNF that enforces that each element
+            1..max_elem is covered and that at most k subsets are chosen.
+            """
+            cnf = CNF()
+            # coverage clauses
+            for e in range(1, max_elem + 1):
+                lits = cover_map.get(e)
+                if lits:
+                    cnf.append(lits)
+                else:                # unsatisfiable if an element never appears
+                    cnf.append([1, -1])
 
-        # Binary search on the minimum size `k`.
+            # cardinality constraint – at most k
+            top_lits = list(range(1, m + 1))
+            atmost_k = CardEnc.atmost(lits=top_lits, bound=k, encoding=EncType.seqcounter)
+            cnf.extend(atmost_k.clauses)
+            return cnf
+
+        left, right = 1, m
+        best = None
+
         while left <= right:
             mid = (left + right) // 2
-            cnf = self._encode(problem, element_to_sets, mid)
-
-            # Use a context‑manager for the solver to ensure timely cleanup.
-            with Solver(name="Minicard") as solver:
+            cnf = build_cnf(mid)
+            with Solver(name='Minicard') as solver:
                 solver.append_formula(cnf)
                 sat = solver.solve()
+                model = solver.get_model() if sat else None
+            if sat:
+                selected = [idx for idx in range(1, m + 1) if idx in model]
+                best = selected
+                right = mid - 1
+            else:
+                left = mid + 1
 
-                if sat:
-                    # Extract the subset indices from the model.
-                    model = solver.get_model()
-                    selected = [i + 1 for i, v in enumerate(model) if v > 0]
-                    best_k = mid
-                    best_solution = selected
-                    right = mid - 1    # try a smaller k
-                else:
-                    left = mid + 1     # need more subsets
-
-        return best_solution if best_solution is not None else []
+        return best or []

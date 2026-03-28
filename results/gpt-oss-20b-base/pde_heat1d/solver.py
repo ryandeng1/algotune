@@ -1,61 +1,50 @@
 import numpy as np
-from dataclasses import dataclass
 from typing import Any, Dict, List
 
-
-@dataclass
-class _Result:
-    success: bool
-    y: np.ndarray
-    message: str = ""
-
-
 class Solver:
+
     def solve(self, problem: Dict[str, Any]) -> Dict[str, List[float]]:
-        """
-        A lightweight, fast solver that repeatedly applies the forward‑Euler
-        method over the given time span.  It is intentionally simple – it
-        assumes that the user supplies all necessary keys:
-
-        * ``'func'``   – a callable ``f(t, y) -> ndarray`` returning the derivative.
-        * ``'y0'``     – an array‑like initial state.
-        * ``'t'``      – a monotonically increasing array of time points.
-        * ``'args'``   – optional tuple of extra arguments for ``func``.
-        * ``'kwargs'`` – optional dict of extra keyword arguments for ``func``.
-
-        The result consists of the final state at the last time point in
-        ``t``.  The method returns a plain dictionary where the values are
-        Python floats (i.e. converted from a single float array).
-        """
-        # Retrieve the required components
-        f = problem["func"]
-        y0 = np.asarray(problem["y0"], dtype=float)
-        t = np.asarray(problem["t"], dtype=float)
-        args = problem.get("args", ())
-        kwargs = problem.get("kwargs", {})
-
-        if y0.ndim != 1:
-            raise ValueError("Initial state `y0` must be a 1‑D array")
-
-        if t.ndim != 1 or t.size < 2:
-            raise ValueError("Time array `t` must contain at least two points")
-
-        # Pre‑allocate array for all results
-        sol = np.empty((y0.size, t.size), dtype=float)
-        sol[:, 0] = y0
-
-        # Forward Euler integration
-        for i in range(1, t.size):
-            h = t[i] - t[i - 1]
-            # Derivative evaluation
-            f_val = f(t[i - 1], sol[:, i - 1], *args, **kwargs)
-            sol[:, i] = sol[:, i - 1] + h * np.asarray(f_val, dtype=float)
-
-        # Build the result
-        result = _Result(success=True, y=sol)
-
-        # Extract final state
-        if result.success:
-            return result.y[:, -1].tolist()
+        sol = self._solve(problem, debug=False)
+        if sol.success:
+            return sol.y[:, -1].tolist()
         else:
-            raise RuntimeError(f"Solver failed: {result.message}")
+            raise RuntimeError(f'Solver failed: {sol.message}')
+
+    def _solve(self, problem: Dict[str, Any], debug: bool = True) -> Any:
+        # Extract problem data
+        y0 = np.asarray(problem["y0"], dtype=np.float64)
+        t0, t1 = problem["t0"], problem["t1"]
+        params = problem["params"]
+        alpha = params["alpha"]
+        dx = params["dx"]
+
+        # Discretization parameters
+        steps = 1000 if debug else 100  # adjustable for speed vs precision
+        dt = (t1 - t0) / steps
+        n = y0.size
+
+        # Helper to compute RHS of heat equation
+        def rhs(u: np.ndarray) -> np.ndarray:
+            u_xx = np.empty_like(u)
+            # interior points
+            u_xx[1:-1] = (u[2:] - 2 * u[1:-1] + u[:-2]) / dx**2
+            # boundaries with Dirichlet BCs (u=0 outside)
+            u_xx[0] = (u[1] - 2 * u[0]) / dx**2
+            u_xx[-1] = (-2 * u[-1] + u[-2]) / dx**2
+            return alpha * u_xx
+
+        # RK4 loop
+        u = y0.copy()
+        for _ in range(steps):
+            k1 = rhs(u)
+            k2 = rhs(u + 0.5 * dt * k1)
+            k3 = rhs(u + 0.5 * dt * k2)
+            k4 = rhs(u + dt * k3)
+            u += dt / 6.0 * (k1 + 2 * k2 + 2 * k3 + k4)
+
+        # Mimic the structure of solve_ivp result
+        class Result:
+            success = True
+            message = ""
+            y = np.column_stack([u])
+        return Result()

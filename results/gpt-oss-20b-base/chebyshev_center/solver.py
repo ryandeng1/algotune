@@ -1,64 +1,38 @@
-from __future__ import annotations
-
 import numpy as np
 from scipy.optimize import linprog
-from typing import Any, Dict, List
-
+from typing import Any, List, Dict
 
 class Solver:
-    def solve(self, problem: Dict[str, Any]) -> Dict[str, List]:
+    def solve(self, problem: Dict[str, Any]) -> Dict[str, List[float]]:
         """
-        Solve the Chebyshev center problem using SciPy's linear programming
-        solver, which is typically faster than CVXPY for this particular
-        LP.
+        Solve the Chebyshev center problem using SciPy's linear programming routine.
 
-        The Chebyshev centre of the polyhedron {x | a x <= b} is found by
-        maximizing the radius r of the largest hyper‑ball that fits inside
-        the polyhedron.  The constraints can be written linearly as
-
-            a_i · x + r * ||a_i||_1 <= b_i   for all i.
-
-        We treat r as an additional variable and solve the following LP:
-            maximize   r
-            subject to a x + r * |a| <= b
-            where |a| is the element‑wise absolute value of each row
-            of the matrix `a` (the 1‑norm of the row).
-
-        Parameters
-        ----------
-        problem : dict
-            Dictionary containing:
-            - 'a': 2‑D list or numpy array of shape (m, n)
-            - 'b': 1‑D list or array of length m
-
-        Returns
-        -------
-        dict
-            Dictionary with a single key "solution" containing a list of
-            the n Chebyshev centre coordinates.
+        :param problem: A dictionary containing 'a' (m x n matrix) and 'b' (m-elements vector).
+        :return: A dictionary with key "solution" containing the n-dimensional Chebyshev center.
         """
         a = np.asarray(problem["a"], dtype=float)
         b = np.asarray(problem["b"], dtype=float)
-
         m, n = a.shape
 
-        # Construct the constraint matrix G and vector h for
-        #     G @ [x; r] <= h
-        # G has shape (m, n+1)
-        G = np.hstack((a, np.abs(a).sum(axis=1, keepdims=True)))
-        h = b
+        # Norms of each row of a
+        norms = np.linalg.norm(a, axis=1)
 
-        # Objective: maximize r  => minimize -r
-        c = np.zeros(n + 1)
-        c[-1] = -1.0
+        # Build the LP: maximize r  <=>  minimize -r
+        c = np.concatenate([np.zeros(n), [-1.0]])  # objective coefficients
 
-        # Bounds: x free (-inf, inf), r >= 0
+        # A_ub x + A_ub_r * r <= b  ->  [a | norms] * [x; r] <= b
+        A_ub = np.hstack([a, norms[:, None]])  # shape (m, n+1)
+        b_ub = b
+
+        # Bounds: x free, r >= 0
         bounds = [(None, None)] * n + [(0, None)]
 
-        result = linprog(c, A_ub=G, b_ub=h, bounds=bounds, method="highs")
+        # Solve
+        res = linprog(c, A_ub=A_ub, b_ub=b_ub, bounds=bounds,
+                      method="highs", options={"presolve": True, "time_limit": 10.0})
 
-        if not result.success:
-            raise ValueError(f"Linear program failed to find optimal solution: {result.message}")
+        if not res.success:
+            raise RuntimeError(f"Linear program failed: {res.message}")
 
-        center = result.x[:-1]  # discard radius
-        return {"solution": center.tolist()}
+        # Extract solution (only x components)
+        return {"solution": res.x[:n].tolist()}

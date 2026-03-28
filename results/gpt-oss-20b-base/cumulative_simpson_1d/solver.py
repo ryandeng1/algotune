@@ -1,24 +1,28 @@
-from typing import Any
 import numpy as np
+from typing import Any
 from numpy.typing import NDArray
 
+
 class Solver:
+    """Fast cumulative Simpson integrator using NumPy."""
+
     def solve(self, problem: dict) -> NDArray:
-        """
-        Compute the cumulative integral of a 1‑D array using a vectorised 
-        trapezoidal rule that works for a uniform grid spacing `dx`. This 
-        implementation is faster than scipy.integrate.cumulative_simpson for 
-        typical use cases because it avoids the overhead of the Scipy function
-        and removes unnecessary broadcasting.
-        """
+        """Return cumulative integral of y with spacing dx using Simpson's rule."""
         y = np.asarray(problem["y"])
         dx = float(problem["dx"])
-        # If the input has less than 2 points we return it directly
-        if y.size <= 1:
-            return y.copy()
-        # Trapezoidal cumulative sum: ∑_{k=1}^{i} (y[k-1]+y[k]) * dx/2
-        step = (y[:-1] + y[1:]) * (dx * 0.5)
-        cumulative = np.empty_like(y, dtype=np.float64)
-        cumulative[0] = y[0] * 0.0  # integral starts at 0
-        cumulative[1:] = np.cumsum(step)
-        return cumulative
+        n = y.size
+        if n < 2:
+            return np.empty(n, dtype=y.dtype)
+
+        # Weight pattern 1,4,2,4,...,4,1 for Simpson
+        # Create array of weights
+        w = np.empty(n, dtype=y.dtype)
+        w[0] = w[-1] = 1
+        # Internals: even indices (1-based) get 4, odd get 2
+        # For 0-based indexing: indices 1,3,5,... (odd) get 4, even (2,4,6,...) get 2
+        w[1:-1:2] = 4
+        w[2:-1:2] = 2
+
+        # Cumulative weighted sum
+        cum = np.cumsum(w * y)
+        return (dx / 3.0) * cum

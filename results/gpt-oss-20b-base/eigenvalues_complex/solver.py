@@ -1,18 +1,13 @@
-from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 
-
-class Solver:
-    def solve(self, problem: NDArray) -> list[complex]:
-        """
-        Compute eigenvalues of the given square matrix and return them
-        sorted descending by real part and then by imaginary part.
-        """
-        # Compute only eigenvalues for speed
-        evs = np.linalg.eigvals(problem)
-
-        # Vectorized sorting: lexsort uses last key as primary,
-        # so we provide negative imag and negative real
-        idx = np.lexsort((-evs.imag, -evs.real))
-        return evs[idx].tolist()
+def solve(problem: NDArray) -> list[complex]:
+    """
+    Solve the eigenvalue problem for the given square matrix.
+    The solution returned is a list of eigenvalues sorted in descending order
+    by real part, then by imaginary part.
+    """
+    vals = np.linalg.eigvals(problem)          # efficient eigenvalue computation
+    # Use numpy.lexsort on negative real and imaginary parts for descending order
+    ix = np.lexsort((-vals.imag, -vals.real))
+    return vals[ix].tolist()

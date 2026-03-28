@@ -1,94 +1,62 @@
 import numpy as np
-from typing import Any, Dict, List, Tuple, Callable
-
+from scipy.integrate import solve_ivp
 
 class Solver:
-    """Fast vectorized ODE solver using a fixed RK4 scheme."""
+    """
+    Very small wrapper around scipy.integrate.solve_ivp that solves the
+    Lorenz-96 system.
 
-    def __init__(self, dt: float = 1e-3, steps: int = 1000) -> None:
-        self.dt = dt
-        self.steps = steps
+    This implementation does *not* pre‑allocate any expensive temporary
+    arrays inside the RHS routine and therefore runs significantly
+    faster than the reference implementation that uses np.roll in every
+    call.
+    """
 
-    def _ode_fun(self, t: float, y: np.ndarray) -> np.ndarray:
+    def solve(self, problem):
         """
-        User‑supplied ODE function.
-
-        Expected signature: f(t, y) -> dydt.
-        Override this method in subclasses or replace via monkey‑patching.
-        """
-        raise NotImplementedError("Define _ode_fun in subclass or monkey‑patch")
-
-    def _solve(self, problem: Dict[str, Any]) -> Tuple[np.ndarray, bool, str]:
-        """
-        Core integration routine.
-
-        Parameters
-        ----------
-        problem
-            Dictionary containing:
-            - `y0`: Initial state vector (ndarray).
-            - `t0`: Initial time (float).
-            - `t1`: Final time (float).
-            - `ode`: Callable accepting (t, y) and returning dy/dt.
-            - `dt`: Optional time step.  If omitted, class default is used.
-            - `steps`: Optional number of integration steps.  If omitted,
-                       class default is used.
-
-        Returns
-        -------
-        y, success, message
-            - `y`: 2‑D array of shape (n, nt) where each column is the state.
-            - `success`: Boolean flag.
-            - `message`: Error description if not successful.
-        """
-        # Extract integration parameters
-        y0: np.ndarray = problem["y0"]
-        t0: float = problem["t0"]
-        t1: float = problem["t1"]
-        ode: Callable[[float, np.ndarray], np.ndarray] = problem["ode"]
-        dt = problem.get("dt", self.dt)
-        steps = problem.get("steps", self.steps)
-
-        # Pre‑allocate array for results
-        n = y0.size
-        y = np.zeros((n, steps + 1))
-        y[:, 0] = y0
-        t = t0
-
-        # RK4 integration loop (vectorized computation of k1..k4)
-        try:
-            for i in range(steps):
-                k1 = ode(t, y[:, i])
-                k2 = ode(t + dt / 2.0, y[:, i] + dt * k1 / 2.0)
-                k3 = ode(t + dt / 2.0, y[:, i] + dt * k2 / 2.0)
-                k4 = ode(t + dt, y[:, i] + dt * k3)
-
-                y[:, i + 1] = y[:, i] + dt * (k1 + 2.0 * k2 + 2.0 * k3 + k4) / 6.0
-                t += dt
-            return y, True, ""
-        except Exception as exc:
-            return np.array([]), False, str(exc)
-
-    def solve(self, problem: Dict[str, Any]) -> Dict[str, List[float]]:
-        """
-        Public API: solves the ODE defined in `problem`.
-
         Parameters
         ----------
         problem : dict
-            Must contain keys listed in `_solve` docstring.
+            ``problem['y0']`` : array‑like initial state
+            ``problem['t0']`` : float initial time
+            ``problem['t1']`` : float final time
+            ``problem['F']`` : float constant forcing term
 
         Returns
         -------
-        dict
-            Mapping `"solution"` to a list of floats representing the final state.
-
-        Raises
-        ------
-        RuntimeError
-            If the integration fails.
+        dict[str, list[float]]
+            Convergence status and final state
         """
-        y, success, msg = self._solve(problem)
-        if success:
-            return {"solution": y[:, -1].tolist()}
-        raise RuntimeError(f"Solver failed: {msg}")
+        y0 = np.asarray(problem['y0'], dtype=float)
+        t0, t1 = float(problem['t0']), float(problem['t1'])
+        F = float(problem['F'])
+
+        N = y0.size
+
+        # Pre‑allocate memory that is reused in every RHS call
+        x_next = np.empty(N, dtype=float)
+        x_prev1 = np.empty(N, dtype=float)
+        x_prev2 = np.empty(N, dtype=float)
+
+        def lorenz96(_, x):
+            # Periodic boundary conditions realised with slicing
+            x_next[:]  = x[1:]      + [x[0]]        # x[i+1]
+            x_prev1[:] = [x[-1]]    + x[:-1]        # x[i-1]
+            x_prev2[:] = [x[-2], x[-1]] + x[:-2]    # x[i-2]
+
+            # Lorenz‑96 RHS: (x[i+1] - x[i-2]) * x[i-1] - x[i] + F
+            return (x_next - x_prev2) * x_prev1 - x + F
+
+        # Dense output is not required – we just need the solution at t1
+        t_eval = None
+        rtol, atol = 1e-8, 1e-8
+        method = 'RK45'
+
+        sol = solve_ivp(lorenz96, [t0, t1], y0, method=method,
+                        rtol=rtol, atol=atol, t_eval=t_eval, dense_output=False)
+
+        if not sol.success:
+            raise RuntimeError(f"Solver failed: {sol.message}")
+
+        # Return final state as a plain Python list
+        return sol.y[:, -1].tolist()

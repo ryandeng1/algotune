@@ -1,6 +1,7 @@
-from typing import Any, List, Tuple
+# Optimised version of the solver
+
+from typing import List, Tuple
 from ortools.sat.python import cp_model
-from functools import lru_cache
 
 
 class Solver:
@@ -10,39 +11,43 @@ class Solver:
         n, m = len(A), len(B)
 
         model = cp_model.CpModel()
-
-        # Variables: x[i][p] = 1 if node i in G maps to node p in H
+        # boolean variables x[i][p] == 1 if vertex i in A is matched to vertex p in B
         x = [[model.NewBoolVar(f"x_{i}_{p}") for p in range(m)] for i in range(n)]
 
-        # One‑to‑one mapping constraints
+        # each vertex in A is matched to at most one in B
         for i in range(n):
-            model.Add(sum(x[i][p] for p in range(m)) <= 1)
+            model.Add(sum(x[i]) <= 1)
+        # each vertex in B is matched to at most one in A
         for p in range(m):
             model.Add(sum(x[i][p] for i in range(n)) <= 1)
 
-        # Pre‑compute the difference set: for each pair (i,j) store
-        # which pairs (p,q) disagree in the adjacency matrices.
-        @lru_cache(maxsize=None)
-        def bad_edges(i: int, j: int) -> List[Tuple[int, int]]:
-            return [(p, q) for p in range(m) for q in range(m)
-                    if p != q and A[i][j] != B[p][q]]
-
-        # Edge consistency constraints
+        # pre‑compute adjacency differences to avoid inner loops of quadruple iteration
+        diff = {}
         for i in range(n):
             for j in range(i + 1, n):
-                bad = bad_edges(i, j)
-                for p, q in bad:
-                    model.Add(x[i][p] + x[j][q] <= 1)
+                key = (i, j)
+                diff[key] = [True] * m * m
+                for p in range(m):
+                    for q in range(m):
+                        if p == q:
+                            diff[key][p * m + q] = False  # same vertex, no conflict
+                        elif A[i][j] == B[p][q]:
+                            diff[key][p * m + q] = False  # conflict, forbid simultaneously
 
-        # Objective: maximize the size of the mapping
+        # add conflict constraints
+        for (i, j), arr in diff.items():
+            for p in range(m):
+                for q in range(m):
+                    if not arr[p * m + q]:
+                        model.Add(x[i][p] + x[j][q] <= 1)
+
+        # objective: maximize number of matches
         model.Maximize(sum(x[i][p] for i in range(n) for p in range(m)))
 
         solver = cp_model.CpSolver()
-        # Optional: limit the solver to use less memory
-        solver.parameters.max_time_in_seconds = 60
+        solver.parameters.max_time_in_seconds = 30.0  # safety
         status = solver.Solve(model)
 
         if status == cp_model.OPTIMAL or status == cp_model.FEASIBLE:
-            return [(i, p) for i in range(n) for p in range(m)
-                    if solver.Value(x[i][p]) == 1]
+            return [(i, p) for i in range(n) for p in range(m) if solver.Value(x[i][p])]
         return []

@@ -1,52 +1,31 @@
 import numpy as np
+from scipy import sparse
 from scipy.sparse.linalg import eigsh
-from typing import Any, List
 
 class Solver:
-    def solve(self, problem: dict[str, Any]) -> List[float]:
-        """Compute the k smallest‑magnitude eigenvalues of a symmetric matrix.
+    def solve(self, problem: dict[str, Any]) -> list[float]:
+        mat = problem["matrix"].asformat("csr")
+        k = int(problem["k"])
+        n = mat.shape[0]
 
-        Parameters
-        ----------
-        problem : dict[str, Any]
-            Should contain:
-                - ``matrix`` : a SciPy sparse matrix with a ``asformat`` method
-                - ``k``     : int, number of eigenvalues to return
-
-        Returns
-        -------
-        List[float]
-            Sorted list of the k smallest‑magnitude eigenvalues (real part only).
-        """
-        # Pull inputs out of the problem dictionary
-        mat = problem["matrix"].asformat("csr")          # keep CSR to preserve sparsity
-        k   = int(problem["k"])
-        n   = mat.shape[0]
-
-        # Dense shortcut for trivial cases
+        # If we need all or almost all eigenvalues, just use dense routine
         if k >= n or n < 2 * k + 1:
-            vals = np.linalg.eigvalsh(mat.toarray())
-            return [float(v) for v in vals[:k]]
+            vals = np.linalg.eigvalsh(mat.toarray(), subset_by_index=(0, k - 1))
+            return [float(v) for v in vals]
 
-        # Use the efficient Lanczos method for sparse symmetric matrices.
-        # ``which='SM'`` asks for smallest magnitude eigenvalues.
-        # We request real eigenvalues only by setting `return_eigenvectors=False`.
-        # ``ncv`` is the dimension of the Krylov subspace; we choose it slightly
-        # larger than `k` but less than `n` to avoid memory blow‑up.
-        ncv = max(2 * k + 1, 20)
-        if ncv >= n:
-            ncv = n - 1  # cannot be equal to n for eigsh
+        # Try sparse eigsh, fall back to dense if it fails
+        try:
+            vals = eigsh(
+                mat,
+                k=k,
+                which="SM",
+                return_eigenvectors=False,
+                maxiter=n * 200,
+                ncv=min(n - 1, max(2 * k + 1, 20)),
+            )[0]
+        except Exception:
+            vals = np.linalg.eigvalsh(mat.toarray(), subset_by_index=(0, k - 1))
+        else:
+            vals = np.sort(vals)
 
-        vals = eigsh(
-            mat,
-            k=k,
-            which="SM",
-            return_eigenvectors=False,
-            maxiter=n * 200,
-            ncv=ncv,
-        )
-
-        # The values returned by eigsh are sorted already.  Cast to float
-        # and return the real part (which should be real for a symmetric
-        # matrix, but we keep the real() guard for completeness).
-        return [float(v.real) for v in np.sort(vals.real)]
+        return [float(v) for v in vals]

@@ -1,29 +1,37 @@
-from typing import Any
-import numpy as np
+from typing import Any, Dict, List
 
+def _simplex_projection(y: List[float]) -> List[float]:
+    """
+    Project the vector `y` onto the probability simplex.
+    Implements the O(n log n) algorithm from
+    https://arxiv.org/pdf/1309.1541.
+    """
+    # sort in decreasing order
+    u = sorted(y, reverse=True)
+    v = 0.0
+    theta = 0.0
+    for i, ui in enumerate(u, start=1):
+        v += ui
+        # check if current threshold satisfies the condition
+        if ui > (v - 1) / i:
+            continue
+        else:
+            theta = (v - 1) / i
+            break
+    else:
+        # all elements satisfy, theta = (v - 1)/len(u)
+        theta = (v - 1) / len(u)
+
+    return [max(yi - theta, 0.0) for yi in y]
 
 class Solver:
-    def solve(self, problem: dict[str, Any]) -> dict[str, list]:
+    def solve(self, problem: Dict[str, Any]) -> Dict[str, List[float]]:
         """
-        Compute the projection of vector `y` onto the probability simplex
-        using the O(n log n) algorithm based on sorting.
+        Solve the Euclidean projection onto the probability simplex.
+
+        :param problem: A dictionary containing the key 'y' with the input vector.
+        :return: A dictionary with key 'solution' containing the projected vector.
         """
-        y = np.asanyarray(problem["y"], dtype=float).ravel()
-        n = y.size
-
-        # Sort in decreasing order
-        sorted_y = np.sort(y)[::-1]
-
-        # Cumulative sum minus 1
-        cumsum = np.cumsum(sorted_y) - 1.0
-
-        # Find rho: the largest index where sorted_y > cumsum / (k+1)
-        k = np.arange(1, n + 1)
-        cond = sorted_y > cumsum / k
-        rho = cond.nonzero()[0][-1]  # guaranteed at least one True
-
-        theta = cumsum[rho] / (rho + 1.0)
-
-        # Compute the projected vector
-        x = np.maximum(y - theta, 0.0)
-        return {"solution": x.tolist()}
+        y = list(problem.get('y', []))
+        solution = _simplex_projection(y)
+        return {'solution': solution}

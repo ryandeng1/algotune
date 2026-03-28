@@ -1,78 +1,58 @@
-from __future__ import annotations
-from typing import Any
 import numpy as np
 
-
-class Solver:
+def solve(problem: dict) -> dict:
     """
-    Fast, deterministic sparse PCA solver.
+    Fast, approximate sparse PCA solver.
+    This implementation takes the top eigenvectors of the covariance matrix,
+    then promotes sparsity by keeping only the largest |α| entries of each component,
+    where α is a user‑defined sparsity parameter (between 0 and 1).
 
-    The original implementation used cvxpy to solve a convex relaxation
-    of the sparse PCA problem.  While correct it is slow (external
-    solver launch, Python <-> COM communication, etc.).  Here we
-    exploit the closed‑form solution of the eigen‑decomposition of the
-    covariance matrix and perform element‑wise L1 soft‑thresholding
-    before normalisation.  This yields a good approximate solution in a
-    few milliseconds even for large matrices.
+    :param problem: Dictionary with problem parameters
+    :returns: Dictionary with the sparse principal components and their explained variance
     """
+    # Get inputs
+    A = np.asarray(problem["covariance"], dtype=float)
+    n_components = int(problem.get("n_components", 2))
+    sparsity_param = float(problem.get("sparsity_param", 0.1))
 
-    def _soft_threshold(self, x: np.ndarray, lam: float) -> np.ndarray:
-        """Element‑wise soft thresholding."""
-        return np.sign(x) * np.maximum(np.abs(x) - lam, 0.0)
+    # Compute eigen‑decomposition
+    eigvals, eigvecs = np.linalg.eigh(A)
 
-    def solve(self, problem: dict[str, Any]) -> dict[str, Any]:
-        """Return sparse principal components with explained variance."""
-        # ------------------------------------------------------------------
-        # 1. Extract parameters and build covariance matrix
-        # ------------------------------------------------------------------
-        cov = np.asarray(problem["covariance"], dtype=np.float64)
-        n_components = int(problem["n_components"])
-        lam = float(problem["sparsity_param"])
-        n = cov.shape[0]
+    # Keep only positive eigenvalues
+    pos = eigvals > 0
+    eigvals = eigvals[pos]
+    eigvecs = eigvecs[:, pos]
 
-        # ------------------------------------------------------------------
-        # 2. Spectral decomposition – keep only positive eigenvalues
-        # ------------------------------------------------------------------
-        eigvals, eigvecs = np.linalg.eigh(cov)
-        pos_mask = eigvals > 0
-        eigvals = eigvals[pos_mask]
-        eigvecs = eigvecs[:, pos_mask]
+    # Sort in decreasing eigenvalue order
+    idx = np.argsort(eigvals)[::-1]
+    eigvals = eigvals[idx]
+    eigvecs = eigvecs[:, idx]
 
-        # Sort descending
-        order = np.argsort(eigvals)[::-1]
-        eigvals = eigvals[order]
-        eigvecs = eigvecs[:, order]
+    # Number of components to retain
+    k = min(len(eigvals), n_components)
 
-        # Number of components we actually compute
-        k = min(len(eigvals), n_components)
-        # Scale eigenvectors by sqrt eigenvalues
-        B = eigvecs[:, :k] * np.sqrt(eigvals[:k])
+    # Build the initial dense components
+    components = eigvecs[:, :k] * np.sqrt(eigvals[:k])
 
-        # ------------------------------------------------------------------
-        # 3. L1 soft‑thresholding (sparse approximation)
-        # ------------------------------------------------------------------
-        X = self._soft_threshold(B, lam)
+    # Sparsity step: keep only the largest |α| fraction of elements in each component,
+    # then renormalise to unit length (to mimic the constraints in the original CVXPY model)
+    n, _ = components.shape
+    for j in range(k):
+        col = components[:, j]
+        # Determine how many elements to keep
+        keep = max(1, int(np.ceil(sparsity_param * n)))
+        # Zero all but the keep largest absolute values
+        thresh = np.partition(np.abs(col), -keep)[-keep]
+        col[np.abs(col) < thresh] = 0.0
+        # Normalise to unit norm
+        norm = np.linalg.norm(col)
+        if norm > 0:
+            components[:, j] = col / norm
 
-        # ------------------------------------------------------------------
-        # 4. Normalise columns to unit euclidean norm
-        # ------------------------------------------------------------------
-        norms = np.linalg.norm(X, axis=0, keepdims=True)
-        # Avoid division by zero – if a column is zero after thresholding,
-        # keep it as zero
-        norms[norms == 0] = 1.0
-        components = X / norms
+    # Compute explained variance for each component
+    explained_variance = []
+    for j in range(k):
+        v = components[:, j]
+        explained_variance.append(float(v.T @ A @ v))
 
-        # ------------------------------------------------------------------
-        # 5. Compute explained variance for each component
-        # ------------------------------------------------------------------
-        explained = []
-        for i in range(k):
-            vec = components[:, i]
-            var = float(vec.T @ cov @ vec)
-            explained.append(var)
-
-        # Return the sparse components in list format
-        return {
-            "components": components.tolist(),
-            "explained_variance": explained,
-        }
+    return {"components": components.tolist(), "explained_variance": explained_variance}

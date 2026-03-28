@@ -1,7 +1,6 @@
 from typing import Any
 from ortools.sat.python import cp_model
 
-
 class Solver:
     def solve(self, problem: dict[str, Any]) -> list[int]:
         """
@@ -10,41 +9,34 @@ class Solver:
         Returns
         -------
         List[int]
-            offer[t] ∈ {‑1,0,…,N-1}.  ‑1 ⇒ offer nothing in period *t*.
+            offer[t] ∈ {‑1,0,…,N−1}.  ‑1 ⇒ offer nothing in period t.
         """
-        T = problem["T"]
-        N = problem["N"]
-        prices = problem["prices"]
-        capacities = problem["capacities"]
-        probs = problem["probs"]
+        T = problem['T']
+        N = problem['N']
+        prices = problem['prices']
+        capacities = problem['capacities']
+        probs = problem['probs']
 
         model = cp_model.CpModel()
+        # binary variables: x[t][i] == 1 if offer i is chosen at time t
+        x = {(t, i): model.NewBoolVar(f"x_{t}_{i}") for t in range(T) for i in range(N)}
 
-        # Decision vars: x[t,i] = 1 ⇔ offer product i in period t
-        x = {}
+        # at most one offer per time period
         for t in range(T):
-            for i in range(N):
-                x[(t, i)] = model.NewBoolVar(f"x_{t}_{i}")
+            model.Add(sum(x[t, i] for i in range(N)) <= 1)
 
-        # Each period at most one product
-        for t in range(T):
-            model.Add(sum(x[(t, i)] for i in range(N)) <= 1)
-
-        # Capacity limits
+        # capacity constraints for each offer
         for i in range(N):
-            model.Add(sum(x[(t, i)] for t in range(T)) <= capacities[i])
+            model.Add(sum(x[t, i] for t in range(T)) <= capacities[i])
 
-        # Objective: expected revenue
-        total_rev = sum(
-            prices[i] * probs[t][i] * x[(t, i)]
-            for t in range(T)
-            for i in range(N)
-        )
-        model.Maximize(total_rev)
+        # objective: maximize expected revenue
+        expected_rev = sum(prices[i] * probs[t][i] * x[t, i] for t in range(T) for i in range(N))
+        model.Maximize(expected_rev)
 
         solver = cp_model.CpSolver()
-        status = solver.Solve(model)
+        solver.parameters.max_time_in_seconds = 30.0  # optional timeout
 
+        status = solver.Solve(model)
         if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
             return [-1] * T
 
@@ -52,8 +44,9 @@ class Solver:
         for t in range(T):
             chosen = -1
             for i in range(N):
-                if solver.Value(x[(t, i)]) == 1:
+                if solver.Value(x[t, i]) == 1:
                     chosen = i
                     break
             offer.append(chosen)
+
         return offer

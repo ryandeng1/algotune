@@ -1,30 +1,24 @@
-from typing import Any
-import heapq
+from typing import List, Dict
 
 class Solver:
-    def solve(self, problem: dict[str, list[float]]) -> float:
+    def solve(self, problem: Dict[str, List[float]]) -> float:
         """
-        Computes the 1‑dimensional Wasserstein distance (Earth Mover's Distance)
-        between two discrete probability distributions `u` and `v` defined on
-        the same lattice of positions 1..n.
-
-        The implementation runs in O(n) time and O(1) additional space, using
-        the fact that the optimal transport plan for a 1‑D histogram is the
-        cumulative difference between the two histograms.
-
-        :param problem: a dict with keys `u` and `v` containing weight lists.
-        :return: the Wasserstein distance as a float.
+        Compute the 1‑dimensional Wasserstein distance
+        for two distributions defined on the discrete grid 1…n.
+        The distances are given by their probability mass functions in
+        problem['u'] and problem['v'].
         """
-        u = problem["u"]
-        v = problem["v"]
-        if len(u) != len(v):
-            raise ValueError("Distributions must have the same length.")
-        n = len(u)
+        u = problem.get("u")
+        v = problem.get("v")
+        if not u or not v or len(u) != len(v):
+            return float(len(u) if u else 0)
 
-        # Accumulate the difference between the cumulative distributions
-        diff = 0.0
-        total = 0.0
-        for i in range(n):
-            diff += u[i] - v[i]
-            total += abs(diff)
-        return total
+        # cumulative sums
+        cum_u = 0.0
+        cum_v = 0.0
+        dist = 0.0
+        for pu, pv in zip(u, v):
+            cum_u += pu
+            cum_v += pv
+            dist += abs(cum_u - cum_v)
+        return dist

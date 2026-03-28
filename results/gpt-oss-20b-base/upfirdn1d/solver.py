@@ -1,46 +1,43 @@
 import numpy as np
-from typing import List, Tuple, Any
+from typing import Any, List, Tuple
 
 class Solver:
-    def solve(self, problem: List[Tuple[np.ndarray, np.ndarray, int, int]]) -> List[np.ndarray]:
+    def solve(self, problem: List[Tuple[Any, Any, int, int]]) -> List[np.ndarray]:
         """
-        Compute the upfirdn operation for each problem definition in the list
-        without using SciPy.
-
+        Compute the upfirdn operation for each problem definition in the list.
         Parameters
         ----------
-        problem : List[Tuple[h, x, up, down]]
-            * h   : FIR filter coefficients (1‑D ndarray)
-            * x   : input signal (1‑D ndarray)
-            * up  : upsample factor (int)
-            * down: downsample factor (int)
-
+        problem : list of tuples (h, x, up, down)
+            - h : 1‑D array-like filter coefficients
+            - x : 1‑D array-like input signal
+            - up : integer up‑sampling factor (>=1)
+            - down : integer down‑sampling factor (>=1)
         Returns
         -------
-        List[np.ndarray]
-            Results of the upfirdn operation for each tuple.
+        list of np.ndarray
+            The upfirdn results for each tuple
         """
         results = []
 
         for h, x, up, down in problem:
-            # 1. Upsample x by inserting (up-1) zeros between samples
-            if up != 1:
-                up_len = len(x) * up - (up - 1)
-                upx = np.empty(up_len, dtype=x.dtype)
-                upx[::up] = x
-                upx[1::up] = 0
-            else:
-                upx = x
+            # Convert to numpy arrays
+            h = np.asarray(h, dtype=np.float64)
+            x = np.asarray(x, dtype=np.float64)
 
-            # 2. Convolve with FIR filter h (full mode)
-            #    Using np.convolve is efficient for 1‑D signals
-            conv = np.convolve(upx, h, mode='full')
-
-            # 3. Downsample by taking every `down`-th sample
-            if down != 1:
-                res = conv[::down]
+            # Upsample by inserting zeros
+            if up > 1:
+                up_x_len = len(x) * up
+                up_x = np.empty(up_x_len, dtype=x.dtype)
+                up_x[::up] = x
             else:
-                res = conv
+                up_x = x
+
+            # Linear convolution (full)
+            res = np.convolve(up_x, h, mode='full')
+
+            # Downsample
+            if down > 1:
+                res = res[::down]
 
             results.append(res)
 

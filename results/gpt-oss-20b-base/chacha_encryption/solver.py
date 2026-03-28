@@ -1,22 +1,26 @@
 from typing import Any
 from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
 
-CHACHA_KEY_SIZE = 32  # 256‑bit key for ChaCha20
-POLY1305_TAG_SIZE = 16  # 128‑bit authentication tag
+CHACHA_KEY_SIZE = 32
+POLY1305_TAG_SIZE = 16
 
 class Solver:
     def solve(self, problem: dict[str, Any]) -> dict[str, bytes]:
-        key = problem["key"]
+        """
+        Encrypt the plaintext with ChaCha20-Poly1305 and return the ciphertext
+        (excluding the authentication tag) together with the tag itself.
+        """
+        key = problem['key']
         if len(key) != CHACHA_KEY_SIZE:
-            raise ValueError(f"Invalid key size: {len(key)}. Must be {CHACHA_KEY_SIZE}.")
+            raise ValueError(f'Invalid key size: {len(key)}. Must be {CHACHA_KEY_SIZE}.')
 
-        # ChaCha20-Poly1305 encrypts and appends a 16‑byte tag.
-        ciphertext = ChaCha20Poly1305(key).encrypt(
-            problem["nonce"], problem["plaintext"], problem["associated_data"]
-        )
+        chacha = ChaCha20Poly1305(key)
+        # encrypt returns ciphertext || tag
+        ct_tag = chacha.encrypt(problem['nonce'], problem['plaintext'], problem['associated_data'])
+        if len(ct_tag) < POLY1305_TAG_SIZE:
+            raise ValueError('Encrypted output is shorter than the expected tag size.')
 
-        # Separate ciphertext and tag.
         return {
-            "ciphertext": ciphertext[:-POLY1305_TAG_SIZE],
-            "tag": ciphertext[-POLY1305_TAG_SIZE:],
+            'ciphertext': ct_tag[:-POLY1305_TAG_SIZE],
+            'tag': ct_tag[-POLY1305_TAG_SIZE:]
         }

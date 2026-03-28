@@ -1,46 +1,51 @@
+from typing import Any
 import numpy as np
-from typing import Dict, List, Any
-
+from scipy.integrate import solve_ivp
 
 class Solver:
     """
-    A minimal but efficient ODE solver implementation based on the
-    explicit Euler method. The solver accepts a problem dictionary
-    describing the initial state `y0`, a callable for the derivative
-    function `fun`, the time span `t_span`, and the number of steps
-    `n_steps`. The result is returned in the required dictionary format.
+    Optimised ODE solver for the specific 8‑state system.
+    The system is stiff, hence the Radau method is kept but
+    unnecessary overhead is removed:
+    * constants are captured once in the closure
+    * dense_output / t_eval are disabled unless debug=True
+    * the state array is stored as a plain `numpy.ndarray`
     """
 
-    def solve(self, problem: Dict[str, Any]) -> Dict[str, List[float]]:
-        """
-        Solve the ODE specified in *problem* and return the final state.
+    def solve(self, problem: dict[str, np.ndarray | float]) -> dict[str, list[float]]:
+        sol = self._solve(problem, debug=False)
+        if not sol.success:
+            raise RuntimeError(f"Solver failed: {sol.message}")
+        return sol.y[:, -1].tolist()
 
-        Parameters
-        ----------
-        problem : dict
-            Must contain:
-                * 'y0'   : np.ndarray   – Initial state vector.
-                * 'fun'  : callable     – derivative function f(t, y).
-                * 't_span' : tuple[float, float] – Start and end time.
-                * 'n_steps' : int        – Number of integration steps.
+    def _solve(self, problem: dict[str, np.ndarray | float], *, debug: bool = True) -> Any:
+        y0 = np.asarray(problem["y0"], dtype=float)
+        t0, t1 = problem["t0"], problem["t1"]
+        c = problem["constants"]
+        # capture constants once
+        def f(t, y):
+            # local variables for readability
+            c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12 = c
+            y1, y2, y3, y4, y5, y6, y7, y8 = y
+            f1 = -c1 * y1 + c2 * y2 + c3 * y3 + c4
+            f2 = c1 * y1 - c5 * y2
+            f3 = -c6 * y3 + c2 * y4 + c7 * y5
+            f4 = c3 * y2 + c1 * y3 - c8 * y4
+            f5 = -c9 * y5 + c2 * y6 + c2 * y7
+            f6 = -c10 * y6 * y8 + c11 * y4 + c1 * y5 - c2 * y6 + c11 * y7
+            f7 = c10 * y6 * y8 - c12 * y7
+            f8 = -c10 * y6 * y8 + c12 * y7
+            return np.array([f1, f2, f3, f4, f5, f6, f7, f8])
 
-        Returns
-        -------
-        dict
-            Dictionary with a single key 'final_state' mapping to the list
-            representation of the state at the final time step.
-        """
-        y0 = problem["y0"]
-        f = problem["fun"]
-        t0, t1 = problem["t_span"]
-        n = problem["n_steps"]
-
-        h = (t1 - t0) / n
-        y = y0.astype(np.float64, copy=True)
-
-        t = t0
-        for _ in range(n):
-            y += h * f(t, y)
-            t += h
-
-        return {"final_state": y.tolist()}
+        # Radau is chosen for stiff systems; dense_output only when debugging
+        sol = solve_ivp(
+            f,
+            (t0, t1),
+            y0,
+            method="Radau",
+            rtol=1e-10,
+            atol=1e-9,
+            t_eval=np.linspace(t0, t1, 1000) if debug else None,
+            dense_output=debug,
+        )
+        return sol

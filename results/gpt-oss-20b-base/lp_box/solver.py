@@ -1,37 +1,35 @@
-from typing import Any, Dict, List
+from typing import Any
 import numpy as np
 from scipy.optimize import linprog
 
-
 class Solver:
-    def solve(self, problem: Dict[str, Any]) -> Dict[str, List[float]]:
+    def solve(self, problem: dict[str, Any]) -> dict[str, list]:
         """
-        Solve the LP box problem using SciPy's `linprog` for speed.
+        Solve the LP box problem using SciPy's linear programming routine.
 
-        :param problem: A dictionary containing:
-                        - "c": cost vector
-                        - "A": constraint matrix
-                        - "b": right‑hand side vector
-        :return: Dictionary with key "solution" holding the optimal variable values.
+        The problem is:
+            minimize   cᵀ x
+            subject to A x ≤ b
+                       0 ≤ x ≤ 1
+
+        :param problem: A dictionary containing keys 'c', 'A', 'b'.
+        :return: Dictionary with key 'solution' containing the optimal x as a Python list.
         """
         c = np.asarray(problem["c"], dtype=float)
         A = np.asarray(problem["A"], dtype=float)
         b = np.asarray(problem["b"], dtype=float)
 
-        # Bounds: 0 <= x_i <= 1
-        bounds = [(0.0, 1.0)] * c.size
-
-        # linprog expects a mi p x n matrix for <= constraints
+        # SciPy's linprog expects A_ub @ x <= b_ub
         res = linprog(
             c,
             A_ub=A,
             b_ub=b,
-            bounds=bounds,
+            bounds=(0, 1),
             method="highs",
-            options={"presolve": True},
+            options={"presolve": True, "time_limit": 30},
         )
 
         if not res.success:
-            raise ValueError("Linear program did not converge to optimal solution.")
+            raise RuntimeError(f"LP solver failed: {res.message}")
 
         return {"solution": res.x.tolist()}

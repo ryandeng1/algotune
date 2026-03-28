@@ -1,46 +1,48 @@
 import numpy as np
-from scipy.linalg import solve as linalg_solve
+from scipy.linalg import cho_factor, cho_solve
 
-
-def solve(problem: dict[str, any]) -> dict[str, any]:
+def solve(problem: dict) -> dict:
     """
-    Compute optimal control sequence via backward Riccati recursion.
-
-    Returns a dictionary with key "U" (shape (T, m)).
+    Backward Riccati recursion to compute optimal control sequence.
+    Returns dictionary with key `"U"` (shape (T, m)).
     """
-    A, B = problem["A"], problem["B"]
-    Q, R, P = problem["Q"], problem["R"], problem["P"]
-    T, x0 = problem["T"], problem["x0"]
+    A = problem['A']          # (n, n)
+    B = problem['B']          # (n, m)
+    Q = problem['Q']          # (n, n)
+    R = problem['R']          # (m, m)
+    P = problem['P']          # (n, n)
+    T = problem['T']          # int
+    x0 = problem['x0']        # (n,)
 
     n, m = B.shape
-    # Pre‑allocate arrays
+    # Riccati matrices
     S = np.empty((T + 1, n, n), dtype=A.dtype)
-    K = np.empty((T, m, n), dtype=B.dtype)
+    K = np.empty((T, m, n), dtype=A.dtype)
     S[T] = P
 
-    # Backward pass
     for t in range(T - 1, -1, -1):
         St1 = S[t + 1]
-        # Solve (R + Bᵀ Stₜ₊₁ B) Kᵀ = Bᵀ Stₜ₊₁ A
-        M1 = R + B.T @ St1 @ B
-        M2 = B.T @ St1 @ A
-        # M1 is symmetric positive‑definite; use direct solver
-        L = np.linalg.cholesky(M1)
-        y = np.linalg.solve(L, M2)
-        K[t] = np.linalg.solve(L.T, y)
+        # M1 = R + B.T @ St1 @ B
+        BTSt1 = B.T @ St1
+        M1 = R + BTSt1 @ B
+        # K[t] = M1^{-1} @ (B.T @ St1 @ A)
+        rhs = BTSt1 @ A
+        # Use Cholesky for speed and numerical stability
+        c, lower = cho_factor(M1)
+        K[t] = cho_solve((c, lower), rhs)
 
+        # Closed‑loop dynamics
         Acl = A - B @ K[t]
-        # Riccati update with symmetry enforcement
+        # Update Riccati matrix
         S[t] = Q + K[t].T @ R @ K[t] + Acl.T @ St1 @ Acl
-        # Make symmetric explicitly
-        S[t] = 0.5 * (S[t] + S[t].T)
+        # Symmetrise to guard against round‑off
+        S[t] = (S[t] + S[t].T) * 0.5
 
-    # Forward pass
     U = np.empty((T, m), dtype=A.dtype)
     x = x0
     for t in range(T):
         u = -K[t] @ x
-        U[t] = u.ravel()
+        U[t] = u
         x = A @ x + B @ u
 
-    return {"U": U}
+    return {'U': U}

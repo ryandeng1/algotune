@@ -1,31 +1,11 @@
-import numpy as np
 from numpy.typing import NDArray
-from scipy.fft import dctn
-
+import scipy.fft
 
 class Solver:
-    """
-    Compute the N‑dimensional DCT Type I.
-
-    The implementation uses scipy.fft.dctn, which is generally
-    faster than the legacy fftpack version.  The function operates
-    in-place on the input array to reduce memory traffic.
-    """
-
     def solve(self, problem: NDArray) -> NDArray:
         """
-        Apply a type‑I DCT along all axes of *problem*.
-
-        Parameters
-        ----------
-        problem : NDArray
-            The input data to transform.
-
-        Returns
-        -------
-        NDArray
-            The transformed data.
+        Compute the N-dimensional DCT Type I using the fast CPU implementation
+        from :mod:`scipy.fft`. This routine is substantially quicker than the
+        legacy :mod:`scipy.fftpack.dctn` on modern platforms.
         """
-        # SciPy's dctn is implemented in C and returns a new array,
-        # but the overhead is minimal compared to the FFT itself.
-        return dctn(problem, type=1)
+        return scipy.fft.dctn(problem, type=1)

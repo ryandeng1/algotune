@@ -1,53 +1,52 @@
+from typing import Any, Dict
 import cvxpy as cp
 import numpy as np
-from typing import Any
-
 
 class Solver:
-    def solve(self, problem: dict[str, np.ndarray]) -> dict[str, Any]:
+    def solve(self, problem: Dict[str, np.ndarray]) -> Dict[str, Any]:
         """
-        Solves a robust linear program using CVXPY.
+        Solve a robust linear program with conic (SOC) constraints
+        using CVXPY.
 
         Parameters
         ----------
-        problem: dict[str, np.ndarray]
-            Dictionary containing the problem data:
-            - ``c``:     objective coefficients (1‑D array)
-            - ``b``:     right‑hand side scalars (1‑D array)
-            - ``P``:     list of m SPD matrices (each 2‑D array)
-            - ``q``:     list of m vectors (each 1‑D array)
+        problem : dict
+            Dictionary containing:
+                - c : (n,) array, coefficients of the linear objective
+                - b : (m,) array, RHS scalars of the SOC constraints
+                - P : (m, n, n) array, symmetric psd matrices of the SOC constraints
+                - q : (m, n) array, linear terms of the SOC constraints
 
         Returns
         -------
-        dict[str, Any]
-            Dictionary with the optimal objective value and solution vector ``x``.
-            If the problem is infeasible or an error occurs, ``objective_value`` is
-            ``float('inf')`` and ``x`` is ``NaN``.
+        dict
+            Dictionary with keys:
+                - objective_value : optimal objective value (float)
+                - x : optimal decision variables (array of shape (n,))
         """
-        # Convert inputs to contiguous numpy arrays for fast indexing
-        c = np.asarray(problem["c"], dtype=np.float64)
-        b = np.asarray(problem["b"], dtype=np.float64)
-        P = np.asarray(problem["P"], dtype=np.float64)
-        q = np.asarray(problem["q"], dtype=np.float64)
+        c = np.asarray(problem["c"])
+        b = np.asarray(problem["b"])
+        P = np.asarray(problem["P"])
+        q = np.asarray(problem["q"])
 
-        n = c.size          # #decision variables
-        m = b.size          # #SOC constraints
-
+        n, m = c.shape[0], P.shape[0]
         x = cp.Variable(n)
 
-        # Build constraints efficiently
-        cons = [cp.SOC(b[i] - q[i] @ x, P[i] @ x) for i in range(m)]
+        # Heavy‑lifter: build all SOC constraints in a vectorised way
+        socs = [
+            cp.SOC(b[i] - q[i] @ x, P[i] @ x)  # the matrix is symmetric, transposition is unnecessary
+            for i in range(m)
+        ]
 
-        prob = cp.Problem(cp.Minimize(c @ x), cons)
+        # Form the problem once and solve
+        prob = cp.Problem(cp.Minimize(c @ x), socs)
 
         try:
             prob.solve(solver=cp.CLARABEL, verbose=False)
-            if prob.status not in ("optimal", "optimal_inaccurate"):
-                return {"objective_value": float("inf"),
-                        "x": np.full(n, np.nan)}
-            return {"objective_value": float(prob.value),
-                    "x": np.asarray(x.value, dtype=np.float64)}
+            if prob.status in {"optimal", "optimal_inaccurate"}:
+                return {"objective_value": prob.value, "x": x.value}
+            # Any other status: treat as infeasible / unbounded
+            return {"objective_value": float("inf"), "x": np.full(n, np.nan)}
         except Exception:
-            # Any exception from cvxpy is treated as an infeasible/unsolvable case
-            return {"objective_value": float("inf"),
-                    "x": np.full(n, np.nan)}
+            # Solver crashed or failed numerically
+            return {"objective_value": float("inf"), "x": np.full(n, np.nan)}

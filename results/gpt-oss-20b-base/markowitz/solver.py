@@ -1,55 +1,38 @@
-from typing import Any
-import cvxpy as cp
 import numpy as np
+from cvxopt import matrix, solvers
 
+# Disable solver output for speed
+solvers.options['show_progress'] = False
+solvers.options['maxiters'] = 2000
+
+def _qpsolve(μ: np.ndarray, Σ: np.ndarray, γ: float):
+    """Solve the quadratic program:
+          max μ'w - γ w^T Σ w
+          s.t. sum(w) = 1, w >= 0
+    using cvxopt which is much faster than cvxpy for this simple case."""
+    n = μ.size
+    P = matrix(2 * γ * Σ, tc='d')
+    q = matrix(-μ, tc='d')                # objective: 0.5 w^T P w + q^T w
+
+    G = matrix(-np.eye(n), tc='d')        # w >= 0  ->  -w <= 0
+    h = matrix(np.zeros(n), tc='d')
+
+    A = matrix(np.ones((1, n)), tc='d')   # sum(w) = 1
+    b = matrix([1.0], tc='d')
+
+    sol = solvers.qp(P, q, G, h, A, b)
+    if sol['status'] != 'optimal':
+        return None
+    return np.array(sol['x']).reshape(-1)
 
 class Solver:
-    """
-    Optimizes a mean‑variance portfolio with non‑negativity and budget constraints.
-
-    The problem is
-        max  μᵀw – γ wᵀΣw
-        s.t. 1ᵀw = 1
-              w ≥ 0
-
-    Parameters
-    ----------
-    problem : dict
-        Dictionary containing ``"μ"``, ``"Σ"``, and ``"γ"``.
-
-    Returns
-    -------
-    dict
-        Optimal portfolio weights `w` in a list form, or ``None`` on failure.
-    """
-    def solve(self, problem: dict[str, Any]) -> dict[str, list[float]] | None:
-        # ------------- Pre‑process data ------------------------------------
-        mu = np.asarray(problem["μ"], dtype=np.float64, order="C")
-        sigma = np.asarray(problem["Σ"], dtype=np.float64, order="C")
-        gamma = float(problem["γ"])
-
-        n = mu.size
-
-        # ------------- Formulate the CVXPY problem -----------------------
-        w = cp.Variable(n, nonneg=True)
-        # use psd_wrap to avoid enforcing full PSD (quick reduction)
-        objective = cp.Maximize(mu @ w - gamma * cp.quad_form(w, cp.psd_wrap(sigma)))
-        constraints = [cp.sum(w) == 1]
-
-        prob = cp.Problem(objective, constraints)
-
-        # ------------- Solve -----------------------------------------------
-        try:
-            # OSQP is the fastest solver for quadratic constraints with
-            # inequality constraints – it is deterministic and fast on large
-            # industrial‑size data.  If not installed, fall back to the default.
-            prob.solve(solver=cp.OSQP, verbose=False, eps_abs=1e-6, eps_rel=1e-6)
-        except cp.error.SolverError:
+    def solve(self, problem: dict[str, any]) -> dict[str, list[float]] | None:
+        μ = np.asarray(problem['μ'], dtype=float)
+        Σ = np.asarray(problem['Σ'], dtype=float)
+        γ = float(problem['γ'])
+        if μ.shape != Σ.shape[0:2] or Σ.shape[0] != Σ.shape[1]:
             return None
-
-        # ------------- Validation ------------------------------------------
-        w_val = w.value
-        if w_val is None or not np.isfinite(w_val).all():
+        w = _qpsolve(μ, Σ, γ)
+        if w is None or not np.isfinite(w).all():
             return None
-
-        return {"w": w_val.tolist()}
+        return {'w': w.tolist()}

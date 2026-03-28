@@ -1,39 +1,46 @@
-from math import isqrt
+import math
 from typing import Dict
 
-def solve(problem: Dict[str, int]) -> Dict[str, int]:
-    """Solve the discrete logarithm g**x = h (mod p) using baby‑step giant‑step.
+class Solver:
+    def solve(self, problem: Dict[str, int]) -> Dict[str, int]:
+        """
+        Solve the discrete logarithm problem g^x ≡ h (mod p)
+        using the Baby‑Step Giant‑Step algorithm.
+        The function returns a dictionary with the key "x" set to the
+        smallest non‑negative solution.
+        """
+        p = problem["p"]
+        g = problem["g"]
+        h = problem["h"]
 
-    The algorithm runs in O(sqrt(p) * log p) time with O(sqrt(p)) memory.
-    """
-    p: int = problem["p"]
-    g: int = problem["g"] % p
-    h: int = problem["h"] % p
+        # Trivial cases
+        if h % p == 1:
+            return {"x": 0}
+        if g % p == 0:
+            # g == 0 modulo p only works if h == 0
+            return {"x": 1 if h % p == 0 else -1}
 
-    # Trivial cases
-    if h == 1:
-        return {"x": 0}
-    if g == 0:
-        return {"x": 1 if h == 0 else None}
+        # Find m = ceil(sqrt(p-1)) for the algorithm
+        m = math.isqrt(p - 1) + 1
 
-    # Pre‑compute baby steps: g^j (mod p) for j = 0 .. m-1
-    m = isqrt(p) + 1
-    baby = {}
-    cur = 1
-    for j in range(m):
-        if cur not in baby:        # keep smallest exponent
-            baby[cur] = j
-        cur = (cur * g) % p
+        # Baby steps: store g^j for j in [0, m-1]
+        baby = {}
+        cur = 1
+        for j in range(m):
+            if cur not in baby:
+                baby[cur] = j
+            cur = (cur * g) % p
 
-    # Compute g^-m mod p
-    inv_g_m = pow(g, (p - 1 - m) % (p - 1), p)
+        # Compute g^{-m} modulo p
+        inv_g_m = pow(g, (p - 1) - (m % (p - 1)), p)
 
-    # Giant steps: h * g^(-i*m) (mod p)
-    cur = h
-    for i in range(m):
-        if cur in baby:
-            return {"x": i * m + baby[cur]}
-        cur = (cur * inv_g_m) % p
+        # Giant steps
+        gamma = h % p
+        for i in range(m):
+            if gamma in baby:
+                x = i * m + baby[gamma]
+                return {"x": x}
+            gamma = (gamma * inv_g_m) % p
 
-    # No solution found
-    return {"x": None}
+        # No solution found (should not happen for prime modulus with primitive root)
+        return {"x": -1}

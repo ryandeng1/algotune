@@ -1,36 +1,47 @@
-from typing import Any
+from typing import Any, Dict, List
 import numpy as np
+from scipy.integrate import solve_ivp
 
 
 class Solver:
-    def solve(self, problem: dict[str, np.ndarray | float]) -> dict[str, list[float]]:
-        """
-        Solve the differential equation system defined in `problem`.
-
-        Parameters
-        ----------
-        problem : dict[str, np.ndarray | float]
-            A dictionary containing the problem parameters.
-            The keys expected by `_solve` are left unchanged.
-
-        Returns
-        -------
-        dict[str, list[float]]
-            Dictionary containing the final state of the system.
-
-        Raises
-        ------
-        RuntimeError
-            If the underlying solver fails.
-        """
-        # Delegate the heavy lifting to the private routine.
+    def solve(self, problem: Dict[str, np.ndarray | float]) -> Dict[str, List[float]]:
         sol = self._solve(problem, debug=False)
-
-        # Extract the final state only if the solution succeeded.
         if sol.success:
-            # `sol.y` is assumed to be a 2‑D NumPy array where the first axis
-            # corresponds to state variables and the second to time points.
-            # We return the last column as a plain Python list.
             return sol.y[:, -1].tolist()
-        # If the solver failed, propagate a clear diagnostics message.
         raise RuntimeError(f"Solver failed: {sol.message}")
+
+    def _solve(
+        self, problem: Dict[str, np.ndarray | float], debug: bool = True
+    ) -> Any:
+        y0 = np.array(problem["y0"])
+        t0, t1 = float(problem["t0"]), float(problem["t1"])
+        k1, k2, k3 = problem["k"]
+
+        def rober(t, y):
+            y1, y2, y3 = y
+            f0 = -k1 * y1 + k3 * y2 * y3
+            f1 = k1 * y1 - k2 * y2 * y2 - k3 * y2 * y3
+            f2 = k2 * y2 * y2
+            return [f0, f1, f2]  # list is cheaper than 1‑D array allocation
+
+        t_eval = (
+            np.clip(
+                np.exp(
+                    np.linspace(np.log(1e-6), np.log(t1), 1000)
+                ),
+                t0,
+                t1,
+            )
+            if debug
+            else None
+        )
+        return solve_ivp(
+            rober,
+            (t0, t1),
+            y0,
+            method="Radau",
+            rtol=1e-11,
+            atol=1e-9,
+            t_eval=t_eval,
+            dense_output=debug,
+        )

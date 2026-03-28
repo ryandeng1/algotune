@@ -2,38 +2,40 @@ import numpy as np
 
 class Solver:
     """
-    Compute the 2‑D correlation of two arrays using the FFT for maximum performance.
-    Works for the `"full"` mode and `"fill"` boundary which is equivalent to zero‑padding.
+    Efficient 2‑D correlation using FFT.
+    Supports "full" mode with zero padding (boundary = "fill").
     """
-    def __init__(self, mode: str = "full", boundary: str = "fill"):
-        if mode != "full":
-            raise NotImplementedError("Only 'full' mode is supported")
-        if boundary != "fill":
-            raise NotImplementedError("Only 'fill' boundary is supported")
-        self.mode = mode
-        self.boundary = boundary
+    def _next_fast_len(self, n):
+        """Return the next power‑of‑two length for efficient FFT."""
+        return 1 << (n - 1).bit_length()
 
-    def solve(self, problem: tuple[np.ndarray, np.ndarray]) -> np.ndarray:
+    def solve(self, problem: tuple) -> np.ndarray:
         a, b = problem
-        # Cast to float for FFT precision
-        a = np.asarray(a, dtype=np.float64)
-        b = np.asarray(b, dtype=np.float64)
+        # Ensure float type for FFT
+        a = np.asarray(a, dtype=np.float64, order="C")
+        b = np.asarray(b, dtype=np.float64, order="C")
 
-        # Determine output shape for full correlation
-        out_shape = (a.shape[0] + b.shape[0] - 1, a.shape[1] + b.shape[1] - 1)
+        # Sizes for full correlation
+        out_shape = (a.shape[0] + b.shape[0] - 1,
+                     a.shape[1] + b.shape[1] - 1)
 
-        # Pad arrays to the output shape (FFT length)
-        fft_shape = [np.max([size, out]) for size, out in zip((a.shape[0], a.shape[1]), out_shape)]
-        N, M = fft_shape
+        # Pad to next power‑of‑two for fast FFT (optional but often faster)
+        fft_shape = (self._next_fast_len(out_shape[0]),
+                     self._next_fast_len(out_shape[1]))
 
-        # FFT of padded arrays
-        fa = np.fft.rfft2(a, s=(N, M))
-        fb = np.fft.rfft2(b, s=(N, M))
+        # FFT of zero‑padded arrays
+        fa = np.fft.rfftn(a, fft_shape)
+        fb = np.fft.rfftn(b, fft_shape)
 
-        # Element‑wise multiplication for cross‑correlation (conjugate on second factor)
-        fc = fa * np.conj(fb)
+        # Element‑wise multiplication (correlation = flip b)
+        # Flip b over both axes
+        fb_flip = np.fft.ifftshift(fb)
+        corr_fft = fa * fb_flip
 
-        # Inverse FFT to get correlation, then crop to full mode size
-        corr = np.fft.irfft2(fc, s=(N, M))
-        start0, start1 = b.shape[0] - 1, b.shape[1] - 1
-        return corr[start0:start0 + out_shape[0], start1:start1 + out_shape[1]]
+        # Inverse FFT to get correlation
+        corr = np.fft.irfftn(corr_fft, fft_shape)
+
+        # Take real part and crop to full output size
+        corr = np.real(corr[:out_shape[0], :out_shape[1]])
+
+        return corr

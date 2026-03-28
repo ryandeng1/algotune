@@ -1,44 +1,40 @@
 from __future__ import annotations
+
 import numpy as np
+from scipy.integrate import solve_ivp
 from typing import Any, Dict, List
 
 
 class Solver:
-    """
-    A very lightweight and fast solver that evaluates a linear time‑invariant
-    system of the form
-
-        dy/dt = A @ y + b
-
-    with an explicit Euler integrator.  The solver is intentionally simple
-    so that it does not pull in heavyweight packages (e.g. SciPy) and
-    therefore offers excellent performance on typical I/O‑bound workloads.
-
-    The expected input ``problem`` is a mapping that contains at least:
-
-    * ``A``   – the system matrix (`np.ndarray`, shape ``(n, n)``).
-    * ``b``   – a constant forcing vector (`np.ndarray`, shape ``(n,)``).
-    * ``y0``  – the initial state vector (`np.ndarray`, shape ``(n,)``).
-    * ``t``   – an array of monotonically increasing time points
-                (`np.ndarray`, shape ``(m,)``).  Time steps may be
-                non‑uniform.
-
-    The output is a mapping with a single key ``"final_state"`` that
-    contains the state vector at the last time point as a plain Python
-    list of floats.
-    """
-
     def solve(self, problem: Dict[str, np.ndarray | float]) -> Dict[str, List[float]]:
-        A = problem["A"]
-        b = problem["b"]
-        y = problem["y0"].astype(float, copy=True)
-        t = problem["t"]
+        sol = self._solve(problem, debug=False)
+        if sol.success:
+            return sol.y[:, -1].tolist()
+        raise RuntimeError(f"Solver failed: {sol.message}")
 
-        dt = np.diff(t)
-        n = y.size
+    def _solve(self, problem: Dict[str, np.ndarray | float], debug: bool = False) -> Any:
+        y0 = np.asarray(problem["y0"], dtype=float)
+        t0, t1 = float(problem["t0"]), float(problem["t1"])
+        mu = float(problem["mu"])
 
-        # Explicit Euler integration
-        for i, step in enumerate(dt):
-            y += step * (A @ y + b)
+        def vdp(t: float, y: "np.ndarray[float, shape=(2,)]") -> "np.ndarray[float, shape=(2,)]":
+            x, v = y
+            return np.array([v, mu * ((1 - x ** 2) * v - x)], dtype=float)
 
-        return {"final_state": y.tolist()}
+        # Radau is well suited for stiff systems like the Van der Pol oscillator
+        method = "Radau"
+        rtol, atol = 1e-8, 1e-9
+
+        # If debugging, we want intermediate points, otherwise just the end
+        t_eval = np.linspace(t0, t1, 1000) if debug else None
+
+        return solve_ivp(
+            vdp,
+            [t0, t1],
+            y0,
+            method=method,
+            rtol=rtol,
+            atol=atol,
+            t_eval=t_eval,
+            dense_output=debug,
+        )

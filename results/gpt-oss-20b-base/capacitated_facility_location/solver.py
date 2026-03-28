@@ -1,61 +1,44 @@
 from typing import Any
-import pulp
+import cvxpy as cp
 import numpy as np
 
 
 class Solver:
     def solve(self, problem: dict[str, Any]) -> dict[str, Any]:
-        """
-        Solves the Capacitated Facility Location Problem using PuLP with CBC solver.
+        # Extract data into NumPy arrays
+        fixed_costs = np.asarray(problem["fixed_costs"], dtype=float)
+        capacities = np.asarray(problem["capacities"], dtype=float)
+        demands = np.asarray(problem["demands"], dtype=float)
+        transport_costs = np.asarray(problem["transportation_costs"], dtype=float)
 
-        Args:
-            problem: A dictionary containing problem parameters.
-
-        Returns:
-            A dictionary containing:
-                - objective_value: optimal objective value
-                - facility_status: list of bools for open facilities
-                - assignments: matrix x_{ij} assignments
-        """
-        # Extract data
-        fixed_costs = np.array(problem["fixed_costs"])
-        capacities = np.array(problem["capacities"])
-        demands = np.array(problem["demands"])
-        transportation_costs = np.array(problem["transportation_costs"])
-
-        n_facilities = len(fixed_costs)
-        n_customers = len(demands)
-
-        # Create problem instance
-        model = pulp.LpProblem("Capacitated_Facility_Location", pulp.LpMinimize)
+        n_facilities = fixed_costs.size
+        n_customers = demands.size
 
         # Decision variables
-        y = [pulp.LpVariable(f"y_{i}", cat="Binary") for i in range(n_facilities)]
-        x = [[pulp.LpVariable(f"x_{i}_{j}", cat="Binary") for j in range(n_customers)]
-             for i in range(n_facilities)]
+        y = cp.Variable(n_facilities, boolean=True)
+        x = cp.Variable((n_facilities, n_customers), boolean=True)
 
-        # Objective: fixed costs + transportation costs
-        model += (pulp.lpSum(fixed_costs[i] * y[i] for i in range(n_facilities)) +
-                  pulp.lpSum(transportation_costs[i][j] * x[i][j]
-                             for i in range(n_facilities)
-                             for j in range(n_customers)))
+        # Objective: facility opening + transportation cost
+        objective = cp.Minimize(
+            fixed_costs @ y + cp.sum(cp.multiply(transport_costs, x))
+        )
 
         # Constraints
-        # Each customer must be assigned to exactly one facility
-        for j in range(n_customers):
-            model += pulp.lpSum(x[i][j] for i in range(n_facilities)) == 1
+        constraints = []
 
-        # Demand & capacity constraints
-        for i in range(n_facilities):
-            # Total demand assigned to facility i must not exceed its capacity if it is open
-            model += pulp.lpSum(demands[j] * x[i][j] for j in range(n_customers)) <= capacities[i] * y[i]
-            # Assignment only allowed if facility is open
-            for j in range(n_customers):
-                model += x[i][j] <= y[i]
+        # Each customer served exactly once
+        constraints.append(cp.sum(x, axis=0) == 1)
 
-        # Solve
+        # Facility capacity constraints
+        constraints.append((x.T @ demands) <= capacities * y)
+
+        # Assignments only to open facilities
+        constraints.append(x <= y[:, None])
+
+        # Build and solve the problem
+        prob = cp.Problem(objective, constraints)
         try:
-            model.solve(pulp.PULP_CBC_CMD(msg=False))
+            prob.solve(solver=cp.HIGHS, verbose=False)
         except Exception:
             return {
                 "objective_value": float("inf"),
@@ -63,23 +46,19 @@ class Solver:
                 "assignments": [[0.0] * n_customers for _ in range(n_facilities)],
             }
 
-        status = pulp.LpStatus.get(model.status, "")
-        if status not in ("Optimal", "Optimal (integer)", "Optimal (within tolerance)"):
+        if prob.status not in (cp.OPTIMAL, cp.OPTIMAL_INACCURATE):
             return {
                 "objective_value": float("inf"),
                 "facility_status": [False] * n_facilities,
                 "assignments": [[0.0] * n_customers for _ in range(n_facilities)],
             }
 
-        # Retrieve solution
-        y_vals = np.array([bool(pulp.value(var)) for var in y], dtype=int)
-        x_vals = np.array([[bool(pulp.value(var)) for var in row] for row in x], dtype=int)
-
-        facility_status = [bool(val) for val in y_vals.tolist()]
-        assignments = x_vals.tolist()
+        # Retrieve integer solutions
+        y_vals = np.clip(np.rint(y.value), 0, 1).astype(int)
+        x_vals = np.clip(np.rint(x.value), 0, 1).astype(int)
 
         return {
-            "objective_value": float(pulp.value(model.objective)),
-            "facility_status": facility_status,
-            "assignments": assignments,
+            "objective_value": float(prob.value),
+            "facility_status": y_vals.astype(bool).tolist(),
+            "assignments": x_vals.tolist(),
         }

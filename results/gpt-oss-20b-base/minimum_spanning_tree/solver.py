@@ -1,40 +1,47 @@
-from typing import Any, Dict, List
-
+from typing import Any
 
 class Solver:
-    def solve(self, problem: Dict[str, Any]) -> Dict[str, List[List[float]]]:
-        # Kruskal's algorithm with a disjoint‑set structure
+    def solve(self, problem: dict[str, Any]) -> dict[str, list[list[float]]]:
+        """
+        Construct MST with Kruskal's algorithm and return edges sorted by (u, v).
+        """
         edges = problem["edges"]
-        # Ensure each edge is stored as (weight, u, v) for easy sorting
-        sorted_edges = sorted([(w, u, v) for u, v, w in edges])
+        num_nodes = problem["num_nodes"]
 
-        parent = list(range(problem["num_nodes"]))
-        rank = [0] * problem["num_nodes"]
+        # Sort edges by weight
+        edges_sorted = sorted(edges, key=lambda e: e[2])
 
-        def find(x: int) -> int:
+        # Union-Find data structure
+        parent = list(range(num_nodes))
+        rank = [0] * num_nodes
+
+        def find(x):
             while parent[x] != x:
                 parent[x] = parent[parent[x]]
                 x = parent[x]
             return x
 
-        def union(x: int, y: int) -> bool:
-            rx, ry = find(x), find(y)
-            if rx == ry:
+        def union(x, y):
+            xroot, yroot = find(x), find(y)
+            if xroot == yroot:
                 return False
-            if rank[rx] < rank[ry]:
-                parent[rx] = ry
-            elif rank[rx] > rank[ry]:
-                parent[ry] = rx
+            if rank[xroot] < rank[yroot]:
+                parent[xroot] = yroot
+            elif rank[xroot] > rank[yroot]:
+                parent[yroot] = xroot
             else:
-                parent[ry] = rx
-                rank[rx] += 1
+                parent[yroot] = xroot
+                rank[xroot] += 1
             return True
 
-        mst_edges: List[List[float]] = []
-        for w, u, v in sorted_edges:
+        mst_edges = []
+        for u, v, w in edges_sorted:
             if union(u, v):
                 if u > v:
                     u, v = v, u
                 mst_edges.append([u, v, w])
+                if len(mst_edges) == num_nodes - 1:
+                    break
 
+        mst_edges.sort(key=lambda x: (x[0], x[1]))
         return {"mst_edges": mst_edges}

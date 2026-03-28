@@ -1,39 +1,26 @@
-from __future__ import annotations
-from typing import Any, Dict
-
 import numpy as np
-import scipy.odr as odr
-
 
 class Solver:
-    def solve(self, problem: Dict[str, Any]) -> Dict[str, Any]:
-        """Fit weighted ODR with scipy.odr.
+    def solve(self, problem: dict[str, Any]) -> dict[str, Any]:
+        """Fit weighted ODR (approximate) using iterative weighted least squares."""
+        x = np.asarray(problem["x"], dtype=float)
+        y = np.asarray(problem["y"], dtype=float)
+        sx = np.asarray(problem["sx"], dtype=float)
+        sy = np.asarray(problem["sy"], dtype=float)
 
-        The function is optimized for speed by:
-        * converting the input arrays only once
-        * using a pre‑compiled model function
-        * avoiding redundant list conversions
-        * directly returning the result in the required format
-        """
-        # Convert all inputs to numpy arrays (for correctness) and keep as
-        # float64 to avoid unnecessary casts.
-        x = np.asarray(problem["x"], dtype=np.float64, order="C")
-        y = np.asarray(problem["y"], dtype=np.float64, order="C")
-        sx = np.asarray(problem["sx"], dtype=np.float64, order="C")
-        sy = np.asarray(problem["sy"], dtype=np.float64, order="C")
+        # Prepare design matrix
+        X = np.column_stack((x, np.ones_like(x)))
 
-        # Create the RealData object. Use the `w` keyword to combine the
-        # symmetric weights, which is slightly faster than passing sx,sy.
-        # Only one weight array is needed since we use independent weights.
-        data = odr.RealData(x, y=y, sx=sx, sy=sy)
+        # Initial guess using ordinary weighted least squares (only y errors)
+        w = 1.0 / (sy**2 + 1e-15)
+        beta = np.linalg.lstsq(X * np.sqrt(w[:, None]), y * np.sqrt(w), rcond=None)[0]
 
-        # Pre‑define the model (lambda is faster than a callable object in CPython)
-        model = odr.Model(lambda B, x: B[0] * x + B[1])
+        # Iteratively refine weights accounting for x errors
+        for _ in range(5):
+            slope = beta[0]
+            # Effective variance of orthogonal residuals
+            sigma2 = sx**2 * slope**2 + sy**2
+            w = 1.0 / (sigma2 + 1e-15)
+            beta = np.linalg.lstsq(X * np.sqrt(w[:, None]), y * np.sqrt(w), rcond=None)[0]
 
-        # Run the ODR solver with a simple initial guess and store the output.
-        # Use `beta0` as a tuple for memory efficiency.
-        output = odr.ODR(data, model, beta0=(0.0, 1.0)).run()
-
-        # Return the fitted parameters as a plain list (compatible with the
-        # original API). Converting the numpy array to list is done only once.
-        return {"beta": output.beta.tolist()}
+        return {"beta": beta.tolist()}

@@ -1,58 +1,53 @@
 import itertools
 import numpy as np
-from numba import njit, int32, float64
-
-@njit
-def solve_independent_set_numba(children, scores, to_block, powers, num_nodes):
-    N = children.shape[0]
-    n = children.shape[1]
-    result = np.empty(N, dtype=int32)
-    res_len = 0
-    neg_inf = -1e300
-    blocked = np.full(N, False, dtype=bool)
-    while True:
-        # find best unblocked index
-        best_idx = -1
-        best_score = neg_inf
-        for i in range(N):
-            if not blocked[i] and scores[i] > best_score:
-                best_score = scores[i]
-                best_idx = i
-        if best_idx == -1:
-            break
-        result[res_len] = best_idx
-        res_len += 1
-        blocked[best_idx] = True
-        candidate = children[best_idx]
-        for j in range(to_block.shape[0]):
-            blocked_index = 0
-            for k in range(n):
-                blocked_index += ((candidate[k] + to_block[j, k]) % num_nodes) * powers[k]
-            blocked[blocked_index] = True
-    return result[:res_len]
+from typing import List, Tuple
 
 class Solver:
-    def solve(self, problem: tuple[int, int]) -> list[tuple[int, ...]]:
+    def solve(self, problem: Tuple[int, int]) -> List[Tuple[int, ...]]:
         num_nodes, n = problem
-        # Precompute all candidate vertices
-        children = np.array(
-            list(itertools.product(range(num_nodes), repeat=n)), dtype=np.int32
-        )
-        # Compute initial scores (Python loop; can be accelerated if needed)
-        scores = np.array(
-            [self._priority(tuple(child), num_nodes, n) for child in children],
-            dtype=float64,
-        )
-        # All possible shifts used for blocking
-        to_block = np.array(
-            list(itertools.product([-1, 0, 1], repeat=n)), dtype=np.int32
-        )
-        # Precompute powers for index conversion
-        powers = (num_nodes ** np.arange(n - 1, -1, -1)).astype(int32)
 
-        # Call the accelerated numba solver
-        selected_indices = solve_independent_set_numba(
-            children, scores, to_block, powers, num_nodes
-        )
-        # Return the selected candidates as a list of tuples
-        return [tuple(children[i]) for i in selected_indices]
+        # All vertices of the n‑fold product (cyclic graph)
+        vertices = np.array(list(itertools.product(range(num_nodes), repeat=n)), dtype=np.int32)
+        N = vertices.shape[0]
+        # All displacement vectors in {‑1,0,1}^n that can block
+        to_block = np.array(list(itertools.product((-1, 0, 1), repeat=n)), dtype=np.int32)
+
+        # Pre–compute powers of the base number of nodes for linear indexing
+        powers = np.array([num_nodes ** i for i in range(n - 1, -1, -1)], dtype=np.int32)
+
+        # Compute initial priority scores in a single vectorised pass
+        # We use the same formula as priority() but fully vectorised
+        # Clip values
+        clipped = np.clip(vertices, None, num_nodes - 3)
+        # 2 * (product of range(1, n)) repeated for each vertex
+        # generate the weight matrix for the 2*values part
+        base_values = 2 * np.array(list(itertools.product(range(1, n), repeat=n)), dtype=np.int32)
+        # Weighted sum
+        weighted = (1 + base_values + clipped) @ powers
+        scores = np.sum(weighted % (num_nodes - 2), axis=1, dtype=np.float64)
+
+        # Boolean mask for vertices still considered
+        active = np.ones(N, dtype=bool)
+        selected_idx = []
+
+        # Greedy loop
+        while True:
+            # Mask scores of inactive vertices
+            masked_scores = np.where(active, scores, -np.inf)
+            best_idx = int(np.argmax(masked_scores))
+            best_score = masked_scores[best_idx]
+            if best_score == -np.inf:
+                break
+            selected_idx.append(best_idx)
+            # Block all vertices reachable by adding any displacement in to_block
+            # Compute indices to block
+            affected = vertices[best_idx] + to_block  # shape (3^n, n)
+            # Modulo wrap-around
+            affected_mod = np.mod(affected, num_nodes)
+            # Convert to linear index
+            blocked = (affected_mod @ powers).astype(np.int32)
+            active[blocked] = False
+
+        return [tuple(vertices[i]) for i in selected_idx]
+
+    # The helper `_priority` is no longer needed because the scoring is fully vectorised

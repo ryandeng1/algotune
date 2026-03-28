@@ -1,73 +1,63 @@
 import numpy as np
 
-
 class Solver:
     def solve(self, problem: dict) -> dict:
-        # extract data
-        A = np.asarray(problem["A"], dtype=float)
-        B = np.asarray(problem["B"], dtype=float)
-        C = np.asarray(problem["C"], dtype=float)
-        y = np.asarray(problem["y"], dtype=float)
-        x0 = np.asarray(problem["x_initial"], dtype=float)
-        tau = float(problem["tau"])
+        A = np.array(problem['A'])
+        B = np.array(problem['B'])
+        C = np.array(problem['C'])
+        y = np.array(problem['y'])
+        x0 = np.array(problem['x_initial'])
+        tau = float(problem['tau'])
 
         N, m = y.shape
         n = A.shape[1]
         p = B.shape[1]
 
-        # Pre‑compute powers of A and intermediate matrices
-        A_pow = [np.eye(n, dtype=float)]
-        for _ in range(1, N + 1):
-            A_pow.append(A @ A_pow[-1])
+        # Build mapping from w to all states x
+        # X = T x0 + Gw * w_vec
+        T = [np.eye(n)]
+        for _ in range(N):
+            T.append(A @ T[-1])
+        T = np.stack(T, axis=0)          # (N+1, n, n)
+        T0 = T @ x0                     # (N+1, n)
 
-        # Build B_tilde such that
-        # x[t] = A_pow[t] @ x0 + B_tilde[t] @ w
-        B_tilde = np.zeros((N, n, N, p), dtype=float)  # not used directly
-        Psi = np.zeros((n * N, p * N), dtype=float)   # slope of [x0,x1,...,x_{N-1}] wrt w
-
+        # Gw: (N+1, n, N*p)
+        Gw = np.zeros((N + 1, n, N * p))
         for t in range(N):
-            # coefficient matrix for w[k] in x[t]
+            Gw[t + 1, :, t * p : (t + 1) * p] = B
             for k in range(t):
-                idx_w = k * p
-                idx_x = t * n
-                Psi[idx_x : idx_x + n, idx_w : idx_w + p] = (
-                    A_pow[t - k - 1] @ B
-                )
+                Gw[t + 1, :, k * p : (k + 1) * p] = A @ Gw[t, :, k * p : (k + 1) * p]
 
-        # Vector part due to x0
-        Phi_x0 = np.concatenate([A_pow[t] @ x0 for t in range(N)], axis=0)  # shape (n*N,)
+        Gw = Gw.reshape((N + 1) * n, N * p)
 
-        # Build the linear operator on w: (y - C * Phi_x0) - C * Psi * w
-        Q = C @ Psi                  # shape (m*N, p*N)
-        r = y - C @ Phi_x0           # shape (m*N,)
+        # Build measurement mapping: y_vec = (C @ X) + v
+        # Here v = y - C @ X
+        Cmat = np.vstack([C @ np.eye(n) for _ in range(N)])
+        Cx0 = Cmat @ T0.reshape(-1)
+        Gvv = Cmat @ Gw
 
-        # Solve weighted least squares: w = argmin ||w||^2 + tau * ||Q w - r||^2
-        # Equivalent to least squares on [I; sqrt(tau)*Q] * w ~ [0; sqrt(tau)*r]
-        I = np.eye(p * N)
-        sqrt_tau = np.sqrt(tau)
-        A_ls = np.vstack([I, sqrt_tau * Q])
-        b_ls = np.concatenate([np.zeros(p * N), sqrt_tau * r])
+        y_vec = y.reshape(-1)
 
-        # Use numpy.linalg.lstsq (economical) for stability
+        # Solve (I + tau Gvv^T Gvv) w = tau Gvv^T (y - Cx0)
+        M = np.eye(N * p) + tau * Gvv.T @ Gvv
+        rhs = tau * Gvv.T @ (y_vec - Cx0)
         try:
-            w_hat, *_ = np.linalg.lstsq(A_ls, b_ls, rcond=None)
-        except Exception:
-            return {"x_hat": [], "w_hat": [], "v_hat": []}
+            w_vec = np.linalg.solve(M, rhs)
+        except np.linalg.LinAlgError:
+            return {'x_hat': [], 'w_hat': [], 'v_hat': []}
 
-        # recover x sequentially
-        x_hat = np.zeros((N, n))
-        prev = x0
-        for t in range(N):
-            w_t = w_hat[t * p : (t + 1) * p]
-            x_t = A @ prev + B @ w_t
-            x_hat[t] = x_t
-            prev = x_t
+        # Recover states
+        X_vec = T0.reshape(-1) + Gw @ w_vec
+        X = X_vec.reshape(N + 1, n)
 
-        # recover v from measurements: v[t] = y[t] - C x[t]
-        v_hat = y - (C @ x_hat.T).T
+        # Recover w
+        w = w_vec.reshape(N, p)
+
+        # Recover v
+        v = y - (C @ X[:N].T).T
 
         return {
-            "x_hat": x_hat.tolist(),
-            "w_hat": w_hat.reshape((N, p)).tolist(),
-            "v_hat": v_hat.tolist(),
+            'x_hat': X.tolist(),
+            'w_hat': w.tolist(),
+            'v_hat': v.tolist()
         }

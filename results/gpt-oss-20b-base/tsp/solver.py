@@ -1,51 +1,51 @@
-from ortools.sat.python import cp_model
-from typing import List
+from typing import List, Tuple, Dict
 
 class Solver:
     def solve(self, problem: List[List[int]]) -> List[int]:
-        """Solve the TSP problem using CP‑SAT.
-
-        Args:
-            problem: Distance matrix.
-
-        Returns:
-            Tour starting and ending at city 0 or an empty list on failure.
-        """
         n = len(problem)
         if n <= 1:
             return [0, 0]
 
-        model = cp_model.CpModel()
+        # Held‑Karp dynamic programming
+        END = 1 << (n - 1)      # mask for node 0
+        INF = 10 ** 18
 
-        # Edge variables: one for each directed pair (i, j) with i != j
-        x = {}
-        for i in range(n):
-            for j in range(n):
-                if i != j:
-                    x[(i, j)] = model.NewBoolVar(f"x[{i},{j}]")
+        # dp[mask][i] = minimal cost to start at 0, visit nodes in mask, end at i
+        dp: List[Dict[int, int]] = [{} for _ in range(1 << n)]
+        parent: List[Dict[int, int]] = [{} for _ in range(1 << n)]
 
-        # Circuit constraint modelling a tour that visits all cities once
-        model.AddCircuit([(u, v, x[(u, v)]) for (u, v) in x])
+        dp[1 << 0][0] = 0  # start at node 0
 
-        # Objective: minimize total travel cost
-        cost = sum(problem[i][j] * x[(i, j)]
-                   for (i, j) in x)
-        model.Minimize(cost)
+        for mask in range(1 << n):
+            for u in dp[mask]:
+                cost_u = dp[mask][u]
+                for v in range(n):
+                    if mask & (1 << v):
+                        continue
+                    new_mask = mask | (1 << v)
+                    new_cost = cost_u + problem[u][v]
+                    if new_cost < dp[new_mask].get(v, INF):
+                        dp[new_mask][v] = new_cost
+                        parent[new_mask][v] = u
 
-        # Solver
-        solver = cp_model.CpSolver()
-        solver.parameters.log_search_progress = True
-        status = solver.Solve(model)
+        full_mask = (1 << n) - 1
+        min_cost = INF
+        last = -1
+        for v in range(1, n):
+            c = dp[full_mask].get(v, INF) + problem[v][0]
+            if c < min_cost:
+                min_cost = c
+                last = v
 
-        if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-            tour = []
-            current = 0
-            for _ in range(n):
-                tour.append(current)
-                for nxt in range(n):
-                    if current != nxt and solver.Value(x[(current, nxt)]) == 1:
-                        current = nxt
-                        break
-            tour.append(0)
-            return tour
-        return []
+        # reconstruct tour
+        tour = [0]
+        mask = full_mask
+        cur = last
+        while cur != 0:
+            tour.append(cur)
+            prev = parent[mask][cur]
+            mask ^= (1 << cur)
+            cur = prev
+        tour.append(0)
+        tour.reverse()
+        return tour

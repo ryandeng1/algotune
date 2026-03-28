@@ -1,164 +1,148 @@
 import math
 import bisect
-from typing import Iterable, List, Tuple, Dict
+from typing import Iterable
+from pysat.solvers import Solver as SATSolver
+import networkx as nx
 
-# Lightweight graph representation and all‑pairs shortest distances
+
 class Distances:
-    def __init__(self, graph: Dict[str, Dict[str, float]]) -> None:
-        """
-        graph: adjacency dict {node: {nbr: weight}}
-        Computes all‑pairs shortest distances via Floyd‑Warshall.
-        """
-        nodes = list(graph)
-        index = {n: i for i, n in enumerate(nodes)}
-        n = len(nodes)
-        # initialize distance matrix
-        INF = math.inf
-        dist = [[INF] * n for _ in range(n)]
-        for u in nodes:
-            i = index[u]
-            dist[i][i] = 0
-            for v, w in graph[u].items():
-                j = index[v]
-                dist[i][j] = min(dist[i][j], w)
-
-        # Floyd‑Warshall
-        for k in range(n):
-            dk = dist[k]
-            for i in range(n):
-                di = dist[i]
-                aik = di[k]
-                if aik == INF:
-                    continue
-                for j in range(n):
-                    bk = dk[j]
-                    if bk == INF:
-                        continue
-                    new = aik + bk
-                    if new < di[j]:
-                        di[j] = new
-
-        self._nodes = nodes
-        self._index = index
-        self._dist = dist
+    def __init__(self, graph: nx.Graph) -> None:
+        # Pre‑compute the all‑pairs distances once.
+        self._distances = dict(nx.all_pairs_dijkstra_path_length(graph))
 
     def all_vertices(self) -> Iterable[str]:
-        return self._nodes
+        return self._distances.keys()
 
     def dist(self, u: str, v: str) -> float:
-        i, j = self._index[u], self._index[v]
-        return self._dist[i][j]
+        return self._distances[u].get(v, math.inf)
 
-    def max_dist(self, centers: List[str]) -> float:
-        ci = [self._index[c] for c in centers]
-        maxd = 0
-        for u in self._nodes:
-            iu = self._index[u]
+    def max_dist(self, centers: Iterable[str]) -> float:
+        maxd = 0.0
+        for u in self.all_vertices():
             mind = math.inf
-            for c in ci:
-                d = self._dist[iu][c]
+            for c in centers:
+                d = self.dist(c, u)
                 if d < mind:
                     mind = d
-                    if mind == 0:
-                        break
             if mind > maxd:
                 maxd = mind
         return maxd
 
     def vertices_in_range(self, u: str, limit: float) -> Iterable[str]:
-        iu = self._index[u]
-        return (self._nodes[j]
-                for j, d in enumerate(self._dist[iu])
-                if d <= limit)
+        return (v for v, d in self._distances[u].items() if d <= limit)
 
-    def sorted_distances(self) -> List[float]:
-        return sorted(d for row in self._dist for d in row if d < math.inf)
-
-# SAT solver wrapper (requires `pysat`)
-try:
-    from pysat.solvers import Solver as SATSolver
-except Exception:  # pragma: no cover
-    SATSolver = None  # SAT path can be omitted if unavailable
+    def sorted_distances(self) -> list[float]:
+        return sorted(
+            d for dist_dict in self._distances.values() for d in dist_dict.values()
+        )
 
 
 class Solver:
-    def solve(self, problem: Tuple[Dict[str, Dict[str, float]], int]) -> List[str]:
+    def solve(self, problem: tuple[dict[str, dict[str, float]], int]) -> list[str]:
         G_dict, k = problem
+        graph = nx.Graph()
+        for src, neigh in G_dict.items():
+            for dst, w in neigh.items():
+                graph.add_edge(src, dst, weight=w)
 
-        distances = Distances(G_dict)
-
-        # Simple greedy heuristic
-        def solve_heur(k: int) -> List[str]:
-            if not G_dict:
-                return [] if k == 0 else []
-
-            nodes = set(G_dict)
-            if k == 0:
-                return []
-
-            # First center: min max distance
-            first = min(nodes,
-                        key=lambda c: max(distances.dist(c, u) for u in nodes))
-            centers = [first]
-            nodes.remove(first)
-
-            while len(centers) < k:
-                best = max(nodes,
-                           key=lambda v: min(distances.dist(c, v) for c in centers))
-                centers.append(best)
-                nodes.remove(best)
-            return centers
-
-        # SAT decision variant
         class KCenterDecisionVariant:
-            def __init__(self, distances: Distances, k: int):
-                self.dist = distances
-                self.k = k
-                self.node_vars = {
-                    v: i + 1 for i, v in enumerate(distances.all_vertices())
-                }
-                if SATSolver is None:
-                    raise RuntimeError("pysat not available")
-                self.solver = SATSolver("MiniCard")
-                self.solver.add_atmost(list(self.node_vars.values()), k=k)
-                self.solver_model = None
+            def __init__(self, distances: Distances, k: int) -> None:
+                self.distances = distances
+                self._node_vars = {node: i for i, node in enumerate(self.distances.all_vertices(), start=1)}
+                self._sat_solver = SATSolver("MiniCard")
+                self._sat_solver.add_atmost(list(self._node_vars.values()), k=k)
+                self._solution = None
 
-            def limit_distance(self, limit: float):
-                for v in self.dist.all_vertices():
-                    clause = [self.node_vars[u]
-                              for u in self.dist.vertices_in_range(v, limit)]
+            def limit_distance(self, limit: float) -> None:
+                for v in self.distances.all_vertices():
+                    clause = [self._node_vars[u] for u in self.distances.vertices_in_range(v, limit)]
                     if clause:
-                        self.solver.add_clause(clause)
+                        self._sat_solver.add_clause(clause)
 
-            def solve(self) -> List[str] | None:
-                if not self.solver.solve():
+            def solve(self) -> list[str] | None:
+                if not self._sat_solver.solve():
                     return None
-                model = self.solver.get_model()
-                chosen = [v for v, var in self.node_vars.items() if var in model]
-                return chosen
+                model = self._sat_solver.get_model()
+                if model is None:
+                    raise RuntimeError("SAT solver returned no model.")
+                self._solution = [
+                    node for node, var in self._node_vars.items() if var in model
+                ]
+                return self._solution
 
-        # Combine heuristic and SAT refinement
-        cent = solve_heur(k)
-        obj = distances.max_dist(cent)
-        variant = KCenterDecisionVariant(distances, k)
+            def get_solution(self) -> list[str]:
+                if self._solution is None:
+                    raise ValueError("No solution available. Call `solve` first.")
+                return self._solution
 
-        all_dists = distances.sorted_distances()
-        idx = bisect.bisect_left(all_dists, obj)
-        cand_dists = all_dists[:idx]
-        if not cand_dists:
-            return cent
-        variant.limit_distance(cand_dists[-1])
+        class KCentersSolver:
+            def __init__(self, graph: nx.Graph) -> None:
+                self.graph = graph
+                self.distances = Distances(graph)
 
-        while True:
-            sol = variant.solve()
-            if sol is None:
-                break
-            cent = sol
-            obj = distances.max_dist(cent)
-            idx = bisect.bisect_left(all_dists, obj)
-            if idx == 0:
-                break
-            cand_dists = all_dists[:idx]
-            variant.limit_distance(cand_dists[-1])
+            def solve_heur(self, k: int) -> list[str]:
+                nodes = set(self.graph.nodes)
+                if not nodes:
+                    return []
+                if k == 0:
+                    return []
 
-        return cent
+                def farthest_from(node_set):
+                    best = None
+                    bestd = -1
+                    for n in node_set:
+                        dmax = 0.0
+                        for m in node_set:
+                            d = self.distances.dist(n, m)
+                            if d > dmax:
+                                dmax = d
+                        if dmax > bestd:
+                            bestd = dmax
+                            best = n
+                    return best
+
+                center = farthest_from(nodes)
+                nodes.remove(center)
+                centers = [center]
+                while len(centers) < k:
+                    # choose node that is farthest from its nearest center
+                    best = None
+                    bestdist = -1
+                    for n in nodes:
+                        mind = min(self.distances.dist(c, n) for c in centers)
+                        if mind > bestdist:
+                            bestdist = mind
+                            best = n
+                    nodes.remove(best)
+                    centers.append(best)
+                return centers
+
+            def solve(self, k: int) -> list[str]:
+                centers = self.solve_heur(k)
+                best_obj = self.distances.max_dist(centers)
+
+                dec_var = KCenterDecisionVariant(self.distances, k)
+                all_dists = self.distances.sorted_distances()
+
+                # binary search initial bound
+                i = bisect.bisect_left(all_dists, best_obj)
+                dist_slice = all_dists[:i]
+                if not dist_slice:
+                    return centers
+                dec_var.limit_distance(dist_slice[-1])
+
+                while True:
+                    sol = dec_var.solve()
+                    if sol is None:
+                        break
+                    centers = sol
+                    best_obj = self.distances.max_dist(centers)
+                    i = bisect.bisect_left(all_dists, best_obj)
+                    dist_slice = all_dists[:i]
+                    if not dist_slice:
+                        break
+                    dec_var.limit_distance(dist_slice.pop())
+                return centers
+
+        solver = KCentersSolver(graph)
+        return solver.solve(k)

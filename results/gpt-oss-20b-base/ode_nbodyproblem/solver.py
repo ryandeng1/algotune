@@ -1,83 +1,55 @@
-from __future__ import annotations
-from typing import Any, Dict, List, Tuple
-
 import numpy as np
-
+from scipy.integrate import solve_ivp
 
 class Solver:
-    """
-    A very small, self‑contained ODE solver that performs an explicit Euler
-    integration for a system of linear ODEs of the form
+    def solve(self, problem: dict[str, np.ndarray | float]) -> dict[str, list[float]]:
+        sol = self._solve(problem, debug=False)
+        if sol.success:
+            return sol.y[:, -1].tolist()
+        raise RuntimeError(f"Solver failed: {sol.message}")
 
-        y' = A · y + b
+    def _solve(self, problem: dict[str, np.ndarray | float], debug: bool = True) -> Any:
+        y0 = np.asarray(problem["y0"], dtype=np.float64)
+        t0, t1 = problem["t0"], problem["t1"]
+        masses = np.asarray(problem["masses"], dtype=np.float64)
+        softening = problem["softening"]
+        n = problem["num_bodies"]
 
-    The input dictionary must contain the following keys:
+        def nbodyproblem(t, y):
+            # extract positions and velocities
+            pos = y[: n * 3].reshape(n, 3)
+            vel = y[n * 3 :].reshape(n, 3)
 
-        - ``A``:  2‑D NumPy array of shape (n, n).
-        - ``b``:  1‑D NumPy array of length n.
-        - ``y0``: 1‑D NumPy array of the initial state (length n).
-        - ``t``:  1‑D NumPy array of time points at which the solution is
-                 required.  The array must start with zero.
+            # pairwise relative vectors (j - i)
+            rij = pos[None, :, :] - pos[:, None, :]  # shape (n, n, 3)
+            # squared distances with softening
+            dist2 = np.sum(rij ** 2, axis=2) + softening ** 2  # (n, n)
+            # avoid self-interaction by masking
+            np.fill_diagonal(dist2, np.inf)
 
-    The solver returns a dictionary containing:
+            # 1 / r^3 for each pair
+            inv_r3 = 1.0 / (dist2 * np.sqrt(dist2))  # (n, n)
+            # mass[j] * inv_r3[i, j]
+            coeff = inv_r3 * masses  # broadcast masses to rows (n, n)
 
-        - ``success``: bool, always ``True`` for the simple Euler method.
-        - ``y``:       2‑D NumPy array of shape (n, len(t)) with the state
-                       trajectory.
-        - ``message``: empty string.
-    """
+            # vector forces on each body: sum over j
+            acc = np.einsum("nij,ij->ni", rij, coeff)  # (n, 3)
 
-    def solve(self, problem: Dict[str, np.ndarray | float]) -> Dict[str, List[float]]:
-        """
-        Compute the state of the system at the final time point.
-        Parameters
-        ----------
-        problem : dict
-            Dictionary containing the keys described in the class docstring.
+            # derivative of state vector
+            return np.concatenate([vel.reshape(-1), acc.reshape(-1)])
 
-        Returns
-        -------
-        dict[str, list[float]]
-            The state at the final time point represented as a list of floats.
-        """
-        A = np.asarray(problem["A"], dtype=np.float64)
-        b = np.asarray(problem["b"], dtype=np.float64).reshape(-1)
-        y0 = np.asarray(problem["y0"], dtype=np.float64).reshape(-1)
-        t = np.asarray(problem["t"], dtype=np.float64).reshape(-1)
+        # integration settings
+        rtol, atol = 1e-8, 1e-8
+        method = "RK45"
+        t_eval = np.linspace(t0, t1, 1000) if debug else None
 
-        if t[0] != 0.0:
-            raise ValueError("Time array must start from 0.0")
-
-        n = A.shape[0]
-        steps = len(t)
-
-        # Pre‑allocate trajectory matrix
-        y = np.empty((n, steps), dtype=np.float64)
-        y[:, 0] = y0
-
-        # Compute time step sizes
-        dt = np.diff(t)
-
-        # Vectorised Euler integration
-        for k in range(steps - 1):
-            y_dot = A @ y[:, k] + b
-            y[:, k + 1] = y[:, k] + dt[k] * y_dot
-
-        result = {"success": True, "y": y, "message": ""}
-
-        # Return final state as list of floats
-        final_state = result["y"][:, -1].tolist()
-        return {"success": result["success"], "final_state": final_state, "message": result["message"]}
-
-
-# Example usage (to be removed or commented out in production):
-if __name__ == "__main__":
-    solver = Solver()
-    prob = {
-        "A": np.array([[-1.0, 0.0], [0.0, -0.5]]),
-        "b": np.array([0.0, 0.0]),
-        "y0": np.array([1.0, 2.0]),
-        "t": np.linspace(0, 10, 101),
-    }
-    sol_dict = solver.solve(prob)
-    print(sol_dict["final_state"])
+        return solve_ivp(
+            nbodyproblem,
+            [t0, t1],
+            y0,
+            method=method,
+            rtol=rtol,
+            atol=atol,
+            t_eval=t_eval,
+            dense_output=debug,
+        )

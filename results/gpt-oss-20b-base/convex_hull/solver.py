@@ -1,37 +1,57 @@
-from typing import Any, Dict, List
-import numpy as np
-from scipy.spatial import ConvexHull
-
+from typing import Any, List, Tuple
 
 class Solver:
-    def solve(self, problem: Dict[str, Any]) -> Dict[str, Any]:
+    def solve(self, problem: dict[str, Any]) -> dict[str, Any]:
         """
-        Compute the convex hull of a set of points using SciPy's
-        ConvexHull implementation.
+        Compute the 2‑D convex hull of a set of points using the
+        monotone chain algorithm (O(n log n)).  This implementation
+        avoids importing heavy libraries such as scipy and is
+        therefore much faster for problems that fit into memory.
 
         Parameters
         ----------
         problem : dict
-            Dictionary containing the key ``"points"``, which is an
-            (n, d) array-like of point coordinates.
+            Expected to contain a key ``"points"`` with a list of
+            ``[x, y]`` coordinates.
 
         Returns
         -------
         dict
-            Dictionary with two keys:
-            * ``"hull_vertices"`` – a list of the indices of the input
-              points that form the hull.
-            * ``"hull_points"`` – a list of the corresponding coordinate
-              values in the same order as ``hull_vertices``.
+            ``"hull_vertices"`` – list of indices of the input points
+            that form the convex hull (in counter‑clockwise order).
+            ``"hull_points"`` – the corresponding coordinate pairs.
         """
-        # Ensure input is a NumPy array for fast indexing
-        points = np.asarray(problem["points"])
+        points: List[List[float]] = problem["points"]
+        if len(points) < 3:
+            return {"hull_vertices": list(range(len(points))), "hull_points": points}
 
-        # Compute the convex hull
-        hull = ConvexHull(points)
+        # Attach original indices so we can return them later
+        indexed = [(x, y, i) for i, (x, y) in enumerate(points)]
 
-        # Convert the indices and points to plain Python lists
-        hull_vertices: List[int] = hull.vertices.tolist()
-        hull_points: List[List[float]] = points[hull.vertices].tolist()
+        # Sort by (x, y)
+        indexed.sort(key=lambda p: (p[0], p[1]))
+
+        def cross(o, a, b):
+            return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+
+        # Build lower hull
+        lower = []
+        for p in indexed:
+            while len(lower) >= 2 and cross(lower[-2], lower[-1], p) <= 0:
+                lower.pop()
+            lower.append(p)
+
+        # Build upper hull
+        upper = []
+        for p in reversed(indexed):
+            while len(upper) >= 2 and cross(upper[-2], upper[-1], p) <= 0:
+                upper.pop()
+            upper.append(p)
+
+        # Concatenate lower and upper to get full hull, removing duplicate endpoints
+        hull = lower[:-1] + upper[:-1]
+
+        hull_vertices = [p[2] for p in hull]
+        hull_points = [[p[0], p[1]] for p in hull]
 
         return {"hull_vertices": hull_vertices, "hull_points": hull_points}

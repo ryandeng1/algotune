@@ -1,43 +1,37 @@
-from typing import Any, Dict, List
 import numpy as np
+from typing import Any, Dict, List
 
 class Solver:
-    def solve(self, problem: Dict[str, Any]) -> Dict[str, List[float]]:
+    def solve(self, problem: Dict[str, Any]) -> Dict[str, List]:
         """
-        Compute the convolution of two 1-D signals using the Fast Fourier Transform.
-        Implements the full, valid, and same modes that scipy.signal.fftconvolve
-        supports.
+        Compute the linear convolution of two real sequences using FFT.
+        Chosen for speed: only uses NumPy (no SciPy dependency) and
+        handles both 'full' and 'same' modes.
         """
-        x = np.asarray(problem["signal_x"], dtype=np.float64)
-        y = np.asarray(problem["signal_y"], dtype=np.float64)
+        # Convert inputs to 1‑D float arrays
+        x = np.asarray(problem["signal_x"], dtype=np.float64, copy=False)
+        y = np.asarray(problem["signal_y"], dtype=np.float64, copy=False)
 
-        mode = problem.get("mode", "full")
+        # Lengths of the inputs
+        nx, ny = x.shape[0], y.shape[0]
+        # Size of the FFT: next power of two of nx + ny - 1
+        nfft = 1 << (nx + ny - 1).bit_length()
 
-        # Length of the convolution
-        n = x.size + y.size - 1
+        # Forward FFT of zero‑padded inputs
+        X = np.fft.rfft(x, nfft)
+        Y = np.fft.rfft(y, nfft)
 
-        # Pad to the next power of two for faster FFT on most hardware
-        m = int(2 ** np.ceil(np.log2(n)))
-        X = np.fft.rfft(x, m)
-        Y = np.fft.rfft(y, m)
-        conv = np.fft.irfft(X * Y, m)[:n]
+        # Element‑wise product in frequency domain and inverse FFT
+        conv = np.fft.irfft(X * Y, nfft)[: nx + ny - 1]
 
+        mode = problem.get("mode", "full").lower()
         if mode == "full":
             result = conv
-        elif mode == "valid":
-            # Valid length is max(len(x), len(y)) - min(len(x), len(y)) + 1
-            vlen = max(x.size, y.size) - min(x.size, y.size) + 1
-            start = n - vlen
-            result = conv[start:start + vlen]
         elif mode == "same":
-            # Same length as the longer input, centered
-            if x.size >= y.size:
-                start = (y.size - 1) // 2
-                result = conv[start:start + x.size]
-            else:
-                start = (x.size - 1) // 2
-                result = conv[start:start + y.size]
+            start = (ny - 1) // 2
+            result = conv[start:start + nx]
         else:
             raise ValueError(f"Unsupported mode: {mode}")
 
+        # Return as a plain Python list
         return {"convolution": result.tolist()}

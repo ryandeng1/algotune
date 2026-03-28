@@ -1,33 +1,35 @@
 import numpy as np
-from contextlib import nullcontext
-try:
-    from threadpoolctl import threadpool_limits
-except Exception:
-    threadpool_limits = None
 
+def solve(problem: list[float]) -> list[float]:
+    """
+    Find all real roots of a polynomial given by its coefficients
+    in descending order.
 
-def _single_thread_blas():
-    return nullcontext() if threadpool_limits is None else threadpool_limits(limits=1)
+    Parameters
+    ----------
+    problem : list[float]
+        Coefficients of the polynomial [aₙ, aₙ₋₁, …, a₀].
 
+    Returns
+    -------
+    list[float]
+        Real roots sorted in descending order.
+    """
+    # Convert to ndarray once (avoid repeated conversions)
+    coeffs = np.asarray(problem, dtype=float)
 
-class Solver:
-    def solve(self, problem: list[float]) -> list[float]:
-        """
-        Solve the polynomial problem by finding all real roots of the polynomial.
-        The polynomial is given as a list of coefficients [aₙ, aₙ₋₁, …, a₀].
-        The roots are returned as a list of real numbers in descending order.
-        """
-        # Ensure input is a NumPy array of dtype float for speed.
-        coeff = np.asarray(problem, dtype=float)
+    # Compute all roots (complex in general)
+    roots = np.roots(coeffs)
 
-        with _single_thread_blas():
-            roots = np.roots(coeff)
+    # Discard negligible imaginary parts
+    # `real_if_close` keeps the value as complex if the imag part is
+    # > tol; otherwise it casts to real.  The default tol works well for
+    # typical numerical noise.
+    roots = np.real_if_close(roots, tol=0.001)
 
-        # Drop negligible imaginary parts and keep only real values.
-        # Using tol=1e-3 is efficient and matches the original behavior.
-        roots = np.real_if_close(roots, tol=1e-3).astype(float)
+    # Extract only the real part (now guaranteed to be real)
+    roots = np.asarray(roots.real, dtype=float)
 
-        # Sort in descending order – the np.sort operation is already optimal.
-        roots.sort()
-        roots = roots[::-1]
-        return roots.tolist()
+    # Sort in descending order
+    roots.sort()
+    return roots[::-1].tolist()

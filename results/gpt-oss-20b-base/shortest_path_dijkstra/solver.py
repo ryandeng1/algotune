@@ -1,41 +1,41 @@
-from typing import Any
+from typing import Any, Dict
 import numpy as np
 import scipy.sparse
 import scipy.sparse.csgraph
 
-
 class Solver:
-    def solve(self, problem: dict[str, Any]) -> dict[str, list[list[float]]]:
+    method = "FW"          # Floyd‑Warshall, works for dense or sparse graphs
+    directed = False
+
+    def solve(self, problem: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Solves the all‑pairs shortest path problem using scipy.sparse.csgraph.shortest_path.
-        :param problem: A dictionary representing the graph in CSR components.
-        :return: A dictionary with key "distance_matrix":
-                 "distance_matrix": The matrix of shortest path distances (list of lists).
-                 np.inf is represented as None for JSON serialisation.
+        Computes all-pairs shortest path distances.
+
+        Parameters
+        ----------
+        problem : dict
+            Dictionary with keys 'data', 'indices', 'indptr', and 'shape' describing a CSR matrix.
+
+        Returns
+        -------
+        dict
+            {'distance_matrix': list[list[float]]} with `None` where no path exists.
         """
-        try:
-            graph_csr = scipy.sparse.csr_matrix(
-                (problem["data"], problem["indices"], problem["indptr"]),
-                shape=problem["shape"],
-            )
-        except Exception:
-            return {"distance_matrix": []}
+        # Build CSR matrix in one go (fast)
+        graph_csr = scipy.sparse.csr_matrix(
+            (problem["data"], problem["indices"], problem["indptr"]),
+            shape=problem["shape"],
+        )
 
-        try:
-            dist_matrix = scipy.sparse.csgraph.shortest_path(
-                csgraph=graph_csr, method=self.method, directed=self.directed
-            )
-        except Exception:
-            return {"distance_matrix": []}
+        # Compute distances
+        dist_matrix = scipy.sparse.csgraph.shortest_path(
+            csgraph=graph_csr,
+            method=self.method,
+            directed=self.directed,
+        )
 
-        # Replace np.inf with None in a vectorised way
-        inf_mask = np.isinf(dist_matrix)
-        dist_matrix[inf_mask] = np.nan  # replace by NaN first
-        dist_matrix_list = dist_matrix.tolist()
-        # Convert NaN to None for JSON compatibility
-        for i, row in enumerate(dist_matrix_list):
-            for j, val in enumerate(row):
-                if val != val:  # NaN test
-                    dist_matrix_list[i][j] = None
+        # Convert infinities to None efficiently
+        dist_matrix[dist_matrix == np.inf] = None
 
-        return {"distance_matrix": dist_matrix_list}
+        # Convert to list of lists for the required output format
+        return {"distance_matrix": dist_matrix.tolist()}

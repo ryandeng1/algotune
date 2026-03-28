@@ -1,54 +1,49 @@
-from typing import Any, Dict
-import cvxpy as cp
 import numpy as np
-
+import cvxpy as cp
+from typing import Any, Dict
 
 class Solver:
     def solve(self, problem: Dict[str, np.ndarray]) -> Dict[str, Any]:
         """
-        Solve the minimum volume covering ellipsoid (MVCE) problem.
+        Solves a minimum volume covering ellipsoid problem using CVXPY.
 
         Parameters
         ----------
         problem : dict
-            Must contain key ``"points"``, an ``(n, d)`` array of sample points.
+            Dictionary containing a single key 'points', which is a 2‑D numpy array
+            of shape (n, d) with the points to be enclosed.
 
         Returns
         -------
         dict
-            ``objective_value`` : optimal (negative log‑determinant) value
-            ``ellipsoid`` : dictionary with keys ``X`` (symmetric matrix) and ``Y`` (center)
+            Dictionary with keys:
+                - objective_value: the optimal objective value (≈ log(volume)).
+                - ellipsoid: a dict with the optimal symmetric matrix X and vector Y.
         """
-        points = np.asarray(problem["points"])
+        points = np.asarray(problem["points"], dtype=np.float64)
         n, d = points.shape
 
-        # Decision variables
         X = cp.Variable((d, d), symmetric=True)
         Y = cp.Variable(d)
 
-        # Constraints:  ||X @ p_i + Y||_2 ≤ 1  for all points
-        constraints = []
-        for i in range(n):
-            constraints.append(cp.norm(X @ points[i] + Y, 2) <= 1)
+        constraints = [cp.SOC(1, X @ points[i] + Y) for i in range(n)]
+        prob = cp.Problem(cp.Minimize(-cp.log_det(X)), constraints)
 
-        # Objective: minimise -logdet(X)
-        objective = cp.Minimize(-cp.log_det(X))
-
-        # Problem definition and solution
-        prob = cp.Problem(objective, constraints)
         try:
             prob.solve(solver=cp.CLARABEL, verbose=False)
         except Exception:
-            # Infeasible / solver error – return empty solution
             return {
                 "objective_value": float("inf"),
                 "ellipsoid": {"X": np.full((d, d), np.nan), "Y": np.full(d, np.nan)},
             }
 
-        if prob.status not in (cp.OPTIMAL, cp.OPTIMAL_INACCURATE):
+        if prob.status not in {"optimal", "optimal_inaccurate"}:
             return {
                 "objective_value": float("inf"),
                 "ellipsoid": {"X": np.full((d, d), np.nan), "Y": np.full(d, np.nan)},
             }
 
-        return {"objective_value": prob.value, "ellipsoid": {"X": X.value, "Y": Y.value}}
+        return {
+            "objective_value": prob.value,
+            "ellipsoid": {"X": X.value, "Y": Y.value},
+        }

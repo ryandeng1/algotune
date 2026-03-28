@@ -1,55 +1,39 @@
-from typing import Any
-import cvxpy as cp
 import numpy as np
-
+import cvxpy as cp
 
 class Solver:
-    def solve(
-        self, problem: dict[str, list[list[int]] | list[float] | int]
-    ) -> dict[str, list[list[float]] | float]:
-        """
-        Solves the Perron-Frobenius matrix completion using CVXPY.
-
-        Args:
-            problem: Dict containing inds, a, n.
-
-        Returns:
-            Dict with estimates B, optimal_value.
-        """
-        inds = np.asarray(problem["inds"])
-        a = np.asarray(problem["a"])
+    def solve(self, problem):
+        # preprocess inputs
+        inds = np.array(problem["inds"])
+        a = np.array(problem["a"])
         n = problem["n"]
 
-        xx, yy = np.mgrid[0:n, 0:n]
-        allinds = np.column_stack((yy.ravel(), xx.ravel()))
-
-        # Determine indices that are not given
-        mask = np.any(np.all(allinds[:, None] == inds, axis=2), axis=1)
-        otherinds = allinds[~mask]
-
-        # CVXPY variables
+        # Create matrix variable
         B = cp.Variable((n, n), pos=True)
 
-        # Objective: minimize the Perron-Frobenius eigenvalue
-        objective = cp.Minimize(cp.pf_eigenvalue(B))
+        # Objective: minimize Perron–Frobenius eigenvalue
+        obj = cp.Minimize(cp.pf_eigenvalue(B))
 
         # Constraints
+        row, col = np.indices((n, n))
+        all_inds = np.column_stack([row.ravel(), col.ravel()])
+        mask = np.ones(all_inds.shape[0], dtype=bool)
+        for (r, c) in inds:
+            mask &= ~(all_inds[:, 0] == r) | ~(all_inds[:, 1] == c)
+        prod_inds = all_inds[mask]
         constraints = [
-            cp.prod(cp.as_matrix(B[otherinds[:, 0], otherinds[:, 1]])) == 1.0,
             B[inds[:, 0], inds[:, 1]] == a,
+            cp.prod(B[prod_inds[:, 0], prod_inds[:, 1]]) == 1
         ]
 
-        # Solve
-        prob = cp.Problem(objective, constraints)
+        prob = cp.Problem(obj, constraints)
         try:
             result = prob.solve(gp=True)
-        except (cp.SolverError, Exception):
+        except cp.SolverError:
+            return None
+        except Exception:
             return None
 
-        if prob.status not in (cp.OPTIMAL, cp.OPTIMAL_INACCURATE) or B.value is None:
+        if B.value is None:
             return None
-
-        return {
-            "B": B.value.tolist(),
-            "optimal_value": result,
-        }
+        return {"B": B.value.tolist(), "optimal_value": result}

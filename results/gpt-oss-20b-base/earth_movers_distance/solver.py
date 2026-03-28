@@ -3,22 +3,38 @@ import ot
 
 
 class Solver:
+    """
+    Fast solver for the Earth Mover's Distance (EMD) problem.
+    Utilises the highly optimised `ot.emd` routine from
+    the POT (Python Optimal Transport) library.
+    """
+
     def solve(self, problem: dict[str, np.ndarray]) -> dict[str, list[list[float]]]:
         """
-        Solve the Earth Mover's Distance (EMD) problem using POT's LP solver.
-        The function expects the input problem dictionary to contain
-        the source weights `source_weights` (1‑D array-like), the target weights
-        `target_weights` (1‑D array-like), and the cost matrix `cost_matrix`
-        (2‑D array-like). The source and target weight vectors must sum to the
-        same value and be non‑negative. The returned solution dictionary
-        contains the optimal transport plan under the key `"transport_plan"`.
+        Compute the optimal transport plan between two discrete
+        distributions using an efficient linear programming solver.
+
+        Parameters
+        ----------
+        problem : dict[str, np.ndarray]
+            Must contain the keys:
+                - 'source_weights': 1‑D array of shape (n,)
+                - 'target_weights': 1‑D array of shape (m,)
+                - 'cost_matrix'  : 2‑D array of shape (n, m)
+
+        Returns
+        -------
+        dict[str, list[list[float]]]
+            Dictionary with a single entry 'transport_plan' whose value
+            is a nested Python list containing the optimal matrix G.
         """
-        a = np.asarray(problem["source_weights"], dtype=np.float64, order="C").ravel()
-        b = np.asarray(problem["target_weights"], dtype=np.float64, order="C").ravel()
-        M = np.asarray(problem["cost_matrix"], dtype=np.float64, order="C")
+        a = problem["source_weights"]
+        b = problem["target_weights"]
+        # Ensure the cost matrix is contiguous and float64 for POT
+        M = np.ascontiguousarray(problem["cost_matrix"], dtype=np.float64)
 
-        # The POT `emd` implementation requires a C‑contiguous matrix.
-        G = ot.lp.emd(a, b, M, check_marginals=False)
+        # Compute the optimal transport plan
+        G = ot.emd(a, b, M, check_marginals=False)
 
-        # Convert to a Python-friendly list of lists
+        # Convert to a plain Python list of lists for the expected output
         return {"transport_plan": G.tolist()}

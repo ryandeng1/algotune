@@ -1,83 +1,45 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-
-from __future__ import annotations
-
-from typing import Any, Dict, List
-
 import numpy as np
 from scipy.optimize import linprog
 
-
 class Solver:
-    """
-    Solves the following linear program:
+    def solve(self, problem: dict[str, Any]) -> dict[str, Any]:
+        G = np.asarray(problem['G'], dtype=float)
+        sigma = np.asarray(problem['σ'], dtype=float)
+        P_min = np.asarray(problem['P_min'], dtype=float)
+        P_max = np.asarray(problem['P_max'], dtype=float)
+        S_min = float(problem['S_min'])
 
-        minimise   sum(P)
-        subject to
-            P_min <= P <= P_max
-            G[i,i] * P[i] >= S_min * (σ[i] + sum_j G[i,j] * P[j] - G[i,i] * P[i])
-            for all i
+        n = G.shape[0]
 
-    The constraints are transformed into standard form A_ub @ P <= b_ub
-    and A_eq @ P == b_eq using the high‑performance HiGHS solver.
-    """
+        # Objective: minimize sum(P)
+        c = np.ones(n)
 
-    def solve(self, problem: Dict[str, Any]) -> Dict[str, Any]:
-        # ------------------------------------------------------------------
-        # Input parsing – all arrays are cast to np.ndarray of float.
-        # ------------------------------------------------------------------
-        G: np.ndarray = np.asarray(problem["G"], dtype=float)
-        sigma: np.ndarray = np.asarray(problem["σ"], dtype=float)
-        P_min: np.ndarray = np.asarray(problem["P_min"], dtype=float)
-        P_max: np.ndarray = np.asarray(problem["P_max"], dtype=float)
-        S_min: float = float(problem["S_min"])
+        # Bounds for variables
+        bounds = [(P_min[i], P_max[i]) for i in range(n)]
 
-        n: int = G.shape[0]
+        # Form inequalities A_ub x <= b_ub
+        A_ub = []
+        b_ub = []
 
-        # ------------------------------------------------------------------
-        # Build the linear inequality constraints A_ub @ P <= b_ub
-        # The original constraints are of the form
-        #
-        #   g_i * P_i >= S_min * (σ_i + (G P)_i - g_i * P_i)
-        #
-        # Rewriting:
-        #
-        #   (g_i * (1 + S_min)) * P_i - S_min * (G P)_i >= S_min * σ_i
-        #
-        # which can be expressed as:
-        #
-        #   (g_i * (1 + S_min) * e_i^T - S_min * G) @ P >= S_min * σ
-        #
-        # Multiplying by -1 gives the standard "≤" form.
-        # ------------------------------------------------------------------
-        diag_g = np.diag(G).astype(float)  # g_i
-        factor = diag_g * (1.0 + S_min)  # g_i * (1 + S_min)
+        # For each constraint:
+        # Gii*(1+S_min) P_i - S_min * sum_j Gij P_j >= S_min * sigma_i
+        # => -Gii*(1+S_min) P_i + S_min * sum_j Gij P_j <= -S_min * sigma_i
+        factor = S_min
+        for i in range(n):
+            coef = - G[i, i] * (1 + S_min)
+            row = np.zeros(n)
+            row[i] = coef
+            row += factor * G[i, :]
+            A_ub.append(row)
+            b_ub.append(-factor * sigma[i])
 
-        # Coefficient matrix for the inequality constraints
-        A_ub = -S_min * G
-        A_ub[np.arange(n), np.arange(n)] += factor  # add diagonal part
+        A_ub = np.vstack(A_ub)
+        b_ub = np.asarray(b_ub)
 
-        b_ub = -S_min * sigma  # move RHS to LHS and flip sign
-
-        # ------------------------------------------------------------------
-        # Variable bounds: P_min <= P <= P_max
-        # ------------------------------------------------------------------
-        bounds: List[tuple[float, float]] = [(float(P_min[i]), float(P_max[i]))
-                                             for i in range(n)]
-
-        # ------------------------------------------------------------------
-        # Objective: minimise sum(P) -> c = [1, 1, ..., 1]
-        # ------------------------------------------------------------------
-        c = np.ones(n, dtype=float)
-
-        # ------------------------------------------------------------------
-        # Call HiGHS linear programming solver via SciPy
-        # ------------------------------------------------------------------
         res = linprog(c, A_ub=A_ub, b_ub=b_ub, bounds=bounds,
-                      method="highs", options={"presolve": True})
+                      method='highs', options={'presolve': True, 'msg': 0})
 
-        if res.status not in (0, 2):  # 0: optimal, 2: infeasible
-            raise RuntimeError(f"Linear solver failed (status={res.status})")
+        if not res.success:
+            raise ValueError(f'Linear solver failed: {res.message}')
 
-        return {"P": res.x.tolist(), "objective": float(res.fun)}
+        return {'P': res.x.tolist(), 'objective': float(res.fun)}

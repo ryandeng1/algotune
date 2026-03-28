@@ -1,50 +1,35 @@
-import numpy as np
-import cvxpy as cp
 from typing import Any
+import cvxpy as cp
+import numpy as np
+
 
 class Solver:
     def solve(self, problem: dict[str, Any]) -> dict[str, list]:
         """
-        Solve the l_p centering problem with a convex quadratic program
-        using CVXPY.  The problem is:
+        Solve the lp centering problem using CVXPY.
 
-                minimize   cᵀx – ∑ log(xᵢ)
-                subject to A x = b ,  x > 0
-
-        Parameters
-        ----------
-        problem : dict
-            A dictionary containing the keys ``c``, ``A`` and ``b``.  The
-            values are expected to be list-like or ``numpy`` arrays.
-            ``c`` is a 1-D array of length *n*, ``A`` is a 2‑D array
-            (m×n) and ``b`` is a 1‑D array of length *m*.
-
-        Returns
-        -------
-        dict
-            A dictionary with a single key ``"solution"`` whose value is a
-            Python list containing the optimal vector *x*.
+        :param problem: A dictionary of the lp centering problem's parameters.
+        :return: A dictionary with key:
+                 "solution": a 1D list with n elements representing the solution to the lp centering problem.
         """
-        # Convert inputs to NumPy arrays of float64 to avoid dtype
-        # conversions inside cvxpy.
-        c = np.asarray(problem["c"], dtype=np.float64)
-        A = np.asarray(problem["A"], dtype=np.float64)
-        b = np.asarray(problem["b"], dtype=np.float64)
+        # Extract data as NumPy arrays for performance
+        c = np.array(problem["c"])
+        A = np.array(problem["A"])
+        # b is not used directly; CVXPY takes care of broadcasting
+        n = c.shape[0]
 
-        n = c.size
-        x = cp.Variable(n)
+        # Define the variable
+        x = cp.Variable(n, pos=True)
 
-        # Construct the objective: cᵀx – ∑ log(xᵢ)
-        obj = cp.Minimize(c @ x - cp.sum(cp.log(x)))
-
-        # Equality constraints
-        constraints = [A @ x == b]
-
-        # Solve with a fast interior‑point solver
-        prob = cp.Problem(obj, constraints)
+        # Construct and solve the problem
+        objective = cp.Minimize(c.T @ x - cp.sum(cp.log(x)))
+        constraints = [A @ x == problem["b"]]
+        prob = cp.Problem(objective, constraints)
         prob.solve(solver=cp.CLARABEL)
 
-        # Sanity check and return the solution as a plain Python list.
+        # Ensure the problem solved successfully
         if prob.status not in {"optimal", "optimal_inaccurate"}:
-            raise RuntimeError(f"Solver exited with status {prob.status!r}")
+            raise RuntimeError(f"CVXPY did not find an optimal solution: {prob.status}")
+
+        # Return the solution as a plain Python list
         return {"solution": x.value.tolist()}

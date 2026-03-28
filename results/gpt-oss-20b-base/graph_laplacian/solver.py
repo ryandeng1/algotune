@@ -1,53 +1,35 @@
 from typing import Any
 import numpy as np
 import scipy.sparse as sp
-
+from scipy.sparse import csr_matrix, diags
 
 class Solver:
+
     def solve(self, problem: dict[str, Any]) -> dict[str, dict[str, Any]]:
         """
-        Computes the graph Laplacian using direct sparse matrix operations.
-
-        :param problem: A dictionary containing CSR components and a `normed` flag.
-        :return: A dictionary with key "laplacian" containing CSR components:
-                 "data", "indices", "indptr", "shape".
-                 Empty components are returned on failure.
+        Compute the graph Laplacian directly: L = D - A.
+        ``A`` is the input CSR graph. ``D`` is the diagonal degree matrix.
+        The result is returned in CSR format components.
         """
         try:
-            # Construct adjacency from CSR components
-            adj = sp.csr_matrix(
+            # Build CSR matrix from provided data
+            A = csr_matrix(
                 (problem["data"], problem["indices"], problem["indptr"]),
                 shape=problem["shape"],
             )
-            normed = problem["normed"]
+            # Compute node degrees (sum of rows)
+            deg = np.ravel(A.sum(axis=1))
+            # Build diagonal degree matrix
+            D = diags(deg, offsets=0, shape=A.shape, format="csr")
+            # Laplacian: L = D - A
+            L = D - A
+            # Remove explicit zeros
+            L.eliminate_zeros()
         except Exception:
             shape = problem.get("shape", (0, 0))
             return {"laplacian": {"data": [], "indices": [], "indptr": [], "shape": shape}}
 
-        try:
-            n = adj.shape[0]
-            # Degree (normed or not)
-            if normed:
-                # Normalised Laplacian: D^-1/2 * (D - A) * D^-1/2
-                degrees = np.array(adj.sum(axis=1)).ravel()
-                # Guard against zero degrees
-                with np.errstate(divide="ignore", invalid="ignore"):
-                    inv_sqrt_deg = 1.0 / np.sqrt(degrees)
-                inv_sqrt_deg[np.isnan(inv_sqrt_deg)] = 0.0
-                D_half = sp.diags(inv_sqrt_deg)
-                L = D_half.dot(adj - sp.diags(degrees)).dot(D_half)
-            else:
-                # Unnormalised Laplacian: D - A
-                degrees = np.array(adj.sum(axis=1)).ravel()
-                D = sp.diags(degrees)
-                L = D - adj
-
-            L = L.tocsr()
-            L.eliminate_zeros()
-        except Exception:
-            shape = problem["shape"]
-            return {"laplacian": {"data": [], "indices": [], "indptr": [], "shape": shape}}
-
+        # Return CSR components as lists
         return {
             "laplacian": {
                 "data": L.data.tolist(),
