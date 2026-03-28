@@ -4,6 +4,14 @@ import scipy.optimize
 
 class Solver:
 
+    def __init__(self):
+        self.a2 = 1e-09
+        self.a3 = 0.004
+        self.a4 = 10.0
+        self.a5 = 0.27456
+        self.fprime = _task_f_vec_prime
+        self.func = _task_f_vec
+
     def solve(self, problem: dict[str, list[float]]) -> dict[str, list[float]]:
         """
         Finds roots using a single vectorized call to scipy.optimize.newton.

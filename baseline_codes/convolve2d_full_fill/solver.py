@@ -4,6 +4,10 @@ from scipy import signal
 
 class Solver:
 
+    def __init__(self):
+        self.boundary = 'fill'
+        self.mode = 'full'
+
     def solve(self, problem: tuple) -> np.ndarray:
         """
         Compute the 2D convolution of arrays a and b using "full" mode and "fill" boundary.

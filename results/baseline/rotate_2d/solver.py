@@ -3,6 +3,11 @@ import scipy.ndimage
 
 class Solver:
 
+    def __init__(self):
+        self.mode = 'constant'
+        self.order = 3
+        self.reshape = False
+
     def solve(self, problem: dict[str, Any]) -> dict[str, Any]:
         """
         Solves the 2D rotation problem using scipy.ndimage.rotate.

@@ -3,6 +3,11 @@ import networkx as nx
 
 class Solver:
 
+    def __init__(self):
+        self.alpha = 0.85
+        self.max_iter = 100
+        self.tol = 1e-06
+
     def solve(self, problem: dict[str, list[list[int]]]) -> dict[str, list[float]]:
         """
         Calculates the PageRank scores for the graph using NetworkX.

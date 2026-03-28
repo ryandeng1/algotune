@@ -3,6 +3,9 @@ from scipy import signal
 
 class Solver:
 
+    def __init__(self):
+        self.mode = 'full'
+
     def solve(self, problem: list) -> list:
         """
         Compute the 1D correlation for each valid pair in the problem list.

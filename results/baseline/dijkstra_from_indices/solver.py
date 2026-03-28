@@ -5,6 +5,10 @@ import scipy.sparse.csgraph
 
 class Solver:
 
+    def __init__(self):
+        self.directed = False
+        self.min_only = True
+
     def solve(self, problem: dict[str, Any]) -> dict[str, list[list[float]]]:
         """
         Solves the shortest path problem from specified indices using scipy.sparse.csgraph.dijkstra.

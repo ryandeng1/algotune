@@ -3,6 +3,10 @@ import scipy.ndimage
 
 class Solver:
 
+    def __init__(self):
+        self.mode = 'constant'
+        self.order = 3
+
     def solve(self, problem: dict[str, Any]) -> dict[str, Any]:
         """
         Solves the 2D zoom problem using scipy.ndimage.zoom.

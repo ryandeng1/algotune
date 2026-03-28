@@ -6,6 +6,9 @@ from sklearn.neighbors import KernelDensity
 
 class Solver:
 
+    def __init__(self):
+        self.available_kernels = ['gaussian', 'tophat', 'epanechnikov', 'exponential', 'linear', 'cosine']
+
     def solve(self, problem: dict[str, Any]) -> dict[str, Any]:
         try:
             X = np.array(problem['data_points'])

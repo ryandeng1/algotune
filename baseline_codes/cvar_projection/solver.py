@@ -4,6 +4,10 @@ import numpy as np
 
 class Solver:
 
+    def __init__(self):
+        self.beta = 0.95
+        self.kappa = 0.1
+
     def solve(self, problem: dict) -> dict:
         """
         Compute the projection onto the CVaR constraint set.

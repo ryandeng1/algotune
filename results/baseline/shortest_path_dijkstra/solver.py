@@ -5,6 +5,10 @@ import scipy.sparse.csgraph
 
 class Solver:
 
+    def __init__(self):
+        self.directed = False
+        self.method = 'D'
+
     def solve(self, problem: dict[str, Any]) -> dict[str, list[list[float]]]:
         """
         Solves the all-pairs shortest path problem using scipy.sparse.csgraph.shortest_path.
