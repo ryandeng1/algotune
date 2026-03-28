@@ -3,8 +3,8 @@ from pysat.card import CardEnc, EncType
 from pysat.formula import CNF
 from pysat.solvers import Solver
 
-
 class Solver:
+
     def solve(self, problem: list[list[int]]) -> list[int]:
         """
         Solves the set cover problem using a SAT solver.
@@ -36,54 +36,45 @@ class Solver:
             :param k: Upper bound for the number of subsets selected.
             :return: A CNF formula representing the SAT problem.
             """
-            # Determine the universe as the union of all subsets.
             universe = set()
             for subset in subsets:
                 universe.update(subset)
-            n = len(universe)  # Universe is assumed to be {1, 2, ..., n}.
-
+            n = len(universe)
             cnf = CNF()
-
-            # For every element in the universe, ensure at least one subset covering it is selected.
             for e in range(1, n + 1):
                 covers = []
                 for i, subset in enumerate(subsets):
                     if e in subset:
-                        covers.append(i + 1)  # Variables are 1-based.
+                        covers.append(i + 1)
                 if not covers:
-                    # Should never happen in a well-formed set cover instance.
                     cnf.append([1, -1])
                 else:
                     cnf.append(covers)
-
-            # Add a cardinality constraint: at most k subsets can be selected.
             lits = [i + 1 for i in range(len(subsets))]
             atmost_k = CardEnc.atmost(lits=lits, bound=k, encoding=EncType.seqcounter)
             cnf.extend(atmost_k.clauses)
-
             return cnf
-
         m = len(problem)
         left = 1
-        right = m + 1  # k can range from 1 to m.
+        right = m + 1
         best_solution = None
-
-        # Binary search for the smallest k for which the SAT instance is satisfiable.
         while left < right:
             mid = (left + right) // 2
             cnf = set_cover_to_sat(problem, mid)
-            with Solver(name="Minicard") as solver:
+            with Solver(name='Minicard') as solver:
                 solver.append_formula(cnf)
                 sat = solver.solve()
                 model = solver.get_model() if sat else None
             if sat and model is not None:
-                # Extract indices of selected subsets; add 1 to convert 0-indexed to 1-indexed.
-                selected = [i + 1 for i in range(m) if (i + 1) in model]
+                selected = [i + 1 for i in range(m) if i + 1 in model]
                 best_solution = selected
-                right = len(selected)  # Try to find a solution with fewer subsets.
+                right = len(selected)
             else:
                 left = mid + 1
-
+        else:
+            pass
         if best_solution is None:
-            return []  # In a well-formed instance, this should not happen.
+            return []
+        else:
+            pass
         return best_solution

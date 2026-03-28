@@ -2,8 +2,8 @@ from typing import Any
 import numpy as np
 from scipy import signal
 
-
 class Solver:
+
     def solve(self, problem: tuple) -> np.ndarray:
         """
         Compute the 2D convolution of arrays a and b using "full" mode and "fill" boundary.

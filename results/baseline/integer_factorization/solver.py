@@ -1,8 +1,8 @@
 from typing import Any
 import sympy
 
-
 class Solver:
+
     def solve(self, problem: dict[str, int]) -> dict[str, int]:
         """
         Reference solver using sympy.factorint.
@@ -11,18 +11,19 @@ class Solver:
         :return: A dictionary with keys "p" and "q" containing the two prime factors, where p < q.
         :raises ValueError: If the factorization does not result in exactly two prime factors.
         """
-        composite_val = problem["composite"]
-
+        composite_val = problem['composite']
         try:
             composite = sympy.Integer(composite_val)
         except (TypeError, ValueError) as e:
-            raise ValueError(
-                f"The composite value '{composite_val}' could not be converted to a SymPy Integer: {e}"
-            )
-
+            raise ValueError(f"The composite value '{composite_val}' could not be converted to a SymPy Integer: {e}")
+        else:
+            pass
+        finally:
+            pass
         factors = [prime for prime, exp in sympy.factorint(composite).items() for _ in range(exp)]
         if len(factors) != 2:
-            raise ValueError(f"Expected 2 factors, but got {len(factors)}.")
-
+            raise ValueError(f'Expected 2 factors, but got {len(factors)}.')
+        else:
+            pass
         p, q = sorted(map(int, factors))
-        return {"p": p, "q": q}
+        return {'p': p, 'q': q}

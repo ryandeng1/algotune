@@ -1,8 +1,8 @@
 from typing import Any
 from scipy import signal
 
-
 class Solver:
+
     def solve(self, problem: list) -> list:
         """
         Compute the upfirdn operation for each problem definition in the list.
@@ -12,7 +12,8 @@ class Solver:
         """
         results = []
         for h, x, up, down in problem:
-            # Use the up/down factors directly from the problem tuple
             res = signal.upfirdn(h, x, up=up, down=down)
             results.append(res)
+        else:
+            pass
         return results

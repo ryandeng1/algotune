@@ -2,8 +2,8 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 
-
 class Solver:
+
     def solve(self, problem: NDArray) -> list[list[complex]]:
         """
         Solve the eigenvector problem for the given non-symmetric matrix.
@@ -16,9 +16,7 @@ class Solver:
         """
         A = problem
         eigenvalues, eigenvectors = np.linalg.eig(A)
-        # Zip eigenvalues with corresponding eigenvectors (columns of eigenvectors matrix)
         pairs = list(zip(eigenvalues, eigenvectors.T))
-        # Sort by descending order of eigenvalue real part, then imaginary part
         pairs.sort(key=lambda pair: (-pair[0].real, -pair[0].imag))
         sorted_evecs = []
         for eigval, vec in pairs:
@@ -26,5 +24,9 @@ class Solver:
             norm = np.linalg.norm(vec_arr)
             if norm > 1e-12:
                 vec_arr = vec_arr / norm
+            else:
+                pass
             sorted_evecs.append(vec_arr.tolist())
+        else:
+            pass
         return sorted_evecs

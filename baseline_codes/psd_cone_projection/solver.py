@@ -1,8 +1,8 @@
 from typing import Any
 import numpy as np
 
-
 class Solver:
+
     def solve(self, problem: dict[str, np.ndarray]) -> dict[str, Any]:
         """
         Solves a given positive semidefinite cone projection problem.
@@ -15,9 +15,8 @@ class Solver:
             A dictionary containing the problem solution:
                 - X: result of projecting A onto PSD cone.
         """
-
-        A = np.array(problem["A"])
+        A = np.array(problem['A'])
         eigvals, eigvecs = np.linalg.eig(A)
         eigvals = np.maximum(eigvals, 0)
         X = eigvecs @ np.diag(eigvals) @ eigvecs.T
-        return {"X": X}
+        return {'X': X}

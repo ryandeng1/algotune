@@ -1,8 +1,8 @@
 import gzip
 from typing import Any
 
-
 class Solver:
+
     def solve(self, problem: dict[str, Any]) -> dict[str, bytes]:
         """
         Compress the plaintext using the gzip algorithm with mtime=0.
@@ -13,9 +13,13 @@ class Solver:
         Returns:
             dict: A dictionary containing 'compressed_data'.
         """
-        plaintext = problem["plaintext"]
-
-        # Compress the data using gzip, setting compresslevel=9 and mtime=0 for deterministic output
-        compressed_data = gzip.compress(plaintext, compresslevel=9, mtime=0)
-        return {"compressed_data": compressed_data}
-
+        plaintext = problem['plaintext']
+        try:
+            compressed_data = gzip.compress(plaintext, compresslevel=9, mtime=0)
+            return {'compressed_data': compressed_data}
+        except Exception as e:
+            raise
+        else:
+            pass
+        finally:
+            pass

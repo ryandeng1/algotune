@@ -2,8 +2,8 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 
-
 class Solver:
+
     def solve(self, problem: NDArray) -> list[complex]:
         """
         Solve the eigenvalue problem for the given square matrix.
@@ -14,8 +14,6 @@ class Solver:
         :param problem: A numpy array representing the real square matrix.
         :return: List of eigenvalues (complex numbers) sorted in descending order.
         """
-        # Compute eigenvalues using np.linalg.eig
         eigenvalues = np.linalg.eig(problem)[0]
-        # Sort eigenvalues: descending order by real part, then by imaginary part
         solution = sorted(eigenvalues, key=lambda x: (-x.real, -x.imag))
         return solution

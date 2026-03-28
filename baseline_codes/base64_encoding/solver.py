@@ -1,8 +1,8 @@
 import base64
 from typing import Any
 
-
 class Solver:
+
     def solve(self, problem: dict[str, Any]) -> dict[str, bytes]:
         """
         Encode the plaintext using the Base64 algorithm.
@@ -13,9 +13,13 @@ class Solver:
         Returns:
             dict: A dictionary containing 'encoded_data'.
         """
-        plaintext = problem["plaintext"]
-
-        # Encode the data using standard Base64
-        encoded_data = base64.b64encode(plaintext)
-        return {"encoded_data": encoded_data}
-
+        plaintext = problem['plaintext']
+        try:
+            encoded_data = base64.b64encode(plaintext)
+            return {'encoded_data': encoded_data}
+        except Exception as e:
+            raise
+        else:
+            pass
+        finally:
+            pass

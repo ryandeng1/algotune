@@ -8,8 +8,8 @@ def _single_thread_blas():
         return nullcontext()
     return threadpool_limits(limits=1)
 
-
 class Solver:
+
     def solve(self, problem: list[float]) -> list[complex]:
         """
         Solve the polynomial problem by finding all roots of the polynomial.

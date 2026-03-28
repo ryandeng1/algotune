@@ -2,8 +2,8 @@ from typing import Any
 import numpy as np
 from scipy.linalg import expm
 
-
 class Solver:
+
     def solve(self, problem: dict[str, np.ndarray]) -> dict[str, list[list[float]]]:
         """
         Solve the matrix exponential problem by computing exp(A).
@@ -12,7 +12,7 @@ class Solver:
         :param problem: A dictionary representing the matrix exponential problem.
         :return: A dictionary with key "exponential" containing the matrix exponential as a list of lists.
         """
-        A = problem["matrix"]
+        A = problem['matrix']
         expA = expm(A)
-        solution = {"exponential": expA}
+        solution = {'exponential': expA}
         return solution

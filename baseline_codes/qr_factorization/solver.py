@@ -1,8 +1,8 @@
 from typing import Any
 import numpy as np
 
-
 class Solver:
+
     def solve(self, problem: dict[str, np.ndarray]) -> dict[str, dict[str, list[list[float]]]]:
         """
         Solve the QR factorization problem by computing the QR factorization of matrix A.
@@ -14,7 +14,7 @@ class Solver:
                  "Q": The matrix with orthonormal columns.
                  "R": The upper triangular matrix.
         """
-        A = problem["matrix"]
-        Q, R = np.linalg.qr(A, mode="reduced")
-        solution = {"QR": {"Q": Q.tolist(), "R": R.tolist()}}
+        A = problem['matrix']
+        Q, R = np.linalg.qr(A, mode='reduced')
+        solution = {'QR': {'Q': Q.tolist(), 'R': R.tolist()}}
         return solution

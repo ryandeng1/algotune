@@ -2,8 +2,8 @@ from typing import Any
 import cvxpy as cp
 import numpy as np
 
-
 class Solver:
+
     def solve(self, problem: dict[str, Any]) -> dict[str, Any]:
         """
         Solves the feedback controller design problem using semidefinite programming.
@@ -16,29 +16,25 @@ class Solver:
                 - K: The feedback gain matrix
                 - P: The Lyapunov matrix
         """
-        A = np.array(problem["A"])
-        B = np.array(problem["B"])
-        n, m = A.shape[0], B.shape[1]
-
-        # Define variables for the SDP
+        A = np.array(problem['A'])
+        B = np.array(problem['B'])
+        n, m = (A.shape[0], B.shape[1])
         Q = cp.Variable((n, n), symmetric=True)
         L = cp.Variable((m, n))
-        constraints = [
-            cp.bmat([[Q, Q @ A.T + L.T @ B.T], [A @ Q + B @ L, Q]]) >> np.eye(2 * n),
-            Q >> np.eye(n),
-        ]
+        constraints = [cp.bmat([[Q, Q @ A.T + L.T @ B.T], [A @ Q + B @ L, Q]]) >> np.eye(2 * n), Q >> np.eye(n)]
         objective = cp.Minimize(0)
         prob = cp.Problem(objective, constraints)
-
         try:
             prob.solve(solver=cp.CLARABEL)
-
-            if prob.status in ["optimal", "optimal_inaccurate"]:
+            if prob.status in ['optimal', 'optimal_inaccurate']:
                 K_value = L.value @ np.linalg.inv(Q.value)
                 P = np.linalg.inv(Q.value)
-                return {"is_stabilizable": True, "K": K_value.tolist(), "P": P.tolist()}
+                return {'is_stabilizable': True, 'K': K_value.tolist(), 'P': P.tolist()}
             else:
-                return {"is_stabilizable": False, "K": None, "P": None}
-
+                return {'is_stabilizable': False, 'K': None, 'P': None}
         except Exception as e:
-            return {"is_stabilizable": False, "K": None, "P": None}
+            return {'is_stabilizable': False, 'K': None, 'P': None}
+        else:
+            pass
+        finally:
+            pass

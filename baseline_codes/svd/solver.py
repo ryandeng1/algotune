@@ -1,8 +1,8 @@
 from typing import Any
 import numpy as np
 
-
 class Solver:
+
     def solve(self, problem: dict[str, Any]) -> dict[str, list]:
         """
         Solve the SVD problem by computing the singular value decomposition of matrix A.
@@ -16,9 +16,8 @@ class Solver:
                  "S": 1D list representing the singular values.
                  "V": 2D list representing the right singular vectors.
         """
-        A = problem["matrix"]
-        # full_matrices=False ensures U, s, Vh have shapes (n, k), (k,), (k, m) respectively, where k = min(n, m)
+        A = problem['matrix']
         U, s, Vh = np.linalg.svd(A, full_matrices=False)
-        V = Vh.T  # Convert Vh to V so that A = U * diag(s) * V^T
-        solution = {"U": U, "S": s, "V": V}
+        V = Vh.T
+        solution = {'U': U, 'S': s, 'V': V}
         return solution

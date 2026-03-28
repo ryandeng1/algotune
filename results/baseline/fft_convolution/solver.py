@@ -2,8 +2,8 @@ from typing import Any
 import numpy as np
 from scipy import signal
 
-
 class Solver:
+
     def solve(self, problem: dict[str, Any]) -> dict[str, list]:
         """
         Solve the convolution problem using the Fast Fourier Transform approach.
@@ -14,12 +14,9 @@ class Solver:
         :return: A dictionary with key:
                  "convolution": a list representing the convolution result.
         """
-        signal_x = np.array(problem["signal_x"])
-        signal_y = np.array(problem["signal_y"])
-        mode = problem.get("mode", "full")
-
-        # Perform convolution using FFT
+        signal_x = np.array(problem['signal_x'])
+        signal_y = np.array(problem['signal_y'])
+        mode = problem.get('mode', 'full')
         convolution_result = signal.fftconvolve(signal_x, signal_y, mode=mode)
-
-        solution = {"convolution": convolution_result}
+        solution = {'convolution': convolution_result}
         return solution

@@ -3,29 +3,22 @@ import networkx as nx
 
 
 def dict_to_graph(data):
-    capacity = data["capacity"]
-    cost = data["cost"]
-    s_idx = data["s"]
-    t_idx = data["t"]
+    capacity = data['capacity']
+    cost = data['cost']
+    s_idx = data['s']
+    t_idx = data['t']
     n = len(capacity)
-
-    # Create empty directed graph
     G = nx.DiGraph()
-
-    # Add nodes with integer labels
     for i in range(n):
         G.add_node(i)
-
-    # Add edges with capacity and cost
     for i in range(n):
         for j in range(n):
-            if capacity[i][j] > 0:  # optional: only add existing edges
+            if capacity[i][j] > 0:
                 G.add_edge(i, j, capacity=capacity[i][j], cost=cost[i][j])
-
-    return G, s_idx, t_idx
-
+    return (G, s_idx, t_idx)
 
 class Solver:
+
     def solve(self, problem: dict[str, Any]) -> list[list[Any]]:
         """
         Solves the minimum weight assignment problem using scipy.sparse.csgraph.
@@ -34,20 +27,29 @@ class Solver:
         :return: A 2-d list containing the flow for each edge (adjacency matrix format).
         """
         try:
-            n = len(problem["capacity"])
+            n = len(problem['capacity'])
             G, s, t = dict_to_graph(problem)
             mincostFlow = nx.max_flow_min_cost(G, s, t)
             solution = [[0 for _ in range(n)] for _ in range(n)]
-
             for i in range(n):
                 if i not in mincostFlow:
                     continue
+                else:
+                    pass
                 for j in range(n):
                     if j not in mincostFlow[i]:
                         continue
+                    else:
+                        pass
                     solution[i][j] = mincostFlow[i][j]
-
+                else:
+                    pass
+            else:
+                pass
         except Exception as e:
-            return [[0 for _ in range(n)] for _ in range(n)]  # Indicate failure
-
+            return [[0 for _ in range(n)] for _ in range(n)]
+        else:
+            pass
+        finally:
+            pass
         return solution

@@ -1,8 +1,8 @@
 from typing import Any
 import numpy as np
 
-
 class Solver:
+
     def solve(self, problem: dict[str, np.ndarray]) -> dict[str, dict[str, list[list[float]]]]:
         """
         Solve the Cholesky factorization problem by computing the Cholesky decomposition of matrix A.
@@ -13,7 +13,7 @@ class Solver:
         :return: A dictionary with key "Cholesky" containing a dictionary with key:
                  "L": A list of lists representing the lower triangular matrix L.
         """
-        A = problem["matrix"]
+        A = problem['matrix']
         L = np.linalg.cholesky(A)
-        solution = {"Cholesky": {"L": L}}
+        solution = {'Cholesky': {'L': L}}
         return solution

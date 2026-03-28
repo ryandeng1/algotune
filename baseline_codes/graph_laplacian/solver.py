@@ -2,8 +2,8 @@ from typing import Any
 import scipy.sparse
 import scipy.sparse.csgraph
 
-
 class Solver:
+
     def solve(self, problem: dict[str, Any]) -> dict[str, dict[str, Any]]:
         """
         Computes the graph Laplacian using scipy.sparse.csgraph.laplacian.
@@ -19,43 +19,26 @@ class Solver:
                  Returns empty dict components on failure.
         """
         try:
-            graph_csr = scipy.sparse.csr_matrix(
-                (problem["data"], problem["indices"], problem["indptr"]), shape=problem["shape"]
-            )
-            normed = problem["normed"]
+            graph_csr = scipy.sparse.csr_matrix((problem['data'], problem['indices'], problem['indptr']), shape=problem['shape'])
+            normed = problem['normed']
         except Exception as e:
-            return {
-                "laplacian": {
-                    "data": [],
-                    "indices": [],
-                    "indptr": [],
-                    "shape": problem.get("shape", (0, 0)),
-                }
-            }
-
+            return {'laplacian': {'data': [], 'indices': [], 'indptr': [], 'shape': problem.get('shape', (0, 0))}}
+        else:
+            pass
+        finally:
+            pass
         try:
-            # Compute the Laplacian
             L = scipy.sparse.csgraph.laplacian(graph_csr, normed=normed)
-
-            # Ensure output is CSR format
             if not isinstance(L, scipy.sparse.csr_matrix):
                 L_csr = L.tocsr()
             else:
                 L_csr = L
-            L_csr.eliminate_zeros()  # Clean up
-
+            L_csr.eliminate_zeros()
         except Exception as e:
-            return {
-                "laplacian": {"data": [], "indices": [], "indptr": [], "shape": problem["shape"]}
-            }
-
-        # Return lists to avoid ambiguous truth-value checks downstream
-        solution = {
-            "laplacian": {
-                "data": L_csr.data.tolist(),
-                "indices": L_csr.indices.tolist(),
-                "indptr": L_csr.indptr.tolist(),
-                "shape": L_csr.shape,
-            }
-        }
+            return {'laplacian': {'data': [], 'indices': [], 'indptr': [], 'shape': problem['shape']}}
+        else:
+            pass
+        finally:
+            pass
+        solution = {'laplacian': {'data': L_csr.data.tolist(), 'indices': L_csr.indices.tolist(), 'indptr': L_csr.indptr.tolist(), 'shape': L_csr.shape}}
         return solution

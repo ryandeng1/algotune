@@ -1,8 +1,8 @@
 from typing import Any
 import numpy as np
 
-
 class Solver:
+
     def solve(self, problem: dict[str, Any]) -> dict[str, list]:
         """
         Solve the problem using the algorithm described in https://doi.org/10.1109/CVPR.2018.00890.
@@ -13,16 +13,12 @@ class Solver:
         :return: A dictionary with key:
                  "solution": a 1D list with n elements representing the solution to the l0_pruning task.
         """
-        v = np.array(problem.get("v"))
-        k = problem.get("k")
-
-        # Ensure v is a column vector
+        v = np.array(problem.get('v'))
+        k = problem.get('k')
         v = v.flatten()
-
         pruned = np.zeros_like(v)
-        indx = np.argsort(np.abs(v), kind="mergesort")  # mergesort is stable
+        indx = np.argsort(np.abs(v), kind='mergesort')
         remaining_indx = indx[-k:]
         pruned[remaining_indx] = v[remaining_indx]
-
-        solution = {"solution": pruned.tolist()}
+        solution = {'solution': pruned.tolist()}
         return solution

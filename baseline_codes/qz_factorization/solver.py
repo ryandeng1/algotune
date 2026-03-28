@@ -2,11 +2,9 @@ from typing import Any
 import numpy as np
 from scipy.linalg import qz
 
-
 class Solver:
-    def solve(
-        self, problem: dict[str, list[list[float]]]
-    ) -> dict[str, dict[str, list[list[float | complex]]]]:
+
+    def solve(self, problem: dict[str, list[list[float]]]) -> dict[str, dict[str, list[list[float | complex]]]]:
         """
         Solve the QZ factorization problem by computing the QZ factorization of (A,B).
         Uses scipy.linalg.qz with mode='real' to compute:
@@ -19,8 +17,8 @@ class Solver:
             "Q": The unitary matrix.
             "R": The unitary matrix.
         """
-        A = np.array(problem["A"])
-        B = np.array(problem["B"])
-        AA, BB, Q, Z = qz(A, B, output="real")
-        solution = {"QZ": {"AA": AA.tolist(), "BB": BB.tolist(), "Q": Q.tolist(), "Z": Z.tolist()}}
+        A = np.array(problem['A'])
+        B = np.array(problem['B'])
+        AA, BB, Q, Z = qz(A, B, output='real')
+        solution = {'QZ': {'AA': AA.tolist(), 'BB': BB.tolist(), 'Q': Q.tolist(), 'Z': Z.tolist()}}
         return solution

@@ -1,8 +1,8 @@
 from typing import Any
 from scipy import signal
 
-
 class Solver:
+
     def solve(self, problem: list) -> list:
         """
         Compute the 1D correlation for each valid pair in the problem list.
@@ -15,8 +15,12 @@ class Solver:
         """
         results = []
         for a, b in problem:
-            if self.mode == "valid" and b.shape[0] > a.shape[0]:
+            if self.mode == 'valid' and b.shape[0] > a.shape[0]:
                 continue
+            else:
+                pass
             res = signal.correlate(a, b, mode=self.mode)
             results.append(res)
+        else:
+            pass
         return results

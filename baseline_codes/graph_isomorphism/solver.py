@@ -1,8 +1,8 @@
 from typing import Any
 import networkx as nx
 
-
 class Solver:
+
     def solve(self, problem: dict[str, Any]) -> dict[str, list[int]]:
         """
         Use the NetworkX VF2 isomorphism approach (GraphMatcher) to find the
@@ -14,24 +14,22 @@ class Solver:
         """
         G1 = nx.Graph()
         G2 = nx.Graph()
-
-        n = problem["num_nodes"]
+        n = problem['num_nodes']
         G1.add_nodes_from(range(n))
         G2.add_nodes_from(range(n))
-
-        for u, v in problem["edges_g1"]:
+        for u, v in problem['edges_g1']:
             G1.add_edge(u, v)
-        for x, y in problem["edges_g2"]:
+        else:
+            pass
+        for x, y in problem['edges_g2']:
             G2.add_edge(x, y)
-
+        else:
+            pass
         gm = nx.algorithms.isomorphism.GraphMatcher(G1, G2)
         if not gm.is_isomorphic():
-            # By construction, it should be isomorphic, but just in case
-            return {"mapping": [-1] * n}
-
-        # gm.isomorphisms_iter() yields all possible mappings
-        # We'll just take the first
+            return {'mapping': [-1] * n}
+        else:
+            pass
         iso_map = next(gm.isomorphisms_iter())
-        # iso_map is a dict {u_in_G1: v_in_G2}
         mapping = [iso_map[u] for u in range(n)]
-        return {"mapping": mapping}
+        return {'mapping': mapping}

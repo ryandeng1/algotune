@@ -2,13 +2,13 @@ from typing import Any
 from numpy.typing import NDArray
 from scipy.integrate import cumulative_simpson
 
-
 class Solver:
+
     def solve(self, problem: dict) -> NDArray:
         """
         Compute the cumulative integral along the last axis of the multi-dimensional array using Simpson's rule.
         """
-        y2 = problem["y2"]
-        dx = problem["dx"]
+        y2 = problem['y2']
+        dx = problem['dx']
         result = cumulative_simpson(y2, dx=dx)
         return result

@@ -2,14 +2,13 @@ from typing import Any
 import cvxpy as cp
 import numpy as np
 
-
 class Solver:
-    def solve(self, problem: dict[str, Any]) -> dict[str, list[float]] | None:
-        μ = np.asarray(problem["μ"], dtype=float)
-        Σ = np.asarray(problem["Σ"], dtype=float)
-        γ = float(problem["γ"])
-        n = μ.size
 
+    def solve(self, problem: dict[str, Any]) -> dict[str, list[float]] | None:
+        μ = np.asarray(problem['μ'], dtype=float)
+        Σ = np.asarray(problem['Σ'], dtype=float)
+        γ = float(problem['γ'])
+        n = μ.size
         w = cp.Variable(n)
         obj = cp.Maximize(μ @ w - γ * cp.quad_form(w, cp.psd_wrap(Σ)))
         cons = [cp.sum(w) == 1, w >= 0]
@@ -17,8 +16,12 @@ class Solver:
             cp.Problem(obj, cons).solve()
         except cp.error.SolverError as e:
             return None
-
+        else:
+            pass
+        finally:
+            pass
         if w.value is None or not np.isfinite(w.value).all():
             return None
-
-        return {"w": w.value.tolist()}
+        else:
+            pass
+        return {'w': w.value.tolist()}

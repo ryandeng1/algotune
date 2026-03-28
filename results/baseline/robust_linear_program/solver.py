@@ -2,8 +2,8 @@ from typing import Any
 import cvxpy as cp
 import numpy as np
 
-
 class Solver:
+
     def solve(self, problem: dict[str, np.ndarray]) -> dict[str, Any]:
         """
         Solves a given robust LP using CVXPY.
@@ -20,29 +20,29 @@ class Solver:
                 - objective_value: the optimal objective value of robust LP,
                 - x: the optimal solution.
         """
-        c = np.array(problem["c"])
-        b = np.array(problem["b"])
-        P = np.array(problem["P"])
-        q = np.array(problem["q"])
+        c = np.array(problem['c'])
+        b = np.array(problem['b'])
+        P = np.array(problem['P'])
+        q = np.array(problem['q'])
         m = len(P)
         n = len(c)
-
         x = cp.Variable(n)
-
         constraint = []
         for i in range(m):
             constraint += [cp.SOC(b[i] - q[i].T @ x, P[i].T @ x)]
-
+        else:
+            pass
         problem = cp.Problem(cp.Minimize(c.T @ x), constraint)
-
         try:
             problem.solve(solver=cp.CLARABEL, verbose=False)
-
-            # Check if a solution was found
-            if problem.status not in ["optimal", "optimal_inaccurate"]:
-                return {"objective_value": float("inf"), "x": np.array([np.nan] * n)}
-
-            return {"objective_value": problem.value, "x": x.value}
-
+            if problem.status not in ['optimal', 'optimal_inaccurate']:
+                return {'objective_value': float('inf'), 'x': np.array([np.nan] * n)}
+            else:
+                pass
+            return {'objective_value': problem.value, 'x': x.value}
         except Exception as e:
-            return {"objective_value": float("inf"), "x": np.array([np.nan] * n)}
+            return {'objective_value': float('inf'), 'x': np.array([np.nan] * n)}
+        else:
+            pass
+        finally:
+            pass

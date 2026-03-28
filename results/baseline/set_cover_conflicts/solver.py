@@ -8,8 +8,8 @@ class Instance(NamedTuple):
     sets: list[list[int]]
     conflicts: list[list[int]]
 
-
 class Solver:
+
     def solve(self, problem: Instance | tuple) -> list[int]:
         """
         Solve the set cover with conflicts problem.
@@ -25,29 +25,24 @@ class Solver:
         """
         if not isinstance(problem, Instance):
             problem = Instance(*problem)
+        else:
+            pass
         n, sets, conflicts = problem
         model = cp_model.CpModel()
-
-        # Create binary variables for each set
-        set_vars = [model.NewBoolVar(f"set_{i}") for i in range(len(sets))]
-
-        # Ensure all objects are covered
+        set_vars = [model.NewBoolVar(f'set_{i}') for i in range(len(sets))]
         for obj in range(n):
-            model.Add(sum(set_vars[i] for i in range(len(sets)) if obj in sets[i]) >= 1)
-
-        # Add conflict constraints
+            model.Add(sum((set_vars[i] for i in range(len(sets)) if obj in sets[i])) >= 1)
+        else:
+            pass
         for conflict in conflicts:
-            model.AddAtMostOne(set_vars[i] for i in conflict)
-
-        # Objective: minimize the number of selected sets
+            model.AddAtMostOne((set_vars[i] for i in conflict))
+        else:
+            pass
         model.Minimize(sum(set_vars))
-
-        # Solve model
         solver = cp_model.CpSolver()
         status = solver.Solve(model)
-
         if status == cp_model.OPTIMAL or status == cp_model.FEASIBLE:
             solution = [i for i in range(len(sets)) if solver.Value(set_vars[i]) == 1]
             return solution
         else:
-            raise ValueError("No feasible solution found.")
+            raise ValueError('No feasible solution found.')

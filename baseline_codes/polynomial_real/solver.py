@@ -8,8 +8,8 @@ def _single_thread_blas():
         return nullcontext()
     return threadpool_limits(limits=1)
 
-
 class Solver:
+
     def solve(self, problem: list[float]) -> list[float]:
         """
         Solve the polynomial problem by finding all real roots of the polynomial.
@@ -26,9 +26,7 @@ class Solver:
         coefficients = problem
         with _single_thread_blas():
             computed_roots = np.roots(coefficients)
-        # Convert roots to real numbers if the imaginary parts are negligible (tol=1e-3)
-        computed_roots = np.real_if_close(computed_roots, tol=1e-3)
+        computed_roots = np.real_if_close(computed_roots, tol=0.001)
         computed_roots = np.real(computed_roots)
-        # Sort roots in decreasing order.
         computed_roots = np.sort(computed_roots)[::-1]
         return computed_roots.tolist()

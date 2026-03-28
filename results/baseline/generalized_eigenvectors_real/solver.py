@@ -2,8 +2,8 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 
-
 class Solver:
+
     def solve(self, problem: tuple[NDArray, NDArray]) -> tuple[list[float], list[list[float]]]:
         """
         Solve the generalized eigenvalue problem for the given matrices A and B.
@@ -21,32 +21,22 @@ class Solver:
         :return: Tuple (eigenvalues, eigenvectors) with eigenvalues sorted in descending order.
         """
         A, B = problem
-
-        # Compute Cholesky decomposition of B for better numerical stability
         L = np.linalg.cholesky(B)
-        # Transform to standard eigenvalue problem
         Linv = np.linalg.inv(L)
         Atilde = Linv @ A @ Linv.T
-
-        # Solve the transformed problem
         eigenvalues, eigenvectors = np.linalg.eigh(Atilde)
-
-        # Transform eigenvectors back
         eigenvectors = Linv.T @ eigenvectors
-
-        # Normalize with respect to B-inner product: sqrt(vᵀ B v) ≈ 1.
         for i in range(eigenvectors.shape[1]):
             v = eigenvectors[:, i]
             norm = np.sqrt(np.dot(v, B @ v))
             if norm > 0:
                 eigenvectors[:, i] = v / norm
-
-        # Reverse order to have descending eigenvalues and corresponding eigenvectors
+            else:
+                pass
+        else:
+            pass
         eigenvalues = eigenvalues[::-1]
         eigenvectors = eigenvectors[:, ::-1]
-
-        # Convert to lists
         eigenvalues_list = eigenvalues.tolist()
         eigenvectors_list = [eigenvectors[:, i].tolist() for i in range(eigenvectors.shape[1])]
-
         return (eigenvalues_list, eigenvectors_list)

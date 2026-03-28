@@ -5,6 +5,7 @@ import numpy as np
 from numba.typed import List
 
 
+@numba.njit
 def solve_independent_set_numba(children, scores, to_block, powers, num_nodes):
     n = children.shape[1]
     N = children.shape[0]
@@ -12,7 +13,6 @@ def solve_independent_set_numba(children, scores, to_block, powers, num_nodes):
     while True:
         best_idx = -1
         best_score = -np.inf
-        # Find the candidate with the highest score.
         for i in range(N):
             if scores[i] > best_score:
                 best_score = scores[i]
@@ -20,19 +20,16 @@ def solve_independent_set_numba(children, scores, to_block, powers, num_nodes):
         if best_idx == -1 or best_score == -np.inf:
             break
         result.append(best_idx)
-        # Get the selected candidate.
         candidate = children[best_idx]
-        # For each shift in to_block, compute the corresponding blocked index.
         for j in range(to_block.shape[0]):
             blocked_index = 0
             for k in range(n):
-                # Use the precomputed powers to convert the shifted candidate to an index.
-                blocked_index += ((candidate[k] + to_block[j, k]) % num_nodes) * powers[k]
+                blocked_index += (candidate[k] + to_block[j, k]) % num_nodes * powers[k]
             scores[blocked_index] = -np.inf
     return result
 
-
 class Solver:
+
     def solve(self, problem: tuple[int, int]) -> list[tuple[int, ...]]:
         """
         Solve the cyclic graph independent set problem.
@@ -52,20 +49,32 @@ class Solver:
           List: A list of n-tuples representing the vertices in the independent set.
         """
         num_nodes, n = problem
-
-        # Precompute all candidate vertices.
         children = np.array(list(itertools.product(range(num_nodes), repeat=n)), dtype=np.int32)
-        # Compute initial scores for all candidates.
         scores = np.array([self._priority(tuple(child), num_nodes, n) for child in children])
-        # All possible shifts used for blocking.
         to_block = np.array(list(itertools.product([-1, 0, 1], repeat=n)), dtype=np.int32)
-        # Precompute powers for index conversion.
         powers = num_nodes ** np.arange(n - 1, -1, -1)
-
-        # Call the accelerated numba solver.
-        selected_indices = solve_independent_set_numba(
-            children, scores, to_block, powers, num_nodes
-        )
-
-        # Return the selected candidates as a list of tuples.
+        selected_indices = solve_independent_set_numba(children, scores, to_block, powers, num_nodes)
         return [tuple(children[i]) for i in selected_indices]
+
+    def _priority(self, el, num_nodes, n):
+        """
+        Compute the priority for a candidate node (represented as an n-tuple) in the
+        independent set construction.
+
+        This function clips the candidate values to ensure they do not exceed (num_nodes - 3)
+        and then computes a score based on a weighted sum and modular arithmetic.
+        Higher scores indicate a higher priority for inclusion.
+
+        Args:
+          el (tuple): An n-tuple candidate.
+          num_nodes (int): Number of nodes in the base cyclic graph.
+          n (int): Exponent (power) of the strong product.
+
+        Returns:
+          float: The computed priority score.
+        """
+        el_clipped = np.clip(el, a_min=None, a_max=num_nodes - 3)
+        values = 2 * np.array(list(itertools.product(range(1, n), repeat=n)))
+        multipliers = np.array([num_nodes ** i for i in range(n - 1, -1, -1)], dtype=np.int32)
+        x = np.sum((1 + values + el_clipped) * multipliers, axis=-1)
+        return np.sum(x % (num_nodes - 2), dtype=float)

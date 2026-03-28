@@ -2,8 +2,8 @@ from typing import Any
 import numpy as np
 from scipy.linalg import lu
 
-
 class Solver:
+
     def solve(self, problem: dict[str, np.ndarray]) -> dict[str, dict[str, list[list[float]]]]:
         """
         Solve the LU factorization problem by computing the LU factorization of matrix A.
@@ -16,7 +16,7 @@ class Solver:
                  "L": The lower triangular matrix.
                  "U": The upper triangular matrix.
         """
-        A = problem["matrix"]
+        A = problem['matrix']
         P, L, U = lu(A)
-        solution = {"LU": {"P": P.tolist(), "L": L.tolist(), "U": U.tolist()}}
+        solution = {'LU': {'P': P.tolist(), 'L': L.tolist(), 'U': U.tolist()}}
         return solution
