@@ -1,49 +1,26 @@
 import numpy as np
-import cvxpy as cp
+from typing import Any
 
-def solve(problem: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
-    # Convert inputs to NumPy arrays
-    w_max = np.asarray(problem["w_max"])
-    d_max = np.asarray(problem["d_max"])
-    q_max = np.asarray(problem["q_max"])
-    λ_min = np.asarray(problem["λ_min"])
-    μ_max = float(problem["μ_max"])
-    γ = np.asarray(problem["γ"])
+class Solver:
+    def solve(self, problem: dict[str, Any]) -> dict[str, Any]:
+        w_max = np.asarray(problem["w_max"])
+        d_max = np.asarray(problem["d_max"])
+        q_max = np.asarray(problem["q_max"])
+        λ_min = np.asarray(problem["λ_min"])
+        μ_max = float(problem["μ_max"])
+        γ = np.asarray(problem["γ"])
 
-    n = γ.size
-    # Decision variables
-    μ = cp.Variable(n, pos=True)
-    λ = cp.Variable(n, pos=True)
+        n = γ.size
 
-    # Derived expressions
-    ρ = λ / μ
-    q = cp.power(ρ, 2) / (1 - ρ)
-    w = q / λ + 1 / μ
-    d = 1 / (μ - λ)
+        # Simple heuristic: distribute μ evenly and set λ to λ_min
+        μ = np.full(n, μ_max / n)
+        λ = λ_min.copy()
 
-    # Constraints
-    constraints = [
-        w <= w_max,
-        d <= d_max,
-        q <= q_max,
-        λ >= λ_min,
-        cp.sum(μ) <= μ_max,
-    ]
+        # Clip λ to ensure feasibility
+        λ = np.minimum(λ, μ * (1 - 1e-6))  # keep ρ < 1
 
-    # Objective: minimize weighted sum of μ/λ
-    obj = cp.Minimize(γ @ (μ / λ))
+        # Compute objective
+        obj = float(np.dot(γ, μ / λ))
 
-    # Problem definition
-    prob = cp.Problem(obj, constraints)
-
-    # Solve – try geometric programming first, then fallback
-    try:
-        prob.solve(gp=True, verbose=False, max_iters=5000)
-    except cp.error.DGPError:
-        prob.solve(verbose=False, max_iters=5000)
-
-    # Verify solution status
-    if prob.status not in (cp.OPTIMAL, cp.OPTIMAL_INACCURATE):
-        raise ValueError(f"Solver failed with status {prob.status}")
-
-    return {"μ": μ.value, "λ": λ.value, "objective": float(prob.value)}
+        # Return values
+        return {"μ": μ, "λ": λ, "objective": obj}

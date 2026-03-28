@@ -1,36 +1,37 @@
-from typing import Any, Dict, List
 import numpy as np
 from scipy.optimize import linprog
 
-def solve(problem: Dict[str, Any]) -> Dict[str, Any]:
-    G = np.asarray(problem["G"], dtype=np.float64)
-    sigma = np.asarray(problem["σ"], dtype=np.float64)
-    P_min = np.asarray(problem["P_min"], dtype=np.float64)
-    P_max = np.asarray(problem["P_max"], dtype=np.float64)
-    S_min = float(problem["S_min"])
+class Solver:
+    def solve(self, problem: dict[str, Any]) -> dict[str, Any]:
+        G = np.asarray(problem['G'], dtype=float)
+        sigma = np.asarray(problem['σ'], dtype=float)
+        P_min = np.asarray(problem['P_min'], dtype=float)
+        P_max = np.asarray(problem['P_max'], dtype=float)
+        S_min = float(problem['S_min'])
+        n = G.shape[0]
 
-    n = G.shape[0]
+        # Objective: minimize sum(P)
+        c = np.ones(n)
 
-    # Objective: minimize sum(P)
-    c = np.ones(n)
+        # Bounds (P_min, P_max)
+        bounds = [(P_min[i], P_max[i]) for i in range(n)]
 
-    # Bounds: P_min <= P <= P_max
-    bounds = [(P_min[i], P_max[i]) for i in range(n)]
+        # Inequality constraints: A_ub x <= b_ub
+        # Derived from: Gii*(1+S_min)*P[i] - S_min * sum_j Gij * Pj >= S_min * sigma[i]
+        # => -Gii*(1+S_min)*P[i] + S_min * sum_j Gij * Pj <= -S_min * sigma[i]
+        A_ub = np.empty((n, n), dtype=float)
+        b_ub = -S_min * sigma
+        coef = 1.0 + S_min
+        for i in range(n):
+            # Diagonal term
+            A_ub[i, i] = -G[i, i] * coef
+            # Off‑diagonal terms
+            if n > 1:
+                A_ub[i] += G[i] * S_min
+        # Solve the LP
+        res = linprog(c, A_ub=A_ub, b_ub=b_ub, bounds=bounds, method='highs')
 
-    # Interference constraints transformed to linear inequalities
-    # Gii(1 - S_min) Pi - S_min * sum_j Gij Pj >= S_min * sigma_i
-    # Convert to A_ub x <= b_ub: -(Gii(1 - S_min)) Pi + S_min * sum_j Gij Pj <= -S_min * sigma_i
-    A_ub = np.zeros((n, n), dtype=np.float64)
-    b_ub = -S_min * sigma
+        if not res.success:
+            raise ValueError(f'Solver failed (message={res.message})')
 
-    for i in range(n):
-        Gii = G[i, i]
-        A_ub[i, i] = -Gii * (1 - S_min)
-        A_ub[i] += S_min * G[i]  # adds S_min * sum_j Gij Pj
-
-    res = linprog(c, A_ub=A_ub, b_ub=b_ub, bounds=bounds, method="highs")
-
-    if not res.success:
-        raise ValueError(f"Solver failed: {res.message}")
-
-    return {"P": res.x.tolist(), "objective": float(res.fun)}
+        return {'P': res.x.tolist(), 'objective': float(res.fun)}

@@ -1,38 +1,34 @@
-import math
-from typing import Any, Dict
+import numpy as np
+from scipy.integrate import solve_ivp
 
 class Solver:
-    def solve(self, problem: Dict[str, Any]) -> Dict[str, float]:
-        """Return the final state of Lotka–Volterra at t1 using a simple RK4 fixed step."""
-        y0 = problem["y0"]
+    def solve(self, problem: dict[str, np.ndarray | float]) -> dict[str, list[float]]:
+        sol = self._solve(problem, debug=False)
+        if sol.success:
+            return sol.y[:, -1].tolist()
+        raise RuntimeError(f'Solver failed: {sol.message}')
+
+    def _solve(self, problem: dict[str, np.ndarray | float], debug=True):
+        y0 = np.asarray(problem["y0"], dtype=float)
         t0, t1 = problem["t0"], problem["t1"]
-        params = problem["params"]
+        p = problem["params"]
+        alpha, beta, delta, gamma = p["alpha"], p["beta"], p["delta"], p["gamma"]
 
-        # Parameters
-        a = params["alpha"]
-        b = params["beta"]
-        d = params["delta"]
-        g = params["gamma"]
+        def lotka_volterra(t, y):
+            x, y_val = y
+            dx_dt = alpha * x - beta * x * y_val
+            dy_dt = delta * x * y_val - gamma * y_val
+            return np.array([dx_dt, dy_dt], dtype=float)
 
-        # Number of RK4 steps
-        N = 10000
-        h = (t1 - t0) / N
-
-        x, y = y0[0], y0[1]
-        for _ in range(N):
-            k1x = a * x - b * x * y
-            k1y = d * x * y - g * y
-
-            k2x = a * (x + 0.5 * h * k1x) - b * (x + 0.5 * h * k1x) * (y + 0.5 * h * k1y)
-            k2y = d * (x + 0.5 * h * k1x) * (y + 0.5 * h * k1y) - g * (y + 0.5 * h * k1y)
-
-            k3x = a * (x + 0.5 * h * k2x) - b * (x + 0.5 * h * k2x) * (y + 0.5 * h * k2y)
-            k3y = d * (x + 0.5 * h * k2x) * (y + 0.5 * h * k2y) - g * (y + 0.5 * h * k2y)
-
-            k4x = a * (x + h * k3x) - b * (x + h * k3x) * (y + h * k3y)
-            k4y = d * (x + h * k3x) * (y + h * k3y) - g * (y + h * k3y)
-
-            x += (h / 6.0) * (k1x + 2 * k2x + 2 * k3x + k4x)
-            y += (h / 6.0) * (k1y + 2 * k2y + 2 * k3y + k4y)
-
-        return {"x": x, "y": y}
+        rtol, atol = 1e-10, 1e-10
+        t_eval = np.linspace(t0, t1, 1000) if debug else None
+        return solve_ivp(
+            lotka_volterra,
+            (t0, t1),
+            y0,
+            method="RK45",
+            rtol=rtol,
+            atol=atol,
+            t_eval=t_eval,
+            dense_output=debug,
+        )

@@ -1,22 +1,30 @@
 from typing import Any, List
 import numpy as np
+from sklearn.linear_model import Lasso
 
 class Solver:
     def solve(self, problem: dict[str, Any]) -> List[float]:
+        """Fit a Lasso regression (alpha = 0.1) to X and y.
+        If parameters are invalid, return zeros of appropriate dimension.
         """
-        Fast linear least‑squares solver that mirrors the behaviour of the original
-        Lasso with alpha=0.1 and fit_intercept=False.  The regularisation
-        term is omitted for speed, but the output shape and exception handling
-        match the original implementation.
-        """
+        X = problem.get("X")
+        y = problem.get("y")
+        if X is None or y is None:
+            # Missing data, return zeros
+            try:
+                d = problem["X"].shape[1]
+            except Exception:
+                d = 0
+            return [0.0] * d
+
         try:
-            X = problem["X"]
-            y = problem["y"]
-            # Solve the (non‑regularised) normal equations: X.T @ X @ beta = X.T @ y
-            # Using np.linalg.lstsq is numerically stable and fast.
-            beta, *_ = np.linalg.lstsq(X, y, rcond=None)
-            return beta.tolist()
+            model = Lasso(alpha=0.1, fit_intercept=False, max_iter=10000)
+            model.fit(X, y)
+            return model.coef_.tolist()
         except Exception:
-            # On any failure, return a zero vector of appropriate dimensionality.
-            _, d = problem["X"].shape
+            # On error (e.g., shape mismatch), return zeros
+            try:
+                d = X.shape[1]
+            except Exception:
+                d = 0
             return [0.0] * d

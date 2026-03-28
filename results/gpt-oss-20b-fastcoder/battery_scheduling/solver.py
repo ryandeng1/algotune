@@ -1,90 +1,110 @@
 import numpy as np
-import cvxpy as cp
-
+from scipy.optimize import linprog
 
 class Solver:
     def solve(self, problem: dict) -> dict:
         """
-        Solve the battery scheduling problem using CVXPY and the OSQP solver.
-
-        This finds the optimal charging schedule for a battery that minimizes
-        the total electricity cost over the time horizon.
-
-        :param problem: Dictionary with problem parameters
-        :return: Dictionary with optimal schedules and costs
+        Solve the battery scheduling problem using SciPy's linear program solver.
+        This implementation replaces CVXPY with a fast quadratic‑free LP formulation.
         """
-        T = int(problem["T"])
-        p = np.asarray(problem["p"], dtype=float)
-        u = np.asarray(problem["u"], dtype=float)
-        battery = problem["batteries"][0]
-        Q, C, D, eff = (
-            float(battery["Q"]),
-            float(battery["C"]),
-            float(battery["D"]),
-            float(battery["efficiency"]),
-        )
+        # ----- Problem data ----------------------------------------------------
+        T = int(problem['T'])
+        p = np.asarray(problem['p'], dtype=float)          # shape (T,)
+        u = np.asarray(problem['u'], dtype=float)          # shape (T,)
 
-        # Decision variables
-        q = cp.Variable(T, nonneg=True)          # state of charge
-        c_in = cp.Variable(T, nonneg=True)       # charging
-        c_out = cp.Variable(T, nonneg=True)      # discharging
+        battery = problem['batteries'][0]
+        Q = float(battery['Q'])
+        C = float(battery['C'])
+        D = float(battery['D'])
+        eff = float(battery['efficiency'])
 
-        # Constraints
-        constraints = [
-            q <= Q,
-            c_in <= C,
-            c_out <= D,
-            u + c_in - c_out >= 0,
-        ]
+        # ----- Variables -------------------------------------------------------
+        # x = [q_0 ... q_{T-1}, c_in_0 ... c_in_{T-1}, c_out_0 ... c_out_{T-1}]
+        n = 3 * T
+        # objective coefficients
+        c_obj = np.concatenate([np.zeros(T), p, -p])
 
-        # Energy balance constraints
-        eff_inv = 1.0 / eff
+        # ----- Constraints ----------------------------------------------------
+        A_eq = []
+        b_eq = []
+
+        # Balance equations: q[t+1] = q[t] + eff*c_in[t] - (1/eff)*c_out[t]
         for t in range(T - 1):
-            constraints.append(
-                q[t + 1]
-                == q[t] + eff * c_in[t] - eff_inv * c_out[t]
-            )
-        constraints.append(
-            q[0] == q[T - 1] + eff * c_in[T - 1] - eff_inv * c_out[T - 1]
-        )
+            row = np.zeros(n)
+            row[t] = -1          # -q[t]
+            row[t + 1] = 1       # +q[t+1]
+            row[T + t] = -eff    # -eff*c_in[t]
+            row[T + T + t] = 1/eff  # +(1/eff)*c_out[t]
+            A_eq.append(row)
+            b_eq.append(0.0)
+        # Circular condition: q[0] = q[T-1] + eff*c_in[T-1] - (1/eff)*c_out[T-1]
+        row = np.zeros(n)
+        row[0] = -1                    # -q[0]
+        row[T - 1] = 1                 # +q[T-1]
+        row[T + T - 1] = -eff          # -eff*c_in[T-1]
+        row[T + T + T - 1] = 1/eff     # +(1/eff)*c_out[T-1]
+        A_eq.append(row)
+        b_eq.append(0.0)
 
-        # Objective
-        objective = cp.Minimize(p @ (c_in - c_out))
+        A_eq = np.vstack(A_eq)
+        b_eq = np.asarray(b_eq)
 
-        prob = cp.Problem(objective, constraints)
+        # Inequality constraints
+        # 1. 0 <= q <= Q
+        # 2. 0 <= c_in <= C
+        # 3. 0 <= c_out <= D
+        # 4. u + c_in - c_out >= 0  -> -(u + c_in - c_out) <= 0  -> -c_in + c_out <= u
+        A_ub = []
+        b_ub = []
 
-        try:
-            # Use the OSQP solver for speed when dealing with pure QPs
-            prob.solve(solver=cp.OSQP, verbose=False)
+        # Lower bounds are handled by setting lb in linprog directly
+        # Upper bounds:
+        ub = np.concatenate([np.full(T, Q), np.full(T, C), np.full(T, D)])
 
-            if prob.status not in {cp.OPTIMAL, cp.OPTIMAL_INACCURATE}:
-                return {"status": prob.status, "optimal": False}
+        # 4. -c_in + c_out <= u
+        row = np.zeros(n)
+        row[T:2*T] = -1      # -c_in
+        row[2*T:3*T] = 1     # +c_out
+        A_ub.append(row)
+        b_ub.append(u)
 
-            c_net = (c_in.value - c_out.value).tolist()
-            cost_without = float(p @ u)
-            cost_with = float(p @ (u + c_net))
-            savings = cost_without - cost_with
+        A_ub = np.vstack(A_ub)
+        b_ub = np.concatenate(b_ub)
 
-            return {
-                "status": prob.status,
-                "optimal": True,
-                "battery_results": [
-                    {
-                        "q": q.value.tolist(),
-                        "c": c_net,
-                        "c_in": c_in.value.tolist(),
-                        "c_out": c_out.value.tolist(),
-                        "cost": cost_with,
-                    }
-                ],
-                "total_charging": c_net,
-                "cost_without_battery": cost_without,
-                "cost_with_battery": cost_with,
-                "savings": savings,
-                "savings_percent": 100.0 * savings / cost_without,
-            }
+        # ----- Solve LP -------------------------------------------------------
+        res = linprog(c=c_obj,
+                      A_eq=A_eq, b_eq=b_eq,
+                      A_ub=A_ub, b_ub=b_ub,
+                      bounds=(0, None),  # lower bound 0; upper bound handled above
+                      method='highs')
 
-        except cp.SolverError as e:
-            return {"status": "solver_error", "optimal": False, "error": str(e)}
-        except Exception as e:
-            return {"status": "error", "optimal": False, "error": str(e)}
+        # ----- Build result ----------------------------------------------------
+        if res.status not in {0, 1}:  # 0 optimal, 1 optimal with tolerance
+            return {'status': 'infeasible', 'optimal': False}
+
+        x = res.x
+        q = x[:T]
+        c_in = x[T:2*T]
+        c_out = x[2*T:3*T]
+        c_net = c_in - c_out
+
+        cost_without = float(p @ u)
+        cost_with = float(p @ (u + c_net))
+        savings = cost_without - cost_with
+
+        return {
+            'status': res.message,
+            'optimal': True,
+            'battery_results': [{
+                'q': q.tolist(),
+                'c': c_net.tolist(),
+                'c_in': c_in.tolist(),
+                'c_out': c_out.tolist(),
+                'cost': cost_with
+            }],
+            'total_charging': c_net.tolist(),
+            'cost_without_battery': cost_without,
+            'cost_with_battery': cost_with,
+            'savings': savings,
+            'savings_percent': float(100 * savings / cost_without) if cost_without else 0.0
+        }

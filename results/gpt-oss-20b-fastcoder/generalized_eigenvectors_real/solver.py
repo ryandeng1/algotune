@@ -2,33 +2,48 @@ import numpy as np
 from numpy.typing import NDArray
 
 class Solver:
-    def solve(self, problem: tuple[NDArray, NDArray]) -> tuple[list[float], list[list[float]]]:
-        """Fast solver for A x = λ B x with A symmetric, B SPD."""
+    def solve(
+        self, problem: tuple[NDArray, NDArray]
+    ) -> tuple[list[float], list[list[float]]]:
+        """
+        Solve the generalized eigenvalue problem A·x = λ B·x for symmetric A and
+        symmetric positive‑definite B.
+
+        The routine uses the Cholesky factorisation of B and solves standard
+        eigenvalue problem for the transformed matrix.  All operations are
+        vectorised – no explicit Python loops are used – to maximise speed
+        for large matrices.
+        """
         A, B = problem
 
-        # Cholesky factorisation of B: B = L Lᵀ
+        # Cholesky factorisation of B: B = L·L.T
+        # Use np.linalg.cholesky (fast, BLAS-backed)
         L = np.linalg.cholesky(B)
 
-        # Solve L y = x for y instead of forming L⁻¹
-        # Compute Ã = L⁻¹ A L⁻T
-        y = np.linalg.solve(L, A)
-        Atilde = np.linalg.solve(L.T, y)
+        # Compute L⁻¹ once via solve_triangular
+        # Since L is triangular, we can solve L·X = I for X = L⁻¹
+        # We use np.linalg.inv here for brevity; the matrices are small enough.
+        Linv = np.linalg.inv(L)
 
-        # Symmetric eigen–decomposition of Ã
-        eigenvalues, eigvecs = np.linalg.eigh(Atilde)
+        # Similarity transform: Atilde = L⁻¹·A·L⁻T
+        Atilde = Linv @ A @ Linv.T
 
-        # Transform back to eigenvectors of the original problem
-        eigvecs = np.linalg.solve(L.T, eigvecs)
+        # Eigen-decomposition of the symmetric Atilde
+        ev, evec = np.linalg.eigh(Atilde)
 
-        # Normalise eigenvectors to be B‑orthonormal:
-        #  vᵀ B v = ||Lᵀ v||²
-        Lt = L.T
-        norms = np.linalg.norm(Lt @ eigvecs, axis=0)
-        eigvecs /= norms
+        # Back‑transform eigenvectors: v = L⁻T·q
+        evec = L.T @ evec
 
-        # Return in descending eigenvalue order
-        inds = np.argsort(eigenvalues)[::-1]
-        ev = eigenvalues[inds].tolist()
-        evs = eigvecs[:, inds].T.tolist()  # each eigenvector as a list
+        # Normalise eigenvectors with respect to B: (vᵀ B v)¹ᐟ²
+        # Compute B·evec once
+        B_evec = B @ evec
+        norms = np.sqrt(np.einsum("ij,ij->i", evec, B_evec))
+        # Avoid division by zero – norms should be >0 for positive‑definite B
+        evec = evec / norms
 
-        return ev, evs
+        # Return eigenvalues/vectors in descending order
+        ev = ev[::-1].tolist()
+        evec = evec[:, ::-1]
+        evec_list = [evec[:, i].tolist() for i in range(evec.shape[1])]
+
+        return ev, evec_list

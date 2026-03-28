@@ -1,104 +1,94 @@
-from collections import defaultdict, deque
-from heapq import heappush, heappop
+# -*- coding: utf-8 -*-
 import math
-from bisect import bisect_right
-
-INF = float('inf')
-
-
-def dijkstra(graph, start):
-    """Return dict of shortest distances from start to all reachable nodes."""
-    dist = {start: 0}
-    heap = [(0, start)]
-    while heap:
-        d, u = heappop(heap)
-        if d != dist[u]:
-            continue
-        for v, w in graph[u]:
-            nd = d + w
-            if v not in dist or nd < dist[v]:
-                dist[v] = nd
-                heappush(heap, (nd, v))
-    return dist
+from typing import Iterable, List, Dict, Tuple
+import networkx as nx
+from ortools.sat.python import cp_model
 
 
 class Distances:
-    """Pre‑computed all‑pairs shortest‑path distances."""
+    __slots__ = ("_distances", "_nodes")
 
-    def __init__(self, graph):
-        self._dist = {}
-        for u in graph:
-            self._dist[u] = dijkstra(graph, u)
+    def __init__(self, graph: nx.Graph) -> None:
+        self._distances = dict(nx.all_pairs_dijkstra_path_length(graph))
+        self._nodes = list(self._distances.keys())
 
-    def dist(self, u, v):
-        return self._dist[u].get(v, INF)
+    def all_vertices(self) -> Iterable[str]:
+        return self._nodes
 
-    def max_dist(self, centers):
-        best = -INF
-        for v in self._dist:
-            min_d = min(self.dist(c, v) for c in centers)
-            if min_d > best:
-                best = min_d
-        return best
+    def dist(self, u: str, v: str) -> float:
+        return self._distances[u].get(v, math.inf)
 
-    def vertices_in_range(self, u, limit):
-        return [v for v, d in self._dist[u].items() if d <= limit]
+    def sorted_distances(self) -> List[float]:
+        return sorted(
+            d for d_dict in self._distances.values() for d in d_dict.values()
+        )
 
-    def sorted_dists(self):
-        arr = []
-        for d in self._dist.values():
-            arr.extend(d.values())
-        return sorted(arr)
+    def vertices_in_range(self, u: str, limit: float) -> Iterable[str]:
+        return (v for v, d in self._distances[u].items() if d <= limit)
 
 
-def solve(problem):
-    """Solve the k‑center problem using a deterministic greedy–then‑refine method."""
-    G_dict, k = problem
-    # Build graph: adjacency list, undirected
-    graph = defaultdict(list)
-    for u, adj in G_dict.items():
-        for v, w in adj.items():
-            graph[u].append((v, w))
-            graph[v].append((u, w))
+class Solver:
+    def solve(self, problem: Tuple[Dict[str, Dict[str, float]], int]) -> List[str]:
+        """
+        Efficient 2‑approximation for the k‑center problem using
+        a binary search over the sorted list of edge‑weights
+        and CP‑SAT feasibility checks for each radius.
+        """
 
-    if k == 0:
-        return []
+        G_dict, k = problem
+        graph = nx.Graph()
+        for v, adj in G_dict.items():
+            for w, d in adj.items():
+                graph.add_edge(v, w, weight=d)
 
-    distances = Distances(graph)
+        distances = Distances(graph)
+        nodes = list(distances.all_vertices())
 
-    # --- Greedy heuristic: farthest‑point algorithm ---
-    nodes = set(graph)
-    # choose first center with smallest maximum distance to all nodes
-    first = min(nodes, key=lambda c: max(distances.dist(c, u) for u in nodes))
-    centers = [first]
-    nodes.remove(first)
+        # sorted unique distances
+        uniq = sorted(set(distances.sorted_distances()))
 
-    while len(centers) < k and nodes:
-        # pick node farthest from current centers
-        u = max(nodes, key=lambda v: min(distances.dist(c, v) for c in centers))
-        centers.append(u)
-        nodes.remove(u)
+        # mapping from node to index
+        node_index = {node: i for i, node in enumerate(nodes)}
 
-    # --- Refinement: try to reduce maximum distance iteratively ---
-    cur_obj = distances.max_dist(centers)
-    sorted_distances = distances.sorted_dists()
-    idx = bisect_right(sorted_distances, cur_obj)
+        def feasible(r: float) -> Tuple[bool, List[str]]:
+            """Check if there exists a set of k centers within radius r."""
+            model = cp_model.CpModel()
+            x = [model.NewBoolVar(f"x{i}") for i in range(len(nodes))]
 
-    # iterate over candidate radii smaller than current objective
-    for rad in reversed(sorted_distances[:idx-1]):
-        # set cover with radius rad
-        cover = set()
-        un_covered = set(graph)
-        while un_covered:
-            # pick center covering most uncovered nodes
-            best_node = max(un_covered, key=lambda v: len(set(distances.vertices_in_range(v, rad)) & un_covered))
-            cover.add(best_node)
-            un_covered -= set(distances.vertices_in_range(best_node, rad))
-            if len(cover) > k:
-                break
-        if len(cover) <= k:
-            centers = sorted(cover)[:k]
-            cur_obj = rad
-            sorted_distances = sorted_distances[:bisect_right(sorted_distances, cur_obj)]
+            # at most k centers
+            model.Add(sum(x) <= k)
 
-    return centers
+            # coverage constraints
+            for v in nodes:
+                coverers = [x[node_index[u]]
+                            for u, d in distances._distances[v].items() if d <= r]
+                if not coverers:
+                    # no node can cover v under this radius
+                    return False, []
+                model.Add(sum(coverers) >= 1)
+
+            solver = cp_model.CpSolver()
+            solver.parameters.max_time_in_seconds = 5.0
+            status = solver.Solve(model)
+            if status != cp_model.OPTIMAL and status != cp_model.FEASIBLE:
+                return False, []
+
+            selected = [nodes[i] for i, var in enumerate(x) if solver.Value(var) == 1]
+            return True, selected
+
+        # binary search for minimal feasible radius
+        lo, hi = 0, len(uniq) - 1
+        best_radius = uniq[hi]
+        best_solution: List[str] = []
+
+        while lo <= hi:
+            mid = (lo + hi) // 2
+            r = uniq[mid]
+            ok, sol = feasible(r)
+            if ok:
+                best_radius, best_solution = r, sol
+                hi = mid - 1
+            else:
+                lo = mid + 1
+
+        return best_solution

@@ -1,61 +1,85 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-
-from __future__ import annotations
-from typing import NamedTuple, List, Sequence, Tuple, Iterable
-from ortools.sat.python import cp_model
-
+from typing import Any, NamedTuple, Tuple, List
 
 class Instance(NamedTuple):
     n: int
     sets: List[List[int]]
     conflicts: List[List[int]]
 
-
 class Solver:
-    """Fast set‑cover solver with conflicts (0‑based indices)."""
+    def __init__(self):
+        # Nothing to precompute globally
+        pass
 
-    def solve(self, problem: Instance | Tuple[int, List[List[int]], List[List[int]]]) -> List[int]:
+    def solve(self, problem: Instance | Tuple) -> List[int]:
         if not isinstance(problem, Instance):
             problem = Instance(*problem)
-
         n, sets, conflicts = problem
+        m = len(sets)
 
-        # Filter out empty sets – they can never be used in a cover
-        filtered_sets: List[List[int]] = [s for s in sets if s]
-        set_index_map: dict[int, int] = {}
-        for new_i, old_set in enumerate(sets):
-            if old_set:
-                set_index_map[new_i] = len(set_index_map)
+        # Convert sets to sorted lists for deterministic ordering
+        sets = [sorted(s) for s in sets]
 
-        model = cp_model.CpModel()
-        set_vars = [model.NewBoolVar(f'set_{i}') for i in range(len(filtered_sets))]
-
-        # For each object, ensure at least one covering set is chosen
-        # Build a mapping object → covering set indices (filtered)
-        object_to_sets: List[List[int]] = [[] for _ in range(n)]
-        for idx, s in enumerate(filtered_sets):
+        # Build coverage bitmask for each set (bits 0..n-1)
+        obj_mask = [0] * m
+        for i, s in enumerate(sets):
+            mask = 0
             for obj in s:
-                object_to_sets[obj].append(idx)
+                mask |= 1 << obj
+            obj_mask[i] = mask
 
-        for obj_covered in object_to_sets:
-            if obj_covered:  # should always be true
-                model.Add(sum(set_vars[i] for i in obj_covered) >= 1)
+        # Build conflict mask for each set (bits 0..m-1)
+        conflict_mask = [0] * m
+        for idx in range(m):
+            conflict_mask[idx] |= 1 << idx  # self conflicts
+        for c in conflicts:
+            for i in c:
+                for j in c:
+                    conflict_mask[i] |= 1 << j
 
-        # Handle conflicts
-        for conf in conflicts:
-            filtered_conf = [set_index_map[i] for i in conf if i in set_index_map]
-            if filtered_conf:
-                model.AddAtMostOne(set_vars[i] for i in filtered_conf)
+        # Precompute which sets cover each object
+        obj_to_sets = [[] for _ in range(n)]
+        for i, mask in enumerate(obj_mask):
+            for obj in range(n):
+                if mask >> obj & 1:
+                    obj_to_sets[obj].append(i)
 
-        # Minimise number of selected sets
-        model.Minimize(sum(set_vars))
+        # Order objects by fewest covering sets to speed up pruning
+        order = sorted(range(n), key=lambda o: len(obj_to_sets[o]))
 
-        solver = cp_model.CpSolver()
-        status = solver.Solve(model)
+        best_solution: List[int] | None = None
+        best_count = m + 1
+        from functools import lru_cache
 
-        if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-            chosen = [orig_i for orig_i, new_i in set_index_map.items()
-                      if solver.Value(set_vars[new_i]) == 1]
-            return chosen
-        raise ValueError("No feasible solution found.")
+        @lru_cache(maxsize=None)
+        def dfs(uncovered: int, chosen_mask: int, chosen_list: Tuple[int, ...]) -> None:
+            nonlocal best_solution, best_count
+            # Prune if already worse than best found
+            if len(chosen_list) >= best_count:
+                return
+            if uncovered == 0:
+                # All objects covered
+                best_solution = list(chosen_list)
+                best_count = len(chosen_list)
+                return
+            # Choose next uncovered object
+            # Find lowest set bit in uncovered
+            next_obj = (uncovered & -uncovered).bit_length() - 1
+            # For each set covering it
+            for si in obj_to_sets[next_obj]:
+                # Skip if conflicts with already chosen
+                if chosen_mask & conflict_mask[si]:
+                    continue
+                # New chosen mask
+                new_chosen_mask = chosen_mask | (1 << si)
+                # New uncovered mask
+                new_uncovered = uncovered & ~obj_mask[si]
+                dfs(new_uncovered, new_chosen_mask, chosen_list + (si,))
+                # If optimal found (size 1) we can stop early
+                if best_solution is not None and best_count == 1:
+                    return
+
+        ALL_UNCOVERED = (1 << n) - 1
+        dfs(ALL_UNCOVERED, 0, tuple())
+        if best_solution is None:
+            raise ValueError("No feasible solution found.")
+        return best_solution

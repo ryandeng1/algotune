@@ -1,45 +1,54 @@
+from typing import List
 from ortools.sat.python import cp_model
-from typing import List, Dict
 
 class Solver:
-    def solve(self, problem: Dict[str, List]) -> List[int]:
+    """Fast CP‑SAT MWIS implementation."""
+
+    def solve(self, problem: dict[str, List]) -> List[int]:
         """
-        Solves the Maximum Weight Independent Set (MWIS) problem efficiently
-        using OR-Tools CP-SAT.
+        Solves the Maximum‑Weight Independent Set (MWIS) problem.
 
         Parameters
         ----------
         problem : dict
-            A dictionary containing:
-                'adj_matrix': List[List[int]] – adjacency matrix (0/1)
-                'weights'   : List[int]      – node weights
+            Must contain:
+            * `adj_matrix` – adjacency matrix (list of lists of booleans)
+            * `weights`    – list of node weights
 
         Returns
         -------
         List[int]
-            A list of node indices that form the optimal MWIS.
+            Indices of nodes in an optimal independent set.
         """
         adj_matrix = problem["adj_matrix"]
         weights = problem["weights"]
-        n = len(adj_matrix)
+        n = len(weights)
 
         model = cp_model.CpModel()
-        nodes = [model.NewBoolVar(f"x_{i}") for i in range(n)]
+        # Boolean variables for each node
+        x = [model.NewBoolVar(f"x_{i}") for i in range(n)]
 
-        # Add conflict constraints only for existing edges
+        # Create adjacency constraints only once per edge
         for i in range(n):
-            row = adj_matrix[i]
+            ai = adj_matrix[i]
             for j in range(i + 1, n):
-                if row[j]:
-                    model.Add(nodes[i] + nodes[j] <= 1)
+                if ai[j]:
+                    model.Add(x[i] + x[j] <= 1)
 
-        # Optimize the sum of selected weights
-        model.Maximize(sum(weights[i] * nodes[i] for i in range(n)))
+        # Maximize total weight
+        model.Maximize(
+            sum(weights[i] * x[i] for i in range(n))
+        )
 
+        # Use a solver with a short time limit that suffices for moderate graphs.
         solver = cp_model.CpSolver()
-        solver.parameters.num_search_workers = max(1, cp_model.DefaultSearchWorkers())
+        solver.parameters.max_time_in_seconds = 10.0  # adjust if needed
+        solver.parameters.num_search_workers = cp_model.CpSolverParameters().GetDefault().num_search_workers
+
         status = solver.Solve(model)
 
         if status == cp_model.OPTIMAL:
-            return [i for i in range(n) if solver.Value(nodes[i])]
-        return []
+            return [i for i in range(n) if solver.Value(x[i]) == 1]
+        else:
+            # In rare cases the solver may only find a feasible solution, return it
+            return [i for i in range(n) if solver.Value(x[i]) == 1]

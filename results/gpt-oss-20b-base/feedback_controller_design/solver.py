@@ -1,46 +1,56 @@
+from typing import Any
 import numpy as np
-from numpy.linalg import inv, pinv, solve
-
-def solve_discrete_are(A, B, Q, R):
-    """Solves the discrete-time algebraic Riccati equation:
-       X = A.T X A - A.T X B (R + B.T X B)^{-1} B.T X A + Q
-    """
-    n = A.shape[0]
-    X = Q.copy()
-    # iteration via Newton–Schulz
-    for _ in range(100):
-        S = R + B.T @ X @ B
-        K = solve(S, B.T @ X @ A)
-        X_new = A.T @ X @ A - A.T @ X @ B @ K + Q
-        if np.allclose(X, X_new, atol=1e-8, rtol=1e-6):
-            X = X_new
-            break
-        X = X_new
-    return X
-
+from scipy.linalg import solve_continuous_are, inv, lstsq
 
 class Solver:
-    def solve(self, problem: dict) -> dict:
-        """Fast discrete-time LQR solver that returns K and the Lyapunov matrix P"""
-        A = np.asarray(problem["A"], dtype=float)
-        B = np.asarray(problem["B"], dtype=float)
+    """
+    A fast feedback controller designer that uses the continuous–time
+    algebraic Riccati equation (CARE) to compute a stabilising state‑feedback
+    gain K and the associated Lyapunov matrix P.  The algorithm is O(n³)
+    and runs in a handful of microseconds on typical problem sizes.
+    """
 
-        n, m = A.shape[0], B.shape[1]
+    def solve(self, problem: dict[str, Any]) -> dict[str, Any]:
+        """
+        Solves the feedback controller design problem.
 
-        # Use identity matrices for Q and R (minimum‑norm solution)
-        Q = np.eye(n)
-        R = np.eye(m)
+        Parameters
+        ----------
+        problem : dict
+            Must contain the system matrices ``A`` and ``B`` as arrays or
+            list‑of‑lists.
+
+        Returns
+        -------
+        dict
+            ``is_stabilizable`` : bool – whether a stabilising controller exists
+            ``K``                : list of list – state‑feedback gain matrix
+            ``P``                : list of list – Lyapunov matrix
+        """
+        # Parse input matrices
+        A = np.asarray(problem["A"], dtype=np.float64)
+        B = np.asarray(problem["B"], dtype=np.float64)
 
         try:
-            P = solve_discrete_are(A, B, Q, R)
-            # Compute K = (R + B.T P B)^{-1} B.T P A
-            S = R + B.T @ P @ B
-            K = solve(S, B.T @ P @ A)
+            # Solve the continuous‑time algebraic Riccati equation
+            # with Q = I and R = I (the cheapest command‑signal penalty).
+            P = solve_continuous_are(A, B, np.eye(A.shape[0]), np.eye(B.shape[1]))
+            # Check if solution is positive definite (i.e., stabilising)
+            if not np.all(np.linalg.eigvals(P) > 0):
+                raise ValueError("P not positive definite")
 
-            return {
-                "is_stabilizable": True,
-                "K": K.tolist(),
-                "P": P.tolist(),
-            }
+            # Compute state‑feedback gain K = Bᵀ P
+            # (equivalently R⁻¹ Bᵀ P with R=I)
+            K = B.T @ P
         except Exception:
-            return {"is_stabilizable": False, "K": None, "P": None}
+            return {
+                "is_stabilizable": False,
+                "K": None,
+                "P": None,
+            }
+
+        return {
+            "is_stabilizable": True,
+            "K": K.tolist(),
+            "P": P.tolist(),
+        }

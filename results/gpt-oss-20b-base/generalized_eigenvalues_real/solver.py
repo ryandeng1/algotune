@@ -1,28 +1,15 @@
-from typing import Any
 import numpy as np
+from scipy.linalg import eigh
 from numpy.typing import NDArray
 
 class Solver:
     def solve(self, problem: tuple[NDArray, NDArray]) -> list[float]:
         """
-        Solve the generalized eigenvalue problem A·x = λ B·x.
-        A is symmetric, B is symmetric positive definite.
-        Returns eigenvalues sorted in descending order.
+        Solve the generalized eigenvalue problem A·x = λ B·x for symmetric A and positive‑definite B.
+        Returns the eigenvalues sorted in descending order.
         """
         A, B = problem
-
-        # Cholesky factorisation of B: B = L Lᵀ
-        L = np.linalg.cholesky(B)          # L lower‑triangular
-
-        # Solve L X = A  →  X = L⁻¹ A  (avoid explicit inversion)
-        X = np.linalg.solve(L, A)
-
-        # Transform to a standard eigenvalue problem
-        # Atilde = (L⁻¹ A) (L⁻¹)ᵀ = X @ X.T
-        Atilde = X @ X.T
-
-        # Compute eigenvalues of the symmetric matrix
-        eigs = np.linalg.eigh(Atilde, lower=True, eigvals_only=True)
-
-        # Return descending sorted eigenvalues
-        return eigs[::-1].tolist()
+        # Use scipy's optimized generalized eigenvalue routine (eigh handles symmetric-definite pairs).
+        vals, _ = eigh(A, B, eigvals_only=True, lower=False)
+        # eigh returns ascending order; reverse for descending
+        return vals[::-1].tolist()

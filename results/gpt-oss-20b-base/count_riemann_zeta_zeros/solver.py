@@ -1,38 +1,30 @@
-from typing import Any
 import math
+from typing import Any, Dict
 
 class Solver:
+    """
+    Fast approximation of the number of non‑trivial zeros of the Riemann zeta
+    function with imaginary part <= t using the standard explicit formula.
+    """
 
-    def solve(self, problem: dict[str, Any]) -> dict[str, Any]:
-        """Count Riemann‑zeta zeros in the critical strip with imaginary part <= t
-        using the Riemann–von Mangoldt formula (fast approximation)."""
-        t: float = float(problem['t'])
-        if t < 0:
-            # Non‑positive t has no zeros
-            return {'result': 0}
+    @staticmethod
+    def _zero_count_approx(t: float) -> int:
+        """
+        Return the integer count of zeros in the critical strip up to height t.
+        Uses the Riemann–von Mangoldt explicit formula:
+            N(t) ≈ (t/(2π)) * log(t/(2π)) - t/(2π) + 7/8
+        For t <= 2π the count is zero.
+        """
+        if t < 2 * math.pi:
+            return 0
+        t_over_2pi = t / (2 * math.pi)
+        return int(t_over_2pi * math.log(t_over_2pi) - t_over_2pi + 0.875)
 
-        # constants
-        pi = math.pi
-
-        # The main term of the counting function N(t)
-        # N(t) ≈ (t / (2π)) * log(t / (2π)) - t / (2π) + 7/8
-        # This is accurate to within O(1) for t >= 10.
-        main = (t / (2 * pi)) * math.log(t / (2 * pi)) - t / (2 * pi) + 7 / 8
-
-        # For very small t we fall back to a small hard‑coded list.
-        if t < 10:
-            # known zero counts for t < 10
-            # N(0)=0, N(0.1)=0, ... up to N(10)=1.
-            # We use a simple linear interpolation around t=10 for tiny t.
-            if t < 1:
-                # No zeros for t < 14.134...
-                return {'result': 0}
-            elif t < 14.134:
-                return {'result': 1}
-            else:
-                # For the tiny interval 14.134-20, return 1
-                return {'result': 1}
-
-        # For t >= 10 we round down to the nearest integer
-        count = int(math.floor(main))
+    def solve(self, problem: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Count zeta zeros along the critical strip with imaginary part <= t.
+        The argument `problem` must contain the key `'t'` with a float value.
+        """
+        t = float(problem['t'])
+        count = self._zero_count_approx(t)
         return {'result': count}

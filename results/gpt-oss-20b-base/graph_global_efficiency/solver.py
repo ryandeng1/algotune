@@ -1,53 +1,53 @@
 import collections
-from typing import Dict, List
 
-def solve(problem: Dict[str, List[List[int]]]) -> Dict[str, float]:
-    """
-    Compute the global efficiency of an undirected graph given its adjacency list.
-    Global efficiency is defined as the average of the reciprocal of the shortest
-    path lengths between all pairs of nodes:
-        E = (1 / (n * (n-1))) * sum_{i!=j} 1 / d(i,j)
-    If a pair of nodes is disconnected, its contribution to the sum is 0
-    (since 1/∞ = 0).
+class Solver:
+    def solve(self, problem: dict[str, list[list[int]]]) -> dict[str, float]:
+        """
+        Calculates the global efficiency of an undirected unweighted graph
+        given as an adjacency list. The implementation avoids NetworkX and
+        computes the mean of 1/distance for all unordered pairs of
+        distinct vertices.
 
-    The implementation uses a fast breadth‑first search from each source node,
-    avoiding the overhead of the NetworkX library and all its bookkeeping.
-    """
-    adj = problem["adjacency_list"]
-    n = len(adj)
-    # Empty or single node graph: efficiency is 0 by definition
-    if n < 2:
-        return {"global_efficiency": 0.0}
+        Parameters
+        ----------
+        problem : dict
+            {"adjacency_list": List[List[int]]}
 
-    # Pre‑allocate a list for distances (integer depths)
-    distances = [0] * n
-    total_reciprocal = 0.0
+        Returns
+        -------
+        dict
+            {"global_efficiency": float}
+        """
+        adj = problem["adjacency_list"]
+        n = len(adj)
+        if n <= 1:
+            return {"global_efficiency": 0.0}
 
-    for src in range(n):
-        # Reset BFS
-        for i in range(n):
-            distances[i] = -1
-        distances[src] = 0
-        q = collections.deque([src])
+        # Pre‑allocate distances array to reuse during BFS
+        dist = [0] * n
+        total = 0.0
 
-        while q:
-            u = q.popleft()
-            d_u = distances[u]
-            for v in adj[u]:
-                if distances[v] == -1:
-                    distances[v] = d_u + 1
-                    q.append(v)
+        for src in range(n):
+            # BFS from src
+            for i in range(n):
+                dist[i] = -1
+            q = collections.deque([src])
+            dist[src] = 0
+            while q:
+                u = q.popleft()
+                d = dist[u] + 1
+                for v in adj[u]:
+                    if dist[v] == -1:
+                        dist[v] = d
+                        q.append(v)
+            # accumulate contributions for pairs (src, v) with src < v
+            for tgt in range(src + 1, n):
+                d = dist[tgt]
+                if d > 0:
+                    total += 1.0 / d
+                # if d == 0 or -1 (disconnected), contribution is zero
 
-        # Sum reciprocals of distances for all j > src to avoid double counting
-        for j in range(src + 1, n):
-            d = distances[j]
-            if d > 0:  # reachable
-                total_reciprocal += 1.0 / d
-
-    # Since we summed only for j > src, multiply by 2 to account for both (i,j) and (j,i)
-    total_reciprocal *= 2.0
-    # Normalization factor: number of ordered pairs of distinct nodes
-    denom = n * (n - 1)
-    efficiency = total_reciprocal / denom
-
-    return {"global_efficiency": float(efficiency)}
+        # Number of unordered node pairs
+        pair_count = n * (n - 1) / 2.0
+        efficiency = total / pair_count if pair_count else 0.0
+        return {"global_efficiency": float(efficiency)}

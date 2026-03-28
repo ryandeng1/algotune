@@ -1,30 +1,35 @@
-from typing import Dict, List
+import numpy as np
 
 class Solver:
-    """Optimised 1‑D Wasserstein distance solver.
-
-    The Wasserstein distance between two discrete probability
-    distributions on the same support is the L1 distance between
-    their cumulative distribution functions.  If ``u`` and ``v`` are
-    weight lists (not necessarily summing to 1) the distance is
-    ``sum(abs(cum_u - cum_v))`` and the support is simply ``1, 2, …,
-    n`` where ``n`` is the length of the lists.
+    """
+    Optimised 1‑D Wasserstein distance calculator for equally spaced support.
+    The support is assumed to be [1, 2, ..., n].
     """
 
-    def solve(self, problem: Dict[str, List[float]]) -> float:
-        try:
-            u = problem["u"]
-            v = problem["v"]
-            if len(u) != len(v):
-                raise ValueError("length mismatch")
-            cum_u = 0.0
-            cum_v = 0.0
-            distance = 0.0
-            for a, b in zip(u, v):
-                cum_u += a
-                cum_v += b
-                distance += abs(cum_u - cum_v)
-            return distance
-        except Exception:
-            # Fallback: if input is invalid, return a sanity value
-            return float(len(problem.get("u", [])))
+    def solve(self, problem: dict[str, list[float]]) -> float:
+        """
+        Compute the 1‑D Wasserstein distance between two discrete distributions
+        defined on the same equally spaced support.
+
+        :param problem:  Dictionary with keys 'u' and 'v', each a list of positive
+                        weights that sum to 1 (normalised probability mass).
+        :return: Float distance.
+        """
+        u = np.asarray(problem["u"], dtype=np.float64)
+        v = np.asarray(problem["v"], dtype=np.float64)
+
+        # Defensive copy in case inputs are not already normalised.
+        # This normalisation is inexpensive compared to other operations.
+        sum_u = u.sum()
+        if sum_u != 0.0:
+            u /= sum_u
+        sum_v = v.sum()
+        if sum_v != 0.0:
+            v /= sum_v
+
+        # Compute cumulative distribution functions
+        cu = np.cumsum(u)
+        cv = np.cumsum(v)
+
+        # L1 distance between the two CDFs is the 1‑D Wasserstein distance
+        return np.abs(cu - cv).sum()

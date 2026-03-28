@@ -1,3 +1,4 @@
+from typing import Any
 import numpy as np
 from scipy.integrate import solve_ivp
 
@@ -6,40 +7,31 @@ class Solver:
         sol = self._solve(problem, debug=False)
         if sol.success:
             return sol.y[:, -1].tolist()
-        raise RuntimeError(f"Solver failed: {sol.message}")
+        raise RuntimeError(f'Solver failed: {sol.message}')
 
-    def _solve(
-        self,
-        problem: dict[str, np.ndarray | float],
-        debug: bool = True,
-    ) -> "scipy.integrate.OptimizeResult":
-        y0 = np.asarray(problem["y0"], dtype=np.float64)
-        t0, t1 = problem["t0"], problem["t1"]
-        params = problem["params"]
+    def _solve(self, problem: dict[str, np.ndarray | float], debug: bool = True) -> Any:
+        y0 = np.array(problem['y0'], dtype=np.float64)
+        t0, t1 = problem['t0'], problem['t1']
+        params = problem['params']
+        alpha, dx = params['alpha'], params['dx']
 
-        alpha = params["alpha"]
-        dx = params["dx"]
+        # Heat equation derivative using centred difference with homogeneous Dirichlet BC
+        def heat_equation(_: float, u: np.ndarray) -> np.ndarray:
+            # u[0] and u[-1] are boundary nodes set to zero implicitly
+            u_left = np.concatenate([np.zeros(1), u[:-1]])
+            u_right = np.concatenate([u[1:], np.zeros(1)])
+            lap = (u_right - 2 * u + u_left) / dx ** 2
+            return alpha * lap
 
-        def ode(t, u):
-            # Manual padding to avoid repeated np.pad calls
-            u_ext = np.empty(u.size + 2, dtype=u.dtype)
-            u_ext[0] = 0.0
-            u_ext[-1] = 0.0
-            u_ext[1:-1] = u
-            uxx = (u_ext[2:] - 2 * u_ext[1:-1] + u_ext[:-2]) / dx**2
-            return alpha * uxx
-
-        rtol, atol = 1e-6, 1e-6
-        method = "RK45"
-        t_eval = np.linspace(t0, t1, 1000) if debug else None
+        # Integrate with SciPy only once; no dense output needed for speed
         sol = solve_ivp(
-            ode,
+            heat_equation,
             [t0, t1],
             y0,
-            method=method,
-            rtol=rtol,
-            atol=atol,
-            t_eval=t_eval,
-            dense_output=debug,
+            method='RK45',
+            rtol=1e-6,
+            atol=1e-6,
+            t_eval=None if not debug else np.linspace(t0, t1, 1000),
+            dense_output=False,
         )
         return sol

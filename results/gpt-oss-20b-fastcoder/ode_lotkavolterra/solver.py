@@ -1,48 +1,57 @@
+from typing import Any, Dict, List
 import numpy as np
 from scipy.integrate import solve_ivp
 
 class Solver:
-    def solve(self, problem: dict[str, np.ndarray | float]) -> dict[str, list[float]]:
+    """
+    Optimised solver for the Lotka‑Volterra system.
+    """
+
+    def __init__(self) -> None:
+        # Nothing to initialise once per instance, kept for conformity.
+        pass
+
+    def _setup_odefun(self, params: Dict[str, float]):
+        """Return a fast, outer‑closure ODE function using only local variable lookup."""
+        alpha = params["alpha"]
+        beta = params["beta"]
+        delta = params["delta"]
+        gamma = params["gamma"]
+
+        def odefun(t: float, y: np.ndarray) -> np.ndarray:
+            x, y_val = y[0], y[1]
+            dx = alpha * x - beta * x * y_val
+            dy = delta * x * y_val - gamma * y_val
+            return np.array([dx, dy], dtype=y.dtype)
+
+        return odefun
+
+    def solve(self, problem: Dict[str, np.ndarray | float]) -> Dict[str, List[float]]:
         """
-        Solve the Lotka–Volterra system defined in *problem* and return the final state.
-
-        Parameters
-        ----------
-        problem : dict
-            Must contain the keys 'y0', 't0', 't1', and 'params' with the typical
-            parameters of the Lotka–Volterra equations.
-
-        Returns
-        -------
-        dict
-            Mapping of variable names to the final time values.
+        Compute the solution of the Lotka‑Volterra equations at t1.
+        The function returns the final state vector as a list of floats.
         """
-        sol = self._solve(problem, debug=False)
-        if sol.success:
-            return dict(zip(["x", "y"], sol.y[:, -1].tolist()))
-        raise RuntimeError(f"Solver failed: {sol.message}")
-
-    def _solve(self, problem: dict[str, np.ndarray | float], debug: bool = False) -> Any:
-        """Internal routine that calls `solve_ivp` with the appropriate arguments."""
-        y0 = np.asarray(problem["y0"], dtype=float)
+        # Extract data once in a fast manner
+        y0 = np.asarray(problem["y0"], dtype=np.float64)
         t0, t1 = problem["t0"], problem["t1"]
-        p = problem["params"]
+        params = problem["params"]
 
-        # Ordinary differential equation for the Lotka–Volterra system.
-        def lotka_volterra(t, y):
-            x, y = y
-            dx_dt = p["alpha"] * x - p["beta"] * x * y
-            dy_dt = p["delta"] * x * y - p["gamma"] * y
-            return [dx_dt, dy_dt]
+        # Create a local ODE function once per call
+        odefun = self._setup_odefun(params)
 
-        # Solve only the final state; no dense output or intermediate points.
-        return solve_ivp(
-            lotka_volterra,
-            (t0, t1),
-            y0,
+        # Configure solver – the default tolerances of SciPy are already quite tight
+        sol = solve_ivp(
+            fun=odefun,
+            t_span=(t0, t1),
+            y0=y0,
             method="RK45",
             rtol=1e-10,
             atol=1e-10,
-            t_eval=[t1] if debug else None,
-            dense_output=debug,
+            vectorized=False,  # vectorization not needed for 2‑D system
         )
+
+        if not sol.success:
+            raise RuntimeError(f"Solver failed: {sol.message}")
+
+        # Return the last state as a list of floats
+        return sol.y[:, -1].tolist()

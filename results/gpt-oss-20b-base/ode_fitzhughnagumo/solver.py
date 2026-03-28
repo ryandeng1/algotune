@@ -1,43 +1,48 @@
-from typing import Any
+from typing import Any, Dict, List
 import numpy as np
+from scipy.integrate import solve_ivp
 
 class Solver:
-
-    def solve(self, problem: dict[str, np.ndarray | float]) -> dict[str, list[float]]:
+    def solve(self, problem: Dict[str, np.ndarray | float]) -> Dict[str, List[float]]:
         sol = self._solve(problem, debug=False)
-        if sol["success"]:
-            return sol["y"][:, -1].tolist()
-        else:
-            raise RuntimeError(f"Solver failed: {sol['message']}")
+        if sol.success:
+            return sol.y[:, -1].tolist()
+        raise RuntimeError(f"Solver failed: {sol.message}")
 
-    def _solve(self, problem: dict[str, np.ndarray | float], debug: bool = True) -> dict[str, Any]:
-        y0 = np.array(problem["y0"], dtype=float)
-        t0, t1 = problem["t0"], problem["t1"]
+    def _solve(self, problem: Dict[str, np.ndarray | float], debug: bool = True) -> Any:
+        # Extract initial condition and bounds
+        y0 = np.asarray(problem["y0"], dtype=float)
+        t0, t1 = float(problem["t0"]), float(problem["t1"])
         params = problem["params"]
 
-        # number of steps
-        N = 1000 if debug else 200  # adjust if needed for speed/accuracy trade‑off
-        h = (t1 - t0) / N
+        # Pull parameters into local vars to avoid repeated dict lookups
+        a = float(params["a"])
+        b = float(params["b"])
+        c = float(params["c"])
+        I = float(params["I"])
 
-        # pre‑allocate state array
-        y = np.empty((2, N + 1), dtype=float)
-        y[:, 0] = y0
+        def fitzhugh_nagumo(t: float, y: np.ndarray) -> np.ndarray:
+            v, w = y
+            dv_dt = v - v**3 / 3.0 - w + I
+            dw_dt = a * (b * v - c * w)
+            return np.array([dv_dt, dw_dt], dtype=float)
 
-        a, b, c, I = params["a"], params["b"], params["c"], params["I"]
+        # Configure solver options
+        rtol = 1e-8
+        atol = 1e-8
+        method = "RK45"
 
-        def f(v, w):
-            dv = v - v**3 / 3 - w + I
-            dw = a * (b * v - c * w)
-            return dv, dw
+        # No t_eval when not debugging (just final state)
+        t_eval = np.linspace(t0, t1, 1000) if debug else None
 
-        # simple RK4 loop
-        for i in range(N):
-            v, w = y[:, i]
-            k1v, k1w = f(v, w)
-            k2v, k2w = f(v + 0.5 * h * k1v, w + 0.5 * h * k1w)
-            k3v, k3w = f(v + 0.5 * h * k2v, w + 0.5 * h * k2w)
-            k4v, k4w = f(v + h * k3v, w + h * k3w)
-            y[0, i + 1] = v + (h / 6) * (k1v + 2 * k2v + 2 * k3v + k4v)
-            y[1, i + 1] = w + (h / 6) * (k1w + 2 * k2w + 2 * k3w + k4w)
-
-        return {"success": True, "y": y, "message": "Solved"}
+        sol = solve_ivp(
+            fitzhugh_nagumo,
+            (t0, t1),
+            y0,
+            method=method,
+            t_eval=t_eval,
+            dense_output=debug,
+            rtol=rtol,
+            atol=atol,
+        )
+        return sol

@@ -1,4 +1,4 @@
-from typing import List, Dict
+import numpy as np
 
 class Solver:
     def __init__(self):
@@ -6,65 +6,37 @@ class Solver:
         self.max_iter = 100
         self.tol = 1e-06
 
-    def solve(self, problem: Dict[str, List[List[int]]]) -> Dict[str, List[float]]:
-        """
-        Calculate PageRank scores for the directed graph specified by an adjacency list,
-        without using NetworkX.  The algorithm is a standard power‑iteration
-        implementation with a damping factor.
-
-        Parameters
-        ----------
-        problem : dict
-            {"adjacency_list": adj_list}
-        Returns
-        -------
-        dict
-            {"pagerank_scores": [score0, score1, ...]}
-        """
-        adj_list: List[List[int]] = problem["adjacency_list"]
-        n: int = len(adj_list)
-
-        # Trivial cases
+    def solve(self, problem: dict[str, list[list[int]]]) -> dict[str, list[float]]:
+        adj = problem['adjacency_list']
+        n = len(adj)
         if n == 0:
-            return {"pagerank_scores": []}
+            return {'pagerank_scores': []}
         if n == 1:
-            return {"pagerank_scores": [1.0]}
+            return {'pagerank_scores': [1.0]}
 
-        # Pre‑compute outgoing‑link counts for efficiency
-        out_counts = [len(neigh) for neigh in adj_list]
-        # Create reverse adjacency list: inbound neighbors for each node
-        inbound = [[] for _ in range(n)]
-        for u, neigh in enumerate(adj_list):
-            for v in neigh:
-                if 0 <= v < n:          # ignore dangling references
-                    inbound[v].append(u)
+        # Build transition matrix in CSR format for efficiency
+        rows, cols, data = [], [], []
+        out_deg = np.array([len(neigh) for neigh in adj], dtype=np.int32)
+        for u, neigh in enumerate(adj):
+            if neigh:  # non‑damped nodes
+                rows.extend([u]*len(neigh))
+                cols.extend(neigh)
+                data.extend([1.0/len(neigh)]*len(neigh))
+        M = np.zeros((n, n), dtype=np.float64)
+        M[rows, cols] = data
 
-        # Initialise rank uniformly
-        vec = [1.0 / n] * n
-        new_vec = [0.0] * n
-        teleport = (1.0 - self.alpha) / n
+        # Handle dangling nodes (out_deg == 0)
+        dangling = (out_deg == 0).astype(float)
+        # Personalization vector (uniform)
+        e = np.full(n, 1.0 / n)
 
+        # Power iteration
+        r = np.full(n, 1.0 / n)
         for _ in range(self.max_iter):
-            # Reset new_vec
-            for i in range(n):
-                new_vec[i] = teleport
-
-            # Contributions from inbound edges
-            for v in range(n):
-                if out_counts[v] == 0:
-                    # dangling node: distribute its rank uniformly
-                    for i in range(n):
-                        new_vec[i] += self.alpha * vec[v] / n
-                    continue
-                share = self.alpha * vec[v] / out_counts[v]
-                for u in inbound[v]:
-                    new_vec[u] += share
-
-            # Check convergence
-            diff = sum(abs(new_vec[i] - vec[i]) for i in range(n))
-            if diff < self.tol:
-                vec, new_vec = new_vec, vec
+            r_next = self.alpha * (M @ r + dangling @ r / n) + (1 - self.alpha) * e
+            if np.linalg.norm(r_next - r, 1) < self.tol:
+                r = r_next
                 break
-            vec, new_vec = new_vec, vec
+            r = r_next
 
-        return {"pagerank_scores": vec}
+        return {'pagerank_scores': r.tolist()}

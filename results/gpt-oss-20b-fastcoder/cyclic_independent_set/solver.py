@@ -1,69 +1,68 @@
 import itertools
 import numpy as np
-from typing import List, Tuple
+from numba import njit, types
+from numba.typed import List
 
-
-def solve(problem: Tuple[int, int]) -> List[Tuple[int, ...]]:
-    """
-    Compute an optimal independent set in the n‑th strong product of a cycle
-    graph with `num_nodes` vertices. The algorithm is a greedy, vectorized
-    implementation of the score‑based selection described in the original
-    solution.
-
-    This implementation uses only NumPy (no Numba) and is fully vectorized,
-    avoiding explicit Python loops wherever possible. It is therefore
-    significantly faster for large instances.
-    """
-    num_nodes, n = problem
-
-    # All candidate vertices: (num_nodes ** n, n) array
-    all_vertices = np.array(
-        list(itertools.product(range(num_nodes), repeat=n)), dtype=np.int64
-    )
-
-    # Pre‑compute the priority scores for all vertices
-    #  values: (n‑tuple of numbers 1..n‑1) once
-    vals = np.array(list(itertools.product(range(1, n), repeat=n)), dtype=np.int64)
-    # multipliers for weighted sum
-    mults = (num_nodes ** np.arange(n - 1, -1, -1)).astype(np.int64)
-    # repeated for each vertex
-    vals_matrix = np.tile(vals, (all_vertices.shape[0], 1))
-    # clip vertices to [0, num_nodes-3]
-    clipped = np.clip(all_vertices, 0, num_nodes - 3, dtype=np.int64)
-    weighted = np.sum((1 + vals_matrix + clipped) * mults, axis=-1)
-    scores = np.sum(weighted % (num_nodes - 2), dtype=np.float64)
-
-    # Prepare the blocking offsets: all n‑tuples of -1,0,1
-    block_offsets = np.array(
-        list(itertools.product([-1, 0, 1], repeat=n)), dtype=np.int64
-    )
-
-    # Helper to convert n‑tuple index to integer (base num_nodes)
-    powers = (num_nodes ** np.arange(n - 1, -1, -1)).astype(np.int64)
-
-    # Boolean mask of available vertices
-    avail = np.ones(all_vertices.shape[0], dtype=bool)
-
-    selected = []
-
+@njit
+def _solve(children, scores, to_block, powers, num_nodes):
+    N, n = children.shape
+    blocked = np.full(N, False, dtype=nb.boolean)
+    res = List()
     while True:
-        if not avail.any():
+        # find highest score among unblocked candidates
+        best_idx = -1
+        best_score = -1e308
+        for i in range(N):
+            if blocked[i]:
+                continue
+            if scores[i] > best_score:
+                best_score = scores[i]
+                best_idx = i
+        if best_idx == -1:
             break
-        # choose the available vertex with max score
-        avail_scores = np.where(avail, scores, -np.inf)
-        best_idx = int(np.argmax(avail_scores))
-        if avail_scores[best_idx] == -np.inf:  # no more available
-            break
+        res.append(best_idx)
+        candidate = children[best_idx]
+        # block all vertices that conflict with candidate
+        for j in range(to_block.shape[0]):
+            blocked_idx = 0
+            for k in range(n):
+                blocked_idx += ((candidate[k] + to_block[j, k]) % num_nodes) * powers[k]
+            scores[blocked_idx] = -1e308  # mark as blocked
+            blocked[blocked_idx] = True
+    return res
 
-        selected.append(best_idx)
-        # Block neighbors
-        candidate = all_vertices[best_idx]
-        # Compute indices of blocked vertices
-        # All neighbors = candidate + offsets mod num_nodes
-        neighbors = (candidate + block_offsets) % num_nodes
-        # Convert each neighbor tuple to integer index
-        neigh_idx = np.sum(neighbors[..., None] * powers, axis=1)
-        avail[neigh_idx] = False
-        avail[best_idx] = False  # block itself as well
+class Solver:
+    def solve(self, problem: tuple[int, int]) -> list[tuple[int, ...]]:
+        num_nodes, n = problem
 
-    return [tuple(all_vertices[i]) for i in selected]
+        # Pre‑compute all tuples of the graph
+        children = np.array(
+            list(itertools.product(range(num_nodes), repeat=n)),
+            dtype=np.int32,
+        )
+        total = children.shape[0]
+
+        # Vectorised priority computation
+        # Clip values
+        clipped = np.clip(children, 0, num_nodes - 3).astype(np.int64)
+
+        # Powers for index calculation
+        pow_n = np.array([num_nodes ** i for i in range(n - 1, -1, -1)], dtype=np.int64)
+
+        # base part of the score that is independent of the clip
+        # we compute it once using all combinations of (1 + 1..n-1)
+        comb = np.array(list(itertools.product(range(1, n), repeat=n)), dtype=np.int64)
+        base = np.sum((1 + comb) * pow_n, axis=1)
+
+        # Scores: (base + clipped.dot(pow_n)) % (num_nodes-2), summed
+        offset = clipped.dot(pow_n)
+        scores = np.sum((base + offset) % (num_nodes - 2), axis=0)
+
+        # All possible offsets (-1,0,1) for blocking
+        to_block = np.array(
+            list(itertools.product([-1, 0, 1], repeat=n)),
+            dtype=np.int32,
+        )
+
+        selected = _solve(children, scores, to_block, pow_n, num_nodes)
+        return [tuple(children[i]) for i in selected]

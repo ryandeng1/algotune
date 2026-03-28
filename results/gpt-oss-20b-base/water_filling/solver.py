@@ -1,47 +1,41 @@
 import numpy as np
 
-def solve(problem):
-    alpha = np.asarray(problem['alpha'], dtype=float)
-    P_total = float(problem['P_total'])
-    n = alpha.size
+class Solver:
+    def solve(self, problem: dict[str, Any]) -> dict[str, Any]:
+        alpha = np.asarray(problem['alpha'], dtype=float)
+        P_total = float(problem['P_total'])
+        n = alpha.size
 
-    # Quick checks
-    if n == 0 or P_total <= 0 or not np.all(alpha > 0):
-        return {'x': [float('nan')] * n, 'Capacity': float('nan')}
+        # Basic feasibility checks
+        if n == 0 or P_total <= 0 or not np.all(alpha > 0):
+            return {'x': [float('nan')] * n, 'Capacity': float('nan')}
 
-    # Water-filling style solution (KKT for maximizing sum log(alpha + x))
-    # sort alphas and remember original indices
-    idx = np.argsort(alpha)
-    alpha_sorted = alpha[idx]
-    cum_alpha = np.cumsum(alpha_sorted)
+        # Natural bounds for the dual variable lambda
+        # For lambda -> 0+, 1/lambda -> +inf
+        # For lambda -> inf, 1/lambda -> 0
+        lo, hi = 1e-12, np.max(alpha) * 1e8 + 1  # hi large enough
 
-    # Find the largest k such that the corresponding lambda <= 1/alpha_k
-    sol = None
-    for k in range(1, n + 1):
-        lambda_val = k / (P_total + cum_alpha[k - 1])
-        if lambda_val <= 1.0 / alpha_sorted[k - 1]:
-            x_temp = 1.0 / lambda_val - alpha_sorted
-            # other entries beyond k are zero
-            x_temp[k:] = 0.0
-            sol = x_temp
-            break
+        # Binary search for lambda such that sum max(0, 1/lambda - alpha) = P_total
+        for _ in range(60):
+            mid = 0.5 * (lo + hi)
+            inv = 1.0 / mid
+            # compute current sum of x_i
+            x = np.maximum(inv - alpha, 0.0)
+            s = x.sum()
+            if s > P_total:
+                lo = mid  # need larger lambda -> smaller 1/lambda
+            else:
+                hi = mid  # need smaller lambda -> larger 1/lambda
+        # Final x using best lambda
+        lam = hi
+        inv = 1.0 / lam
+        x = np.maximum(inv - alpha, 0.0)
 
-    if sol is None:
-        # All entries saturated to zero if lambda too large
-        sol = np.zeros(n)
+        # In rare case numerical errors cause tiny deficit or surplus, rescale
+        cur_sum = x.sum()
+        if cur_sum > 0:
+            x *= P_total / cur_sum
 
-    # Restore to original order
-    x = np.empty_like(sol)
-    x[idx] = sol
-
-    # Ensure feasibility (numerical robustness)
-    x = np.maximum(x, 0.0)
-    x = x * P_total / np.maximum(np.sum(x), 1e-12)
-
-    # Compute capacity
-    if np.any(np.isnan(x)) or np.any(np.isinf(x)):
-        capacity = float('nan')
-    else:
-        capacity = float(np.sum(np.log(alpha + x)))
-
-    return {'x': x.tolist(), 'Capacity': capacity}
+        # Compute capacity
+        cap = np.sum(np.log(alpha + x))
+        return {'x': x.tolist(), 'Capacity': float(cap)}

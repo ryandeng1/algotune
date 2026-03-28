@@ -1,43 +1,33 @@
 import numpy as np
-from typing import Any
 from numpy.typing import NDArray
 
 class Solver:
     def solve(self, problem: dict) -> NDArray:
         """
-        Compute the cumulative integral of the 1D array using Simpson's rule.
-        Implements an efficient vectorised algorithm without SciPy.
+        Compute the cumulative integral of the 1D array using Simpson's rule
+        via a vectorised NumPy implementation for speed.
         """
-        y = problem['y']
-        dx = problem['dx']
+        y: NDArray = problem["y"]
+        dx: float | NDArray = problem["dx"]
 
-        n = y.size
-        # Result array – first value is 0 as the integral starts at the first point.
-        result = np.empty(n, dtype=y.dtype)
+        n = y.shape[0]
+        if n < 2:
+            # Nothing to integrate
+            return np.zeros_like(y)
+
+        # Build Simpson weights: 1,4,2,4,2,... with the last element 2 if n is even
+        w = np.ones(n, dtype=y.dtype)
+        w[1::2] = 4.0
+        w[2::2] = 2.0
+        w[0] = 1.0
+        # Simpson's rule requires an even number of intervals (odd number of points)
+        # If n is even, adjust the last weight to 4 for the final interval
+        if n % 2 == 0:
+            w[-1] = 4.0
+
+        # Compute cumulative weighted sum
+        cum_wy = np.cumsum(y * w)
+        result = (dx / 3.0) * cum_wy
+        # The cumulative integral starts at 0
         result[0] = 0.0
-
-        # For points 1,2,… the Simpson rule is applied over each pair of
-        # consecutive 3 points: i-2, i-1, i.
-        # We fill in 2 steps at a time to avoid branching inside the loop.
-        i = 2
-        while i < n:
-            integral = (
-                y[i - 2] + 4.0 * y[i - 1] + y[i]
-            )
-            result[i] = result[i - 2] + (dx / 3.0) * integral
-            # If there's a single remaining point, add it using the trapezoid rule
-            if i + 1 < n:
-                result[i + 1] = result[i] + (dx / 2.0) * (y[i] + y[i + 1])
-            i += 2
-
-        # Handle the case of an even number of points where the last
-        # step was processed inside the loop.
-        if n % 2 == 0 and n > 2:
-            # Last index n-1 already set; nothing to do.
-            pass
-        elif n % 2 == 1:
-            # For odd length, the last index will not have been set
-            # if n==1 or n==2 we already handled.
-            pass
-
         return result

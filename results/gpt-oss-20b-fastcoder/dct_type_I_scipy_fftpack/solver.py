@@ -1,10 +1,12 @@
 import numpy as np
+from scipy.fft import dctn
 from numpy.typing import NDArray
-from scipy import fft
+from typing import Any
 
 class Solver:
     def solve(self, problem: NDArray) -> NDArray:
         """
-        Compute the N-dimensional DCT Type I using the faster scipy.fft module.
+        Compute the N‑dimensional DCT Type I using SciPy's fast FFT implementation.
         """
-        return fft.dctn(problem, type=1, norm=None)
+        # Use scipy.fft.dctn which is backed by FFTW (or MKL) and is faster than fftpack.
+        return dctn(problem, type=1)

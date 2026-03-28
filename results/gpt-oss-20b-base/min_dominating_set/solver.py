@@ -1,37 +1,44 @@
-from typing import List
 from ortools.sat.python import cp_model
+from typing import List
 
 class Solver:
     def solve(self, problem: List[List[int]]) -> List[int]:
         """
-        Solve the Minimum Dominating Set (MDS) problem using OR‑Tools CP‑SAT.
-        The implementation is deliberately concise to keep the CP‑SAT model small
-        and therefore fast.
+        Solve the minimum dominating set problem using OR‑Tools CP‑SAT.
+        This implementation pre‑computes adjacency lists and removes
+        unnecessary control flow to reduce model construction time.
         """
         n = len(problem)
+        if n == 0:
+            return []
+
+        # Build adjacency lists (including the node itself)
+        neighbors = [
+            [j for j in range(n) if problem[i][j] or i == j]
+            for i in range(n)
+        ]
+
         model = cp_model.CpModel()
-        x = [model.NewBoolVar(f"x{i}") for i in range(n)]
+        x = [model.NewBoolVar(f'x_{i}') for i in range(n)]
 
-        # For each vertex i, we need at least one selected vertex among
-        # i itself and all of its neighbors.
+        # Each node must be dominated by itself or a neighbor
         for i in range(n):
-            # sum of Booleans equals number of selected vertices in the closed neighborhood
-            neighborhood = [x[i]]
-            # Build the neighborhood list in a tight loop
-            row = problem[i]
-            for j, has_edge in enumerate(row):
-                if has_edge:
-                    neighborhood.append(x[j])
-            model.Add(sum(neighborhood) >= 1)
+            # Sum of BoolVars is at least 1
+            model.AddBoolOr([x[j] for j in neighbors[i]])
 
-        # Objective: minimize the number of selected vertices
+        # Minimise the size of the dominating set
         model.Minimize(sum(x))
 
+        # Create solver instance with a time limit (optional)
         solver = cp_model.CpSolver()
-        solver.parameters.max_time_in_seconds = 10.0  # optional time limit
+        solver.parameters.max_time_in_seconds = 30.0
+        solver.parameters.num_search_workers = 0  # Use single thread for reproducibility
         status = solver.Solve(model)
 
-        if status == cp_model.OPTIMAL or status == cp_model.FEASIBLE:
-            return [i for i, var in enumerate(x) if solver.Value(var) == 1]
+        if status == cp_model.OPTIMAL:
+            return [i for i in range(n) if solver.Value(x[i]) == 1]
+        elif status == cp_model.FEASIBLE:
+            # Return the best feasible solution found within the time limit
+            return [i for i in range(n) if solver.Value(x[i]) == 1]
         else:
             return []

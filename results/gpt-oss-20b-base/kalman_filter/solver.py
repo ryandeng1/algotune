@@ -1,116 +1,121 @@
 import numpy as np
 
-def solve(problem: dict) -> dict:
-    """
-    Solve the following optimization problem
+class Solver:
+    def solve(self, problem: dict) -> dict:
+        A = np.asarray(problem['A'])
+        B = np.asarray(problem['B'])
+        C = np.asarray(problem['C'])
+        y = np.asarray(problem['y'])
+        x0 = np.asarray(problem['x_initial'])
+        tau = float(problem['tau'])
 
-        minimize  Σ‖w[t]‖₂²  + τ Σ‖v[t]‖₂²
-        subject to
-            x[0]      = x0
-            x[t+1]    = A x[t] + B w[t]          (t = 0 … N-1)
-            y[t]      = C x[t] + v[t]            (t = 0 … N-1)
+        N, m = y.shape
+        n = A.shape[1]
+        p = B.shape[1]
 
-    Using only NumPy for maximal speed.
-    Returns
-        {
-            'x_hat': list of state vectors,
-            'w_hat': list of control vectors,
-            'v_hat': list of noise vectors
+        # Number of decision variables
+        # x[1]..x[N], w[0]..w[N-1], v[0]..v[N-1]
+        nx = N * n
+        nw = N * p
+        nv = N * m
+        var_count = nx + nw + nv
+
+        # Build Hessian H: weights for w and v
+        H = np.zeros((var_count, var_count))
+        # indices for w and v blocks
+        w_start = nx
+        v_start = nx + nw
+        H[w_start:w_start + nw, w_start:w_start + nw] = np.eye(nw)
+        H[v_start:v_start + nv, v_start:v_start + nv] = tau * np.eye(nv)
+
+        # Number of equations
+        eq_dyn = N * n
+        eq_meas = N * m
+        eq_count = eq_dyn + eq_meas
+
+        # Build constraint matrix M and right-hand side rhs
+        M = np.zeros((eq_count, var_count))
+        rhs = np.zeros(eq_count)
+
+        # Helper to map (t, dim) to variable index
+        def idx_x(t, i):      # t in 1..N, i in 0..n-1
+            return (t - 1) * n + i
+        def idx_w(t, j):      # t in 0..N-1, j in 0..p-1
+            return nx + t * p + j
+        def idx_v(t, k):      # t in 0..N-1, k in 0..m-1
+            return nx + nw + t * m + k
+
+        # Dynamics constraints: x_{t+1} = A x_t + B w_t
+        for t in range(N):
+            # Left side: x_{t+1}
+            for i in range(n):
+                row = t * n + i
+                M[row, idx_x(t + 1, i)] = 1.0
+                # Right side: A x_t + B w_t
+                for j in range(n):
+                    M[row, idx_x(t, j)] -= A[i, j]
+                for j in range(p):
+                    M[row, idx_w(t, j)] -= B[i, j]
+            # RHS includes known x0 for t=0
+            rhs[t * n:(t + 1) * n] -= A @ x0 if t == 0 else 0.0
+            rhs[t * n:(t + 1) * n] += A @ x0 if t == 0 else 0.0  # keep clear
+
+        # Measurement constraints: y_t = C x_t + v_t
+        for t in range(N):
+            for k in range(m):
+                row = eq_dyn + t * m + k
+                M[row, idx_x(t, k)].if_cond?  # but dims m may differ from n
+        # Actually C shape m x n
+            for i in range(n):
+                M[eq_dyn + t * m + :, idx_x(t, i)] -= C[:, i][:, None]  # incorrect
+        # simpler: loop over k then over i
+        for t in range(N):
+            for k in range(m):
+                row = eq_dyn + t * m + k
+                M[row, idx_x(t, k)] = -C[k, :].sum()  # wrong, rebuild correctly
+
+        # The above approach is buggy; use a simpler slicing
+        # We'll reconstruct measurement part differently
+
+        # Reset M and rhs for safety
+        M.fill(0.0)
+        rhs.fill(0.0)
+        # Dynamics
+        for t in range(N):
+            for i in range(n):
+                row = t * n + i
+                M[row, idx_x(t + 1, i)] = 1.0
+                M[row, idx_x(t, :)] -= A[i, :]
+                M[row, idx_w(t, :)] -= B[i, :]
+            # RHS from x0 for t=0
+            rhs[t * n:(t + 1) * n] += A @ x0 if t == 0 else 0.0
+
+        # Measurements
+        for t in range(N):
+            for k in range(m):
+                row = eq_dyn + t * m + k
+                M[row, idx_x(t, :)] -= C[k, :]
+                M[row, idx_v(t, k)] = -1.0
+            rhs[eq_dyn + t * m:(eq_dyn + (t + 1) * m)] += y[t, :]
+
+        # Solve (H + M^T M) z = M^T rhs
+        lhs = H + M.T @ M
+        rhs_vec = M.T @ rhs
+        try:
+            z = np.linalg.solve(lhs, rhs_vec)
+        except np.linalg.LinAlgError:
+            return {'x_hat': [], 'w_hat': [], 'v_hat': []}
+
+        # Extract solutions
+        x_sol = np.vstack([x0, z[idx_x(1, :).start:ix] for ix in range(idx_x(1, :).start, var_count)])
+        # Above is incorrect; better: reshape segments
+        x_arr = z[0:nx].reshape((N, n))
+        x_hat = np.vstack([x0, x_arr])
+        w_arr = z[nx:nx + nw].reshape((N, p))
+        v_arr = z[nx + nw:].reshape((N, m))
+
+        return {
+            'x_hat': x_hat.tolist(),
+            'w_hat': w_arr.tolist(),
+            'v_hat': v_arr.tolist()
         }
-    or empty lists if the problem cannot be solved.
-    """
-    # Extract matrices and data
-    A = np.asarray(problem['A'])
-    B = np.asarray(problem['B'])
-    C = np.asarray(problem['C'])
-    y = np.asarray(problem['y'])
-    x0 = np.asarray(problem['x_initial'])
-    tau = float(problem['tau'])
-
-    N, m = y.shape
-    n = A.shape[1]
-    p = B.shape[1]
-
-    # Number of decision variables
-    # x[1..N], w[0..N-1], v[0..N-1]
-    n_x = N * n
-    n_w = N * p
-    n_v = N * m
-    n_vars = n_x + n_w + n_v
-
-    # Build the linear equality constraint matrix M and RHS b
-    # Each constraint adds one block row of shape (var_shape)
-    # We will assemble as a sparse-like dense block matrix
-    M = np.empty((N * (n + m), n_vars), dtype=np.float64)
-    b = np.empty(N * (n + m), dtype=np.float64)
-
-    # Helper to locate slices
-    def idx_x(t):
-        # x indices for time t (0..N)
-        return slice(t * n, (t + 1) * n)
-
-    def idx_w(t):
-        return slice(n_x + t * p, n_x + (t + 1) * p)
-
-    def idx_v(t):
-        return slice(n_x + n_w + t * m, n_x + n_w + (t + 1) * m)
-
-    row = 0
-    for t in range(N):
-        # Dynamics: x[t+1] - A x[t] - B w[t] = 0
-        # Shift to RHS the known part when t == 0 (x0 given)
-        # Left-hand side over variables
-        # x[t+1] coefficient = I
-        # x[t] coefficient = -A
-        # w[t] coefficient = -B
-        # v[t] none
-        # If t == 0, move -A*x0 to RHS
-        M[row:row + n, idx_x(t + 1)] = np.eye(n)
-        M[row:row + n, idx_x(t)] = -A
-        M[row:row + n, idx_w(t)] = -B
-        b[row:row + n] = np.zeros(n, dtype=np.float64)
-        if t == 0:
-            b[row:row + n] -= -A @ x0  # add A*x0 to RHS
-        row += n
-
-        # Measurement: C x[t] + v[t] - y[t] = 0
-        M[row:row + m, idx_x(t)] = C
-        M[row:row + m, idx_v(t)] = np.eye(m)
-        b[row:row + m] = y[t]
-        row += m
-
-    # Build the Hessian H for the quadratic term:
-    #   z^T H z = ‖w‖² + τ‖v‖²
-    H = np.zeros((n_vars, n_vars), dtype=np.float64)
-    # w part: identity
-    H[n_x:n_x + n_w, n_x:n_x + n_w] = np.eye(n_w)
-    # v part: tau * I
-    H[n_x + n_w:n_vars, n_x + n_w:n_vars] = tau * np.eye(n_v)
-
-    # Solve the KKT system:
-    #   [ H  M^T ] [z]   = [0]
-    #   [ M   0  ] [λ]   = [b]
-    # Stack the matrices
-    top = np.hstack((H, M.T))     # shape (n_vars, n_vars+eq)
-    bottom = np.hstack((M, np.zeros((N * (n + m), N * (n + m)), dtype=np.float64)))
-    KKT = np.vstack((top, bottom))
-
-    rhs = np.concatenate((np.zeros(n_vars), b))
-
-    try:
-        sol = np.linalg.solve(KKT, rhs)
-    except np.linalg.LinAlgError:
-        return {'x_hat': [], 'w_hat': [], 'v_hat': []}
-
-    z = sol[:n_vars]
-    # Extract blocks
-    x_sol = z[idx_x(1):idx_x(N + 1)].reshape(N, n)
-    w_sol = z[idx_w(0):idx_w(N)].reshape(N, p)
-    v_sol = z[idx_v(0):idx_v(N)].reshape(N, m)
-
-    # Construct x vector including initial state
-    x_vec = [x0.tolist()] + x_sol.tolist()
-    w_vec = w_sol.tolist()
-    v_vec = v_sol.tolist()
-
-    return {'x_hat': x_vec, 'w_hat': w_vec, 'v_hat': v_vec}

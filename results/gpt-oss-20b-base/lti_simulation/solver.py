@@ -1,34 +1,20 @@
 import numpy as np
-from scipy.signal import signal
+from scipy import signal
 
 class Solver:
     def solve(self, problem: dict[str, np.ndarray]) -> dict[str, list[float]]:
-        """
-        Solves the LTI system using scipy.signal.lsim for maximum speed.
+        # Extract problem data
+        num = problem['num']
+        den = problem['den']
+        u = problem['u']
+        t = problem['t']
 
-        Parameters
-        ----------
-        problem : dict[str, np.ndarray]
-            Dictionary containing:
-            - 'num' : array of numerator coefficients
-            - 'den' : array of denominator coefficients
-            - 'u'   : input signal array
-            - 't'   : time array
+        # Discretise the continuous system using zero‑order hold
+        dt = t[1] - t[0]
+        system_discrete = signal.cont2discrete((num, den), dt, method='zoh')
+        b, a, _ = system_discrete
 
-        Returns
-        -------
-        dict
-            Dictionary with key 'yout' containing the output signal as a list of floats.
-        """
-        # Pull data from problem dict
-        num, den, u, t = problem['num'], problem['den'], problem['u'], problem['t']
+        # Compute the discrete output using lfilter (vectorised)
+        y = signal.lfilter(b, a, u)
 
-        # Create lti system once
-        system = signal.lti(num, den)
-
-        # Simulate system
-        # lsim returns tout, yout, xout. tout is the same as t if shapes match
-        tout, yout, _ = signal.lsim(system, u, t)
-
-        # Convert the output to a list of python floats (fast conversion)
-        return {"yout": yout.tolist()}
+        return {'yout': y.tolist()}

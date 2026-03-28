@@ -1,9 +1,15 @@
+from typing import Any
 import numpy as np
-from scipy.fft import dstn
 from numpy.typing import NDArray
+import scipy.fft
 
 class Solver:
+
     def solve(self, problem: NDArray) -> NDArray:
-        """Compute the N‑dimensional Discrete Sine Transform Type‑II efficiently."""
-        # Use SciPy's fast FFT implementation (Cython + FFTW if available)
-        return dstn(problem, type=2)
+        """
+        Compute the N-dimensional DST Type II efficiently.
+        Uses scipy.fft.dstn which is faster than the legacy scipy.fftpack module.
+        """
+        # scipy.fft.dstn expects a floating point array
+        problem = np.asarray(problem, dtype=np.float64)
+        return scipy.fft.dstn(problem, type=2)

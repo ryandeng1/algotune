@@ -1,57 +1,49 @@
 import numpy as np
-from typing import Any, Dict, List
-
-# Using scikit‑learn's fast LinearSVC which solves the hinge‑loss SVM in primal
-# via a coordinate‑descent algorithm; it is orders of magnitude faster than
-# convex‑optimization libraries for large problems.
-try:
-    from sklearn.svm import LinearSVC
-except ImportError:  # pragma: no cover
-    LinearSVC = None  # type: ignore
-
+from sklearn.svm import LinearSVC
 
 class Solver:
-    def solve(self, problem: Dict[str, Any]) -> Dict[str, Any]:
+    def solve(self, problem: dict) -> dict:
         """
-        Solve a linear SVM using scikit‑learn's LinearSVC (C‑SVM).
-        The returned dictionary contains:
-            - beta0 : bias (float)
-            - beta  : coefficient vector (list[float])
-            - optimal_value : training objective value (float)
-            - missclass_error : training error (float)
+        Solve a hard‑margin / soft‑margin linear SVM using scikit‑learn's LinearSVC.
+
+        Parameters
+        ----------
+        problem : dict
+            Must contain
+            * 'X' : array‑like, shape (n_samples, n_features)
+            * 'y' : array‑like, shape (n_samples,)
+            * 'C' : float, regularisation parameter
+
+        Returns
+        -------
+        dict
+            * 'beta0'      : intercept (float)
+            * 'beta'       : weight vector (list[float])
+            * 'optimal_value' : objective value (float)
+            * 'missclass_error' : classification error on training set (float)
         """
-        if LinearSVC is None:
-            raise RuntimeError("scikit‑learn not available")
+        X = np.asarray(problem["X"])
+        y = np.asarray(problem["y"])
+        C = problem.get("C", 1.0)
 
-        X = np.asarray(problem["X"], dtype=float)
-        y = np.asarray(problem["y"], dtype=float).ravel()
-        C = float(problem["C"])
+        # LinearSVC minimises (1/2)||w||^2 + C * Σ max(0, 1- y_i w^T x_i)
+        # This is equivalent to the standard SVM formulation.
+        clf = LinearSVC(C=C, loss="hinge", dual=False, fit_intercept=True, max_iter=10000, random_state=0)
+        try:
+            clf.fit(X, y)
+        except Exception:
+            return None
 
-        # scikit‑learn expects labels to be {-1, 1}
-        y = np.where(y <= 0, -1, 1)
+        beta = clf.coef_.flatten()
+        beta0 = clf.intercept_[0]
+        # compute objective value: 0.5 * ||beta||^2 + C * sum xi
+        # with Dual slope: xi = max(0, 1 - y_i*(Xbeta + beta0))
+        preds = X @ beta + beta0
+        margins = y * preds
+        xi = np.maximum(0, 1 - margins)
+        optimal_value = 0.5 * np.sum(beta ** 2) + C * np.sum(xi)
 
-        clf = LinearSVC(
-            C=C,
-            loss="hinge",
-            fit_intercept=True,
-            max_iter=10000,
-            tol=1e-5,
-            dual=False,
-            verbose=0,
-        )
-        clf.fit(X, y)
-
-        beta = clf.coef_.ravel()
-        beta0 = clf.intercept_.item()
-
-        # Compute objective value: 0.5 * ||beta||^2 + C * sum(max(0, 1 - y*(Xβ+β0))
-        margins = y * (X @ beta + beta0)
-        hinge_loss = np.maximum(0, 1 - margins).sum()
-        optimal_value = 0.5 * np.dot(beta, beta) + C * hinge_loss
-
-        # Training miss‑classification error
-        predictions = X @ beta + beta0
-        missclass_error = np.mean(predictions * y < 0)
+        missclass_error = np.mean(preds * y < 0)
 
         return {
             "beta0": float(beta0),

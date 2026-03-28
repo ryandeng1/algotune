@@ -1,87 +1,63 @@
-from typing import List, Tuple
-import sys
+import numpy as np
+from ortools.sat.python import cp_model
 
-def solve(problem: 'np.ndarray') -> List[Tuple[int, int]]:
-    """
-    Fast backtracking solution for the Queens with Obstacles problem.
-
-    Uses bitmask representation of rows, columns and both diagonals.  
-    The algorithm places queens row‑by‑row and applies branch‑and‑bound
-    pruning when the theoretical maximum achievable from the current
-    state is less than the best solution already found.
-
-    Parameters
-    ----------
-    problem : numpy.ndarray
-        Binary board matrix where 1 indicates an obstacle, 0 an empty cell.
-
-    Returns
-    -------
-    List[Tuple[int, int]]
-        List of queen coordinates that form a maximum independent set.
-    """
-    import numpy as np
-
-    n, m = problem.shape
-    # Pre‑compute list of free cells per row
-    free_rows = [list(np.where(problem[r] == 0)[0]) for r in range(n)]
-
-    # Bit masks for diagonals.  diag1: r+c,  diag2: r-m+c
-    diag1_size = n + m - 1
-    diag2_size = n + m - 1
-
-    best_board = []
-    best_count = 0
-
-    # Kinds of recursion: process rows one by one
-    def dfs(r: int, cur_board: List[Tuple[int, int]],
-            cols_mask: int,
-            d1_mask: int,
-            d2_mask: int,
-            remaining_cells: int):
-        nonlocal best_count, best_board
-
-        # Upper bound: current count + remaining cells in rows r..n-1
-        if len(cur_board) + remaining_cells <= best_count:
-            return
-
-        if r == n:
-            if len(cur_board) > best_count:
-                best_count = len(cur_board)
-                best_board = cur_board.copy()
-            return
-
-        # Sort cells in this row by minimal conflicts if needed
-        for c in free_rows[r]:
-            bit_c = 1 << c
-            d1 = r + c
-            d2 = r - c + m - 1
-            bit_d1 = 1 << d1
-            bit_d2 = 1 << d2
-            if (cols_mask & bit_c) or (d1_mask & bit_d1) or (d2_mask & bit_d2):
+# Pre‑compute all queen attack masks for a board of a given size.
+# Each cell is represented by a tuple (row, col).
+def _build_attack_dict(n: int, m: int, obstacles: np.ndarray):
+    attacks = {}
+    directions = [(-1, -1), (-1, 0), (-1, 1),
+                  ( 0, -1),          ( 0, 1),
+                  ( 1, -1), ( 1, 0), ( 1, 1)]
+    for r in range(n):
+        for c in range(m):
+            if obstacles[r, c]:
                 continue
-            # Place queen
-            cur_board.append((r, c))
-            dfs(r + 1, cur_board,
-                cols_mask | bit_c,
-                d1_mask | bit_d1,
-                d2_mask | bit_d2,
-                remaining_cells - 1)
-            cur_board.pop()
+            cells = []
+            for dr, dc in directions:
+                nr, nc = r + dr, c + dc
+                while 0 <= nr < n and 0 <= nc < m and not obstacles[nr, nc]:
+                    cells.append((nr, nc))
+                    nr += dr
+                    nc += dc
+            attacks[(r, c)] = cells
+    return attacks
 
-        # Option: skip placing a queen in this row
-        dfs(r + 1, cur_board, cols_mask, d1_mask, d2_mask, remaining_cells - 1)
 
-    total_free = int(problem.sum() == 0)  # fallback if problem is scalar
-    total_free = int(problem.sum() == 0)
+class Solver:
+    """
+    Fast solver for the Queens with Obstacles Problem.
+    Uses cp_sat only once with pre‑computed attack lists.
+    """
 
-    # Count total free cells
-    total_free = int(problem.sum() == 0)
-    total_free = int(problem.sum() == 0)
+    def __init__(self):
+        # nothing to initialise
+        pass
 
-    # Compute total free cells
-    total_free = int(problem.sum() == 0)
-    total_free = problem.sum()
+    def solve(self, problem: np.ndarray) -> list[tuple[int, int]]:
+        """Return a maximal set of non‑attacking queens on an obstacle board."""
+        n, m = problem.shape
+        attacks = _build_attack_dict(n, m, problem)
 
-    dfs(0, [], 0, 0, 0, int(total_free))
-    return best_board
+        # CP‑SAT model
+        model = cp_model.CpModel()
+        # Boolean var for every non‑obstacle cell
+        vars_ = {cell: model.NewBoolVar(f"q{cell[0]}_{cell[1]}") for cell in attacks}
+
+        # Constraints: if a queen is placed then it cannot attack other queens
+        for cell, reach in attacks.items():
+            if reach:  # only add if there are reachable cells
+                model.Add(sum(vars_[q] for q in reach) == 0).OnlyEnforceIf(vars_[cell])
+
+        # Objective: maximise number of queens
+        model.Maximize(sum(vars_.values()))
+
+        # Solver
+        solver = cp_model.CpSolver()
+        solver.parameters.max_time_in_seconds = 30.0  # guard against endless runtimes
+        solver.parameters.num_search_workers = 8  # use parallel workers
+        status = solver.Solve(model)
+
+        # Extract solution
+        if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+            return [(r, c) for (r, c), b in vars_.items() if solver.Value(b)]
+        return []

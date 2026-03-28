@@ -1,53 +1,39 @@
-from typing import List
 import numpy as np
-
+from contextlib import nullcontext
 
 def _single_thread_blas():
-    """
-    Stub for the original threadpool limiter. The actual implementation may
-    come from `threadpoolctl` or a similar library. For the purpose of these
-    benchmarks we simply return a no-op context manager.
-    """
-    class _DummyContext:
-        def __enter__(self):  # pragma: no cover
-            return self
-
-        def __exit__(self, exc_type, exc, tb):  # pragma: no cover
-            return False
-
-    return _DummyContext()
-
+    # In this environment we do not control BLAS threads; return a no-op context.
+    return nullcontext()
 
 class Solver:
-    """
-    A lightweight solver that computes all roots of a real‑coefficient
-    polynomial and returns them sorted by descending real part (and, as a tiebreaker,
-    by descending imaginary part).
-    """
+    def solve(self, problem: list[float]) -> list[complex]:
+        """
+        Find all roots of a univariate polynomial with real coefficients.
 
-    # The method signature is fixed by the specification.
-    def solve(self, problem: List[float]) -> List[complex]:
-        # Ensure that the coefficient list is not empty and that the leading
-        # coefficient is non‑zero. Trim any leading zeros to avoid degenerate
-        # cases that np.roots would otherwise handle incorrectly.
-        if not problem:
-            return []
+        Parameters
+        ----------
+        problem : list[float]
+            Coefficients of the polynomial in descending order of powers,
+            e.g. [a_n, a_{n-1}, ..., a_0] for p(x) = a_n x^n + … + a_0.
 
-        # Remove leading zero coefficients to avoid misleading degree inference.
-        i = 0
-        while i < len(problem) - 1 and abs(problem[i]) < 1e-15:
-            i += 1
-        coefficients = problem[i:]
-
-        # Delegate the heavy lifting to NumPy, which is highly optimised.
+        Returns
+        -------
+        list[complex]
+            Roots sorted descending by real part, then by imaginary part.
+        """
+        # Compute roots using NumPy (C implemented).
         with _single_thread_blas():
-            roots = np.roots(coefficients)
+            roots = np.roots(problem)
 
-        # Sort by descending real part, then descending imaginary part.
-        # Converting to Python primitives speeds up repeated tuple comparisons.
-        sorted_roots = sorted(
-            roots,
-            key=lambda z: (float(z.real), float(z.imag)),
-            reverse=True
-        )
-        return list(sorted_roots)
+        # Sort lexicographically: first by real part, then by imaginary part,
+        # both in descending order.  We use numpy's lexsort on the negative
+        # values to avoid Python loops and achieve speed.
+        # Since lexsort sorts with the last key as primary, we provide the
+        # keys in reverse order (imag, real).
+        key_real  = -roots.real
+        key_imag  = -roots.imag
+        idx_sorted = np.lexsort((key_imag, key_real))
+        sorted_roots = roots[idx_sorted]
+
+        # Convert to Python list of complex numbers.
+        return sorted_roots.tolist()

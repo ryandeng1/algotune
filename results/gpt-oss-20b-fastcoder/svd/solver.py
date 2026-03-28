@@ -1,19 +1,18 @@
 import numpy as np
-from typing import Any, Dict
-
+from typing import Any, Dict, List
 
 class Solver:
-    def solve(self, problem: Dict[str, Any]) -> Dict[str, Any]:
-        """Compute the SVD of the given matrix using NumPy's fast LAPACK routines."""
+    def solve(self, problem: Dict[str, Any]) -> Dict[str, List]:
+        """
+        Compute the singular value decomposition of matrix A using NumPy's highly‑optimized
+        LAPACK bindings. The `full_matrices=False` option and `check_finite=False` flag
+        keep the routine lightweight, especially for large dense matrices.
+        """
         A = problem["matrix"]
-        # Fast SVD with minimal overhead
-        U, s, Vh = np.linalg.svd(
-            A,
-            full_matrices=False,
-            compute_uv=True,
-            check_finite=False,  # Skip purity checks for speed
-            lapack_driver="gesdd",  # Guaranteed best performance
-        )
+        # Ensure the data is contiguous and in the native NumPy format
+        A = np.ascontiguousarray(A)
+        # Compute U, S and Vh (V transposed)
+        U, S, Vh = np.linalg.svd(A, full_matrices=False, check_finite=False)
+        # Transpose Vh to obtain V
         V = Vh.T
-        # Convert to native Python lists only once
-        return {"U": U.tolist(), "S": s.tolist(), "V": V.tolist()}
+        return {"U": U, "S": S, "V": V}

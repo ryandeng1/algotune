@@ -1,8 +1,8 @@
 import numpy as np
-from typing import Any
 
 class Solver:
     def solve(self, problem: tuple[np.ndarray, np.ndarray]) -> np.ndarray:
+        """Return the outer product of two 1‑D arrays using vectorised broadcasting."""
         vec1, vec2 = problem
-        # Use NumPy's built‑in outer product routine (fast C implementation)
-        return np.outer(vec1, vec2)
+        # Use broadcasting for a small performance gain over np.outer
+        return vec1[:, None] * vec2[None, :]

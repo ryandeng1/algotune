@@ -1,60 +1,47 @@
-import numpy as np
+from typing import Dict, List, Union
 import cvxpy as cp
+import numpy as np
 
-def solve(problem: dict[str, list[list[int]] | list[float] | int]) -> dict[str, list[list[float]] | float]:
-    """
-    Solve the Perron‑Frobenius matrix completion.
+class Solver:
+    def solve(
+        self,
+        problem: Dict[
+            str,
+            Union[List[List[int]], List[float], int]
+        ]
+    ) -> Dict[str, Union[List[List[float]], float]]:
+        # Extract data
+        inds = np.asarray(problem["inds"], dtype=int)
+        a = np.asarray(problem["a"], dtype=float)
+        n = int(problem["n"])
 
-    Parameters
-    ----------
-    problem
-        Dictionary containing:
-        - 'inds': list of known index pairs
-        - 'a'   : corresponding known values
-        - 'n'   : dimension of the matrix
+        # Build matrix of all indices
+        allinds = np.arange(n * n).reshape(n, n)
+        flat = np.arange(n * n)
+        # Logical mask of known entries
+        mask = np.full(n * n, False, bool)
+        mask[inds[:, 0] * n + inds[:, 1]] = True
+        # Indices of variables to constrain product
+        other_mask = ~mask
+        other_inds = np.column_stack(np.where(other_mask))
 
-    Returns
-    -------
-    dict
-        Dictionary with keys
-        - 'B'            : completed matrix (as Python list of lists)
-        - 'optimal_value': optimum objective value
+        # CVXPY variable and constraints
+        B = cp.Variable((n, n), pos=True)
+        constraints = [
+            B[inds[:, 0], inds[:, 1]] == a,
+            cp.prod(B[other_inds[:, 0], other_inds[:, 1]]) == 1.0,
+        ]
 
-        Returns ``None`` if the problem is infeasible or solver errors.
-    """
-    # --- pre‑processing ----------------------------------------------------
-    n = problem['n']
-    inds = np.asarray(problem['inds'], dtype=int)
-    a = np.asarray(problem['a'], dtype=float)
+        # Objective: minimize Perron root
+        objective = cp.Minimize(cp.pf_eigenvalue(B))
 
-    # grab all indices in row‑major order
-    rows, cols = np.indices((n, n)).reshape(2, -1)
-    all_idx = np.vstack((rows, cols)).T
+        prob = cp.Problem(objective, constraints)
+        try:
+            val = prob.solve(gp=True)
+        except Exception:
+            return None
 
-    # exclude known entries
-    known_mask = np.zeros(all_idx.shape[0], dtype=bool)
-    for (r, c) in inds:
-        known_mask |= (all_idx[:, 0] == r) & (all_idx[:, 1] == c)
-    other_idx = all_idx[~known_mask]
+        if B.value is None:
+            return None
 
-    # --- CVXPY formulation -----------------------------------------------
-    B = cp.Variable((n, n), pos=True)
-
-    constraints = [
-        cp.prod(B[other_idx[:, 0], other_idx[:, 1]]) == 1.0,
-        B[inds[:, 0], inds[:, 1]] == a
-    ]
-
-    objective = cp.Minimize(cp.pf_eigenvalue(B))
-    problem_cvx = cp.Problem(objective, constraints)
-
-    # --- solve -------------------------------------------------------------
-    try:
-        result = problem_cvx.solve(gp=True, verbose=False)
-    except (cp.SolverError, Exception):
-        return None
-
-    if B.value is None:
-        return None
-
-    return {"B": B.value.tolist(), "optimal_value": float(result)}
+        return {"B": B.value.tolist(), "optimal_value": val}

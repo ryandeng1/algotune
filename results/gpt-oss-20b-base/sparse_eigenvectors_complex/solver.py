@@ -1,30 +1,28 @@
 import numpy as np
-import scipy.sparse.linalg
+from scipy import sparse
 
-def solve(problem: dict) -> list[complex]:
-    """
-    Solve the eigenvalue problem for the given square sparse matrix.
-    The solution returned is a list of eigenvectors with the largest `k`
-    eigenvalues sorted in descending order by their modulus.
+class Solver:
+    def solve(self, problem: dict) -> list:
+        """
+        Return the eigenvectors corresponding to the `k` eigenvalues with
+        largest absolute value, sorted in decreasing order.
 
-    :param problem: A dictionary containing the sparse matrix under the key
-                    'matrix' and the number of eigenvalues `k` under the key
-                    'k'.
-    :return: List of eigenvectors sorted in descending order by the modulus
-             of the corresponding eigenvalue.
-    """
-    A = problem["matrix"]
-    k = problem["k"]
+        The matrix `A` is expected to be a square SciPy sparse matrix.
+        """
+        A = problem["matrix"]
+        k = problem["k"]
+        n = A.shape[0]
 
-    # Use the default random vector to seed the Arnoldi iteration – this
-    # is usually faster than creating a large one‑vector and works with any
-    # matrix type.
-    evals, evecs = scipy.sparse.linalg.eigs(
-        A, k=k, maxiter=A.shape[0] * 200, ncv=max(2 * k + 1, 20)
-    )
+        # Use an initial guess that improves convergence speed
+        v0 = np.ones(n, dtype=A.dtype)
 
-    # Sort indices by descending modulus of the eigenvalues
-    idx = np.argsort(-np.abs(evals))
+        # ncv is the number of Lanczos vectors: keep it modest for speed
+        ncv = max(2 * k + 1, 20)
 
-    # Return the eigenvectors in sorted order
-    return [evecs[:, i] for i in idx]
+        # Perform the eigenvalue solve
+        vals, vecs = sparse.linalg.eigs(A, k=k, v0=v0, maxiter=n * 200,
+                                        ncv=ncv, which="LM")
+
+        # Sort by magnitude of eigenvalue (descending)
+        idx = np.argsort(-np.abs(vals))
+        return [vecs[:, i] for i in idx]

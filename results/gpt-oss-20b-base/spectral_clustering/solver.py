@@ -1,53 +1,49 @@
 import numpy as np
-from numpy.linalg import eigh
+from typing import Any, Dict
 from sklearn.cluster import KMeans
+from scipy.linalg import eigh
 
 class Solver:
-    def solve(self, problem: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
-        """
-        Fast spectral clustering using NumPy and scikit‑learn's KMeans.
+    """
+    An efficient spectral clustering implementation that avoids the full
+    sklearn SpectralClustering machinery.
 
-        Parameters
-        ----------
-        problem : dict
-            Must contain:
-                - 'similarity_matrix' : square numpy array
-                - 'n_clusters'       : positive integer
+    The strategy is:
+        1. Compute the unnormalized graph Laplacian L = D - W.
+        2. Extract the first n_clusters eigenvectors of L (corresponding to the
+           smallest eigenvalues).
+        3. Run k-means on the rows of the eigenvector matrix to obtain cluster
+           labels.
+    """
 
-        Returns
-        -------
-        dict
-            {'labels': labels_array}
-        """
+    def solve(self, problem: Dict[str, Any]) -> Dict[str, Any]:
         W = problem["similarity_matrix"]
         k = problem["n_clusters"]
 
-        n = W.shape[0]
-        if n == 0:
-            return {"labels": np.empty((0,), dtype=int)}
+        # --- Basic validation -------------------------------------------------
+        if not isinstance(W, np.ndarray) or W.ndim != 2 or W.shape[0] != W.shape[1]:
+            raise ValueError("similarity_matrix must be a square numpy array.")
+        if not isinstance(k, int) or k < 1:
+            raise ValueError("n_clusters must be a positive integer.")
+        N = W.shape[0]
+        if N == 0:
+            return {"labels": np.array([], dtype=int)}
 
-        # Sanity checks (minimal)
-        if W.shape[0] != W.shape[1] or k < 1:
-            raise ValueError("Invalid input")
+        # --- Special trivial cases --------------------------------------------
+        if k >= N:
+            return {"labels": np.arange(N, dtype=int)}
 
-        if k >= n:
-            return {"labels": np.arange(n)}
+        # --- Compute degree matrix and unnormalized Laplacian ---------------
+        d = np.sum(W, axis=1)
+        L = np.diag(d) - W  # N x N dense matrix
 
-        # Construct unnormalized Laplacian L = D - W
-        D = np.sum(W, axis=1)
-        L = np.diag(D) - W
+        # --- Compute first k eigenvectors (smallest eigenvalues)-----------
+        # eigh returns eigenvalues in ascending order
+        vals, vecs = eigh(L, subset_by_index=[0, k - 1])
+        X = vecs  # rows are the eigenvectors for each node
 
-        # Compute first k eigenvectors of L
-        # eigh returns ascending order
-        _, eigvecs = eigh(L, subset_by_index=[0, k-1])
-        # normalize rows to unit length (for consistency)
-        norm = np.linalg.norm(eigvecs, axis=1, keepdims=True)
-        norm[norm == 0] = 1
-        X = eigvecs / norm
-
-        # k-means clustering on the eigenvector embedding
-        # Use deterministic seed for reproducibility
-        km = KMeans(n_clusters=k, n_init=10, random_state=42, algorithm='elkan')
-        labels = km.fit_predict(X)
+        # --- k-means on the rows of X --------------------------------------
+        kmeans = KMeans(n_clusters=k, n_init=10, random_state=42, max_iter=300, tol=1e-4)
+        labels = kmeans.fit_predict(X)
 
         return {"labels": labels}

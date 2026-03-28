@@ -1,52 +1,55 @@
-from collections import deque
-from typing import Any
+from typing import Any, Dict, List
 
 class Solver:
-    def solve(self, problem: dict[str, Any]) -> dict[str, list[int]]:
-        # Unpack preferences (they may be dicts or lists)
-        prop_raw = problem['proposer_prefs']
-        recv_raw = problem['receiver_prefs']
+    def solve(self, problem: Dict[str, Any]) -> Dict[str, List[int]]:
+        # Extract proposals and acceptances
+        prop_raw = problem["proposer_prefs"]
+        recv_raw = problem["receiver_prefs"]
+
+        # Convert to list-of-lists if necessary
         if isinstance(prop_raw, dict):
             n = len(prop_raw)
-            props = [prop_raw[i] for i in range(n)]
+            proposer = [prop_raw[i] for i in range(n)]
         else:
-            props = list(prop_raw)
-            n = len(props)
+            proposer = list(prop_raw)
+            n = len(proposer)
+
         if isinstance(recv_raw, dict):
-            recvs = [recv_raw[i] for i in range(n)]
+            receiver = [recv_raw[i] for i in range(n)]
         else:
-            recvs = list(recv_raw)
+            receiver = list(recv_raw)
 
-        # Build rank map for receivers
+        # Build receiver rank table
         recv_rank = [[0] * n for _ in range(n)]
-        for r, prefs in enumerate(recvs):
-            ranks = recv_rank[r]
+        for r, prefs in enumerate(receiver):
+            rr = recv_rank[r]
             for rank, p in enumerate(prefs):
-                ranks[p] = rank
+                rr[p] = rank
 
-        # Gale–Shapley (proposer-optimal)
-        next_prop = [0] * n                # next receiver index to propose for each proposer
-        recv_match = [None] * n            # current proposer matched to each receiver
-        free = deque(range(n))             # proposers that are free
+        # Gale–Shapley algorithm
+        next_proposal = [0] * n
+        recv_match = [-1] * n
+        free = list(range(n))  # use LIFO stack for free proposers
 
         while free:
-            p = free.popleft()
-            r = props[p][next_prop[p]]
-            next_prop[p] += 1
+            p = free.pop()
+            r = proposer[p][next_proposal[p]]
+            next_proposal[p] += 1
+
             cur = recv_match[r]
-            if cur is None:
+            if cur == -1:
                 recv_match[r] = p
             else:
-                r_ranks = recv_rank[r]
-                if r_ranks[p] < r_ranks[cur]:
+                rr = recv_rank[r]
+                if rr[p] < rr[cur]:
                     recv_match[r] = p
-                    free.append(cur)
+                    free.append(cur)   # previous match becomes free
                 else:
-                    free.append(p)
+                    free.append(p)     # current proposer remains free
 
-        # Build matching list: proposer -> receiver
+        # Build matching list: matching[p] = r
         matching = [0] * n
         for r, p in enumerate(recv_match):
             matching[p] = r
 
-        return {'matching': matching}
+        return {"matching": matching}

@@ -1,74 +1,71 @@
+from functools import lru_cache
 from typing import List
 
-# Dynamic‑programming implementation (Held‑Karp) – O(n²·2ⁿ) time, O(n·2ⁿ) memory
-# Works fast for n <= 20 (typical contest limits). If n is larger, fall back to a
-# simple 2‑opt heuristic for a quick, non‑optimal answer.
+class Solver:
+    """
+    Implements an optimal TSP solver using the Held‑Karp dynamic programming algorithm.
+    The algorithm is O(n^2 2^n) which is fast enough for n <= 20 and is far faster
+    than a generic CP-SAT formulation for the same problem size.
+    """
+    def solve(self, problem: List[List[int]]) -> List[int]:
+        n = len(problem)
+        if n <= 1:
+            return [0, 0]
 
-def solve(problem: List[List[int]]) -> List[int]:
-    n = len(problem)
-    if n <= 1:
-        return [0, 0]
+        # Pre‑compute a list of neighbours for each node to speed up iteration
+        neighbours = [list(range(n)) for _ in range(n)]
 
-    # Pre‑compute pairwise distances for faster access
-    dist = problem
+        @lru_cache(maxsize=None)
+        def dp(mask: int, i: int) -> int:
+            """
+            Returns the minimal cost of visiting all cities in `mask` and ending at city `i`.
+            `mask` is a bitmask where bit `k` is 1 iff city `k` has been visited.
+            """
+            if mask == (1 << i):
+                # only city i is visited -> cost is 0 (starting at city i)
+                return 0
+            # Remove city i from mask to form submask of remaining cities
+            submask = mask ^ (1 << i)
+            # Iterate over all possible previous cities j in submask
+            min_cost = float("inf")
+            for j in neighbours[i]:
+                if submask & (1 << j):
+                    cost = dp(submask, j) + problem[j][i]
+                    if cost < min_cost:
+                        min_cost = cost
+            return min_cost
 
-    # DP table: dp[mask][i] = minimal cost to reach node i having visited nodes in mask
-    # Only keep the last dimension in a list of size n for each mask
-    INF = 10 ** 18
-    dp = [[INF] * n for _ in range(1 << n)]
-    parent = [[-1] * n for _ in range(1 << n)]
-    dp[1][0] = 0  # start at node 0
+        @lru_cache(maxsize=None)
+        def path_backtrack(mask: int, i: int) -> List[int]:
+            """
+            Reconstructs the optimal path for state (mask, i).
+            """
+            if mask == (1 << i):
+                return [i]
+            submask = mask ^ (1 << i)
+            best_prev = None
+            best_cost = float("inf")
+            for j in neighbours[i]:
+                if submask & (1 << j):
+                    cost = dp(submask, j) + problem[j][i]
+                    if cost < best_cost:
+                        best_cost = cost
+                        best_prev = j
+            return path_backtrack(submask, best_prev) + [i]
 
-    full_mask = (1 << n) - 1
-    for mask in range(1 << n):
-        for i in range(n):
-            if not (mask & (1 << i)):
-                continue
-            d_i = dp[mask][i]
-            if d_i == INF:
-                continue
-            # try to go to a new city j
-            nxt_mask_base = mask
-            for j in range(n):
-                if mask & (1 << j):
-                    continue
-                nxt_mask = nxt_mask_base | (1 << j)
-                new_cost = d_i + dist[i][j]
-                if new_cost < dp[nxt_mask][j]:
-                    dp[nxt_mask][j] = new_cost
-                    parent[nxt_mask][j] = i
+        # Full mask includes all cities
+        full_mask = (1 << n) - 1
+        # Compute optimal tour starting at 0, ending at 0
+        best_tour = None
+        best_cost = float("inf")
+        for i in range(1, n):
+            cost = dp(full_mask, i) + problem[i][0]
+            if cost < best_cost:
+                best_cost = cost
+                best_tour = path_backtrack(full_mask, i)
 
-    # Finish tour by returning to 0
-    best_cost = INF
-    last = -1
-    for i in range(1, n):
-        cost = dp[full_mask][i] + dist[i][0]
-        if cost < best_cost:
-            best_cost = cost
-            last = i
+        if best_tour is None:
+            return []
 
-    if last == -1:  # fallback: use greedy if DP failed (shouldn't happen)
-        path = [0]
-        visited = [False] * n
-        visited[0] = True
-        cur = 0
-        for _ in range(n - 1):
-            nxt = min((d, v) for v, d in enumerate(dist[cur]) if not visited[v])[1]
-            visited[nxt] = True
-            path.append(nxt)
-            cur = nxt
-        path.append(0)
-        return path
-
-    # Reconstruct path
-    mask = full_mask
-    path = [0] * (n + 1)
-    path[n] = 0  # return to start
-    path[n - 1] = last
-    cur = last
-    for k in range(n - 2, -1, -1):
-        cur = parent[mask][cur]
-        mask ^= (1 << path[k + 1])
-        path[k] = cur
-
-    return path
+        # Insert start city 0 at beginning and end
+        return [0] + best_tour + [0]

@@ -1,13 +1,12 @@
 import numpy as np
 import cvxpy as cp
-from typing import Any, Dict, List
 
 class Solver:
-    def solve(self, problem: Dict[str, Any]) -> Dict[str, Any]:
-        # Convert inputs to numpy arrays / scalars
-        p0 = np.asarray(problem["p0"])
-        v0 = np.asarray(problem["v0"])
-        p_target = np.asarray(problem["p_target"])
+    def solve(self, problem: dict[str, any]) -> dict[str, any]:
+        # Extract problem data
+        p0 = np.asarray(problem["p0"], dtype=float)
+        v0 = np.asarray(problem["v0"], dtype=float)
+        p_target = np.asarray(problem["p_target"], dtype=float)
         g = float(problem["g"])
         m = float(problem["m"])
         h = float(problem["h"])
@@ -21,7 +20,7 @@ class Solver:
         F = cp.Variable((K, 3))
 
         # Constraints
-        cons: List[cp.Expression] = [
+        constraints = [
             V[0] == v0,
             P[0] == p0,
             V[K] == np.zeros(3),
@@ -30,26 +29,26 @@ class Solver:
             V[1:, :2] == V[:-1, :2] + h * (F[:, :2] / m),
             V[1:, 2] == V[:-1, 2] + h * (F[:, 2] / m - g),
             P[1:] == P[:-1] + h / 2 * (V[:-1] + V[1:]),
-            cp.norm(F, 2, axis=1) <= F_max,
+            cp.norm(F, 2, axis=1) <= F_max
         ]
 
-        # Objective: minimise fuel consumption
-        fuel = gamma * cp.sum(cp.norm(F, axis=1))
-        prob = cp.Problem(cp.Minimize(fuel), cons)
+        # Objective
+        fuel_consumption = gamma * cp.sum(cp.norm(F, axis=1))
+        objective = cp.Minimize(fuel_consumption)
 
-        # Solve
+        # Solve using OSQP (fast for convex problems with linear constraints)
         try:
-            prob.solve(solver=cp.OSQP, warm_start=True, max_iter=50000)
+            prob = cp.Problem(objective, constraints)
+            prob.solve(solver=cp.OSQP, verbose=False, eps_abs=1e-4, eps_rel=1e-4)
         except Exception:
-            return {"position": [], "velocity": [], "thrust": []}
+            return {"position": [], "velocity": [], "thrust": [], "fuel_consumption": None}
 
-        # Result handling
         if prob.status not in {cp.OPTIMAL, cp.OPTIMAL_INACCURATE} or P.value is None:
-            return {"position": [], "velocity": [], "thrust": []}
+            return {"position": [], "velocity": [], "thrust": [], "fuel_consumption": None}
 
         return {
             "position": P.value.tolist(),
             "velocity": V.value.tolist(),
             "thrust": F.value.tolist(),
-            "fuel_consumption": float(prob.value),
+            "fuel_consumption": float(prob.value)
         }

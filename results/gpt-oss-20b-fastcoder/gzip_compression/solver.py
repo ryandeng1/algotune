@@ -1,8 +1,12 @@
 import gzip
-from typing import Any
 
 class Solver:
-    def solve(self, problem: dict[str, Any]) -> dict[str, bytes]:
-        """Compress plaintext using gzip with mtime=0."""
-        # Directly return the compressed bytes without exception handling overhead
-        return {'compressed_data': gzip.compress(problem['plaintext'], compresslevel=9, mtime=0)}
+    def solve(self, problem: dict) -> dict:
+        """
+        Compress the plaintext using gzip with mtime=0 and maximum compression.
+        """
+        plaintext = problem["plaintext"]
+        # gzip.compress uses ZLIB at level 9 by default and mtime=0 when passed,
+        # but we specify compresslevel explicitly for clarity.
+        compressed = gzip.compress(plaintext, compresslevel=9, mtime=0)
+        return {"compressed_data": compressed}

@@ -1,68 +1,42 @@
 import numpy as np
 
 class Solver:
-    def solve(self, problem: dict[str, float | np.ndarray]) -> dict[str, list[float]]:
+    def solve(self, problem: dict) -> dict:
         """
-        Solve a discounted Markov Decision Process using value iteration.
-        The algorithm iteratively improves the value function until the
-        maximum change is below a tolerance.  The resulting policy chooses
-        an action that maximises the Bellman backup for each state.
-
-        Args:
-            problem: Dictionary containing the keys:
-                - 'num_states': number of states (int)
-                - 'num_actions': number of actions (int)
-                - 'discount': discount factor gamma (float)
-                - 'transitions': 3‑D array of shape (S, A, S) giving
-                                 transition probabilities P(s'|s,a)
-                - 'rewards': 3‑D array of shape (S, A, S) giving
-                              immediate rewards r(s,a,s')
-
-        Returns:
-            A dictionary with keys:
-                - 'value_function': list of state values
-                - 'policy': list of chosen actions (0‑based indexing)
+        Solve a discounted finite‑state MDP by value iteration.
+        :param problem: dict with keys
+            'num_states', 'num_actions', 'discount',
+            'transitions' (S×A×S), 'rewards' (S×A×S)
+        :return: dict with 'value_function' and 'policy'
         """
-        # Extract problem data
-        num_states = problem['num_states']
-        num_actions = problem['num_actions']
+        N = problem['num_states']
+        A = problem['num_actions']
         gamma = problem['discount']
-        transitions = np.asarray(problem['transitions'], dtype=np.float64)
-        rewards = np.asarray(problem['rewards'], dtype=np.float64)
+        trans = np.asarray(problem['transitions'], dtype=np.float64)
+        rew   = np.asarray(problem['rewards'],   dtype=np.float64)
 
-        # Value iteration
-        V = np.zeros(num_states, dtype=np.float64)
-        policy = np.zeros(num_states, dtype=int)
+        # Pre‑compute the expectation of reward + discounted next value
+        # for each state, action: shape (N, A, S)
+        exp_rew = rew + 0.0  # copy to avoid modifying input
 
-        # Convergence parameters
-        eps = 1e-8   # tolerance
-        max_iter = 10000
+        V = np.zeros(N, dtype=np.float64)
+        max_iter = 2000
+        eps = 1e-10
 
         for _ in range(max_iter):
-            V_old = V.copy()
+            V_next = np.empty_like(V)
+            # compute the right‑hand side for all actions simultaneously
+            rhs = np.einsum('nas,as->na', trans, V)          # shape (N, A)
+            rhs += np.sum(exp_rew, axis=2) / trans.sum(axis=2)  # reward term
 
-            # Compute Bellman backups for all states
-            for s in range(num_states):
-                # (A, S) tensors for this state
-                trans_sa = transitions[s]          # shape (A, S)
-                rewards_sa = rewards[s]           # shape (A, S)
-
-                # Expected return for each action:
-                # sum_{s'} P(s'|s,a) * [ r(s,a,s') + gamma * V_old[s'] ]
-                tmp = trans_sa * (rewards_sa + gamma * V_old)
-                act_vals = tmp.sum(axis=1)         # shape (A,)
-
-                # Best action and value
-                best_a = int(act_vals.argmax())
-                V[s] = act_vals[best_a]
-                policy[s] = best_a
-
-            # Check convergence
-            if np.max(np.abs(V - V_old)) < eps:
+            V_next = np.max(rhs, axis=1)
+            if np.max(np.abs(V_next - V)) < eps:
+                V = V_next
                 break
+            V = V_next
 
-        # Return results
-        return {
-            'value_function': V.tolist(),
-            'policy': policy.tolist()
-        }
+        # derive greedy policy
+        rhs = np.einsum('nas,as->na', trans, V)          # shape (N, A)
+        rhs += np.sum(exp_rew, axis=2) / trans.sum(axis=2)
+        policy = np.argmax(rhs, axis=1).tolist()
+        return {'value_function': V.tolist(), 'policy': policy}

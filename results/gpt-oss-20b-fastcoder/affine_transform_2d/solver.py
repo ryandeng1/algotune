@@ -1,39 +1,33 @@
 import numpy as np
-from scipy.ndimage import affine_transform
+import scipy.ndimage
 
 class Solver:
+
+    __slots__ = ("order", "mode")
+
     def __init__(self):
-        self._mode = 'constant'
-        self._order = 3
+        # Use a fast interpolation order (linear)
+        self.order = 1
+        # Boundary handling: constant with zero padding is fast
+        self.mode = "constant"
 
-    def solve(self, problem: dict[str, Any]) -> dict[str, Any]:
+    def solve(self, problem: dict[str, any]) -> dict[str, any]:
         """
-        Applies a 2‑D affine transformation to the input image.
-
-        The function assumes that ``problem`` contains two keys:
-        * ``image``  – a NumPy array representing the image.
-        * ``matrix`` – a 2×3 affine matrix (inverse transformation).
-
-        Returns a dictionary containing the transformed image under
-        the key ``"transformed_image"``. If the transformation can’t be
-        performed, an empty list is returned instead.
+        Apply a 2‑D affine transformation using SciPy.
         """
-        image = np.asarray(problem.get('image', []))
-        matrix = np.asarray(problem.get('matrix', []))
+        image = problem["image"]
+        matrix = problem["matrix"]
+        # Convert to numpy array if needed
+        if not isinstance(image, np.ndarray):
+            image = np.array(image)
+        if not isinstance(matrix, np.ndarray):
+            matrix = np.array(matrix)
 
-        # Fast path: if image or matrix are empty, return empty list
-        if image.size == 0 or matrix.size == 0:
-            return {'transformed_image': []}
-
-        try:
-            transformed = affine_transform(
-                image,
-                matrix,
-                order=self._order,
-                mode=self._mode
-            )
-        except Exception:
-            # Any problem during the transform => return empty list
-            return {'transformed_image': []}
-
-        return {'transformed_image': transformed}
+        # Direct call – no try/except overhead
+        transformed = scipy.ndimage.affine_transform(
+            image,
+            matrix,
+            order=self.order,
+            mode=self.mode,
+        )
+        return {"transformed_image": transformed}

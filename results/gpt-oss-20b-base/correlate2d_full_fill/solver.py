@@ -1,30 +1,42 @@
 import numpy as np
+from typing import Tuple
 
 class Solver:
+
     def __init__(self):
         pass
 
-    def solve(self, problem: tuple) -> np.ndarray:
+    def solve(self, problem: Tuple[np.ndarray, np.ndarray]) -> np.ndarray:
+        """
+        Compute the 2D correlation of arrays a and b using full mode (no boundary padding).
+        This implementation uses FFT-based convolution for performance.
+        """
         a, b = problem
-        # sizes of the arrays
-        ma, na = a.shape
-        mb, nb = b.shape
-        # full convolution size
-        out_shape = (ma + mb - 1, na + nb - 1)
-        # next power of two for efficient FFT (optional but can speed up)
-        fft_shape = (
-            1 << (out_shape[0] - 1).bit_length(),
-            1 << (out_shape[1] - 1).bit_length(),
-        )
 
-        # prepare padded arrays
-        fa = np.fft.fft2(a, s=fft_shape)
-        # correlation uses flipped kernel, so flip b both axes
-        fb = np.fft.fft2(np.flip(b), s=fft_shape)
+        # Ensure inputs are float arrays
+        a = np.asarray(a, dtype=np.float64)
+        b = np.asarray(b, dtype=np.float64)
 
-        # element‑wise multiplication in frequency domain
-        fr = fa * fb
-        # inverse FFT to get full correlation result
-        res = np.fft.ifft2(fr).real
-        # crop to expected output size
-        return res[:out_shape[0], :out_shape[1]]
+        # Size of full correlation: shape_a + shape_b - 1
+        shape_a = a.shape
+        shape_b = b.shape
+        out_shape = (shape_a[0] + shape_b[0] - 1,
+                     shape_a[1] + shape_b[1] - 1)
+
+        # Pad arrays to output size
+        pad_a = np.zeros(out_shape, dtype=np.float64)
+        pad_b = np.zeros(out_shape, dtype=np.float64)
+        pad_a[:shape_a[0], :shape_a[1]] = a
+        pad_b[:shape_b[0], :shape_b[1]] = b
+
+        # FFTs
+        fft_a = np.fft.fft2(pad_a)
+        fft_b = np.fft.fft2(pad_b)
+
+        # Correlation via pointwise multiplication with conjugate of b
+        corr_fft = fft_a * np.conj(fft_b)
+
+        # Inverse FFT to get correlation
+        corr = np.fft.ifft2(corr_fft).real
+
+        return corr

@@ -1,35 +1,44 @@
-from typing import Any
 import numpy as np
 from scipy.optimize import linprog
 
-def solve(problem: dict[str, Any]) -> dict[str, list]:
-    """
-    Solve the Chebyshev center problem using linear programming.
+class Solver:
+    def solve(self, problem: dict[str, Any]) -> dict[str, list]:
+        """
+        Fast Chebyshev center solver using SciPy's linear programming (Highs).
+        """
+        a = np.asarray(problem['a'], dtype=np.float64)
+        b = np.asarray(problem['b'], dtype=np.float64)
 
-    :param problem: A dictionary containing the matrices 'a' and vector 'b'.
-    :return: A dictionary with key "solution" containing the optimal point.
-    """
-    a = np.asarray(problem['a'], dtype=float)
-    b = np.asarray(problem['b'], dtype=float)
+        # Compute the row norms of A
+        row_norms = np.linalg.norm(a, axis=1)
 
-    n = a.shape[1]
-    # Norm of each row of a
-    norms = np.linalg.norm(a, axis=1)
+        n = a.shape[1]          # number of decision variables
+        m = a.shape[0]          # number of constraints
 
-    # Objective: maximize r -> minimize -r
-    c = np.zeros(n + 1)
-    c[-1] = -1.0  # coefficient for r
+        # Variables: [x1,...,xn, r]
+        # Objective: maximize r  -> minimize -r
+        c = np.zeros(n + 1)
+        c[-1] = -1.0   # coefficient for -r
 
-    # Inequality constraints: a @ x + r * norms <= b
-    A_ub = np.hstack([a, norms.reshape(-1, 1)])
-    b_ub = b
+        # Constraints: A x + r * row_norms <= b
+        A_ub = np.column_stack([a, row_norms[:, None]])
+        b_ub = b
 
-    # All variables are free (unbounded)
-    bounds = [(None, None)] * (n + 1)
+        # Set bounds: x free, r unrestricted (defaults to (-inf, inf))
+        bounds = [(None, None)] * n + [(None, None)]
 
-    res = linprog(c, A_ub=A_ub, b_ub=b_ub, bounds=bounds, method='highs')
-    if not res.success:
-        raise RuntimeError(f"Linear program failed: {res.message}")
+        res = linprog(
+            c,
+            A_ub=A_ub,
+            b_ub=b_ub,
+            bounds=bounds,
+            method='highs',
+            options={'presolve': True, 'time_limit': 10}
+        )
 
-    x_opt = res.x[:-1]  # exclude r
-    return {'solution': x_opt.tolist()}
+        if not res.success:
+            raise ValueError("LP did not converge")
+
+        # Extract solution for x
+        x_val = res.x[:n]
+        return {'solution': x_val.tolist()}

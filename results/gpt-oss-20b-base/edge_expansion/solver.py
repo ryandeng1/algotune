@@ -1,30 +1,37 @@
-from typing import Any, Dict, List, Set
+from typing import Any
 
 class Solver:
-    def solve(self, problem: Dict[str, Any]) -> Dict[str, float]:
+    def solve(self, problem: dict[str, Any]) -> dict[str, float]:
         """
-        Compute the edge expansion of the subset S in the given directed graph.
-        Edge expansion = |∂S| / |S| where ∂S is the set of directed edges
-        that leave S. If S is empty or contains all vertices, the expansion
-        is defined as 0.0.
-        """
-        adj: List[List[int]] = problem["adjacency_list"]
-        S_list: List[int] = problem["nodes_S"]
+        Calculates the edge expansion of a subset S in a directed graph.
+        Edge expansion is defined as: |{(u, v) | u ∈ S, v ∉ S}| / |S|
 
-        n: int = len(adj)
-        if n == 0 or not S_list:
+        Parameters
+        ----------
+        problem : dict
+            Must contain:
+            - "adjacency_list": List[List[int]] of outgoing neighbors for each node.
+            - "nodes_S": List[int] of nodes belonging to the subset S.
+
+        Returns
+        -------
+        dict[str, float]
+            {"edge_expansion": expansion_value}
+        """
+        adj_list = problem['adjacency_list']
+        nodes_S_set = set(problem['nodes_S'])
+        n = len(adj_list)
+
+        # Edge cases: empty set or all nodes
+        if not nodes_S_set or len(nodes_S_set) == n:
             return {"edge_expansion": 0.0}
 
-        S: Set[int] = set(S_list)
-        if len(S) == n:
-            return {"edge_expansion": 0.0}
+        # Count edges leaving S
+        boundary = 0
+        for u in nodes_S_set:
+            for v in adj_list[u]:
+                if v not in nodes_S_set:
+                    boundary += 1
 
-        # Count edges from S to outside S
-        cut_edges: int = 0
-        for u in S:
-            for v in adj[u]:
-                if v not in S:
-                    cut_edges += 1
-
-        expansion = cut_edges / len(S)
+        expansion = boundary / len(nodes_S_set)
         return {"edge_expansion": float(expansion)}

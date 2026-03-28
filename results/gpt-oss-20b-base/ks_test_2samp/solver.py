@@ -1,57 +1,53 @@
-from __future__ import annotations
 from typing import Any, Dict
+import numpy as np
 
 class Solver:
-    """Fast two‑sample Kolmogorov–Smirnov test implementation."""
+    # Pre‑allocate temporary arrays once for reuse
+    _tmp_union: np.ndarray | None = None
+    _tmp_cnt1: np.ndarray | None = None
+    _tmp_cnt2: np.ndarray | None = None
+
     def solve(self, problem: Dict[str, Any]) -> Dict[str, Any]:
-        a, b = problem["sample1"], problem["sample2"]
-        n1, n2 = len(a), len(b)
-        if n1 == 0 or n2 == 0:
-            raise ValueError("Both samples must contain at least one value.")
+        """Perform two sample KS test (fast NumPy implementation)."""
+        a = np.asarray(problem['sample1'])
+        b = np.asarray(problem['sample2'])
+        n1, n2 = a.size, b.size
 
-        # Sort the samples
-        a_sorted = sorted(a)
-        b_sorted = sorted(b)
+        # sort inputs
+        a_sort = np.sort(a)
+        b_sort = np.sort(b)
 
-        # Two‑pointer scan to compute maximum absolute difference of empirical CDFs
-        i = j = 0
-        cdf_a = cdf_b = 0.0
-        max_diff = 0.0
+        # build union of unique points
+        if (self._tmp_union is None or
+            self._tmp_union.size < a_sort.size + b_sort.size):
+            self._tmp_union = np.empty(a_sort.size + b_sort.size, dtype=a_sort.dtype)
+        union = np.sort(np.concatenate((a_sort, b_sort)))
+        # unique with original indices
+        uniq, idx = np.unique(union, return_index=True)
 
-        while i < n1 or j < n2:
-            val_a = a_sorted[i] if i < n1 else float("inf")
-            val_b = b_sorted[j] if j < n2 else float("inf")
+        # counts of each point in each sample
+        if (self._tmp_cnt1 is None or self._tmp_cnt1.size < uniq.size):
+            self._tmp_cnt1 = np.empty(uniq.size, dtype=int)
+        if (self._tmp_cnt2 is None or self._tmp_cnt2.size < uniq.size):
+            self._tmp_cnt2 = np.empty(uniq.size, dtype=int)
 
-            if val_a <= val_b:
-                i += 1
-                cdf_a = i / n1
-            else:
-                j += 1
-                cdf_b = j / n2
+        # number of occurrences in a and b at each unique value
+        self._tmp_cnt1[:] = np.diff(np.concatenate(([0], np.searchsorted(a_sort, uniq[ind:], side='right'))))
+        self._tmp_cnt2[:] = np.diff(np.concatenate(([0], np.searchsorted(b_sort, uniq[ind:], side='right'))))
 
-            diff = abs(cdf_a - cdf_b)
-            if diff > max_diff:
-                max_diff = diff
+        # cumulative distribution functions
+        cdf1 = np.cumsum(self._tmp_cnt1) / n1
+        cdf2 = np.cumsum(self._tmp_cnt2) / n2
 
-        D = max_diff
+        # KS statistic
+        statistic = np.max(np.abs(cdf1 - cdf2))
+        # approximate two‑sided p‑value (use same as scipy)
+        # The exact p-value requires more work; here we use asymptotic chi‑square approximation
+        en = np.sqrt(n1 * n2 / (n1 + n2))
+        z = (statistic - 1/(2*en)) * np.sqrt(en)
+        pvalue = 2 * (1 - stats_norm_cdf(z))
+        return {'statistic': float(statistic), 'pvalue': float(pvalue)}
 
-        # Asymptotic p‑value calculation using the Kolmogorov distribution
-        # p ≈ 2 * Σ (-1)^(k-1) exp(-2 k² D² n1 n2/(n1+n2))
-        # Summation stops when additional terms are < 1e-12
-        n = n1 + n2
-        lambda_ = D * (n ** 0.5)
-        if lambda_ == 0:
-            p = 1.0
-        else:
-            term = -2 * lambda_ ** 2
-            k = 1
-            p_sum = 0.0
-            while True:
-                p_term = (2 if k & 1 else -2) * (-1) ** (k - 1) * __import__("math").exp(term * k * k)
-                p_sum += p_term
-                if abs(p_term) < 1e-12:
-                    break
-                k += 1
-            p = min(max(p_sum, 0.0), 1.0)
-
-        return {"statistic": D, "pvalue": p}
+# Auxiliary: fast normal CDF using np.erf
+def stats_norm_cdf(x: np.ndarray) -> np.ndarray:
+    return 0.5 * (1 + np.erf(x / np.sqrt(2)))

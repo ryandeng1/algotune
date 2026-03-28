@@ -4,37 +4,36 @@ from numpy.typing import NDArray
 class Solver:
     def solve(self, problem: tuple[NDArray, NDArray]) -> tuple[list[float], list[list[float]]]:
         """
-        Solve the generalized eigenvalue problem A·x = λ B·x for symmetric A and symmetric
-        positive definite B using only NumPy primitives without explicit matrix inverses.
-        The returned eigenvalues are sorted in descending order and eigenvectors are
-        normalized with respect to B (i.e., xᵀ·B·x = 1).
+        Solve the generalized eigenvalue problem A·x = λ B·x.
+        Uses a Cholesky-based transformation and efficient Numpy operations.
         """
         A, B = problem
 
-        # Cholesky decomposition B = L·Lᵀ
+        # Cholesky factorisation of B (B = L·Lᵀ)
         L = np.linalg.cholesky(B)
 
-        # Compute Ã = L⁻¹ · A · L⁻ᵀ without forming L⁻¹ explicitly
-        # First solve L·Y = A  →  Y = L⁻¹·A
-        Y = np.linalg.solve(L, A)
-        # Then solve Lᵀ·Z = Yᵀ → Zᵀ = L⁻ᵀ·Y
-        Z = np.linalg.solve(L.T, Y.T).T
-        Atilde = Z
+        # Transform the problem to a standard eigenvalue problem
+        # Ã = L⁻¹ · A · L⁻ᵀ
+        Linv = np.linalg.inv(L)                   #  smaller matrices so cost is acceptable
+        Atilde = Linv @ A @ Linv.T
 
-        # Standard eigenproblem on the transformed matrix
-        eigvals, eigvecs = np.linalg.eigh(Atilde)
+        # Solve the standard problem
+        eigvals, eigvecs_tilde = np.linalg.eigh(Atilde)
 
-        # Back-transform eigenvectors: x = L⁻ᵀ·v
-        eigvecs = np.linalg.solve(L.T, eigvecs)
+        # Back‑transform the eigenvectors:
+        #  x = L⁻ᵀ · y   (solve Lᵀ·x = y)
+        eigvecs = np.linalg.solve(L.T, eigvecs_tilde)
 
-        # Normalize eigenvectors with respect to B
-        Bv = B @ eigvecs                    # B·x for all columns
-        norms = np.sqrt(np.einsum('ij,ij->i', eigvecs, Bv))
-        # Avoid division by zero – norm>0 by construction
-        eigvecs /= norms
+        # Normalise eigenvectors so that vᵀ B v = 1
+        # Compute all norms in one matrix product
+        norms = np.sqrt(np.sum(eigvecs * (B @ eigvecs), axis=0))
+        eigvecs = eigvecs / norms
 
-        # Return in descending order of eigenvalues
+        # Reverse order to obtain descending eigenvalues
         eigvals = eigvals[::-1]
         eigvecs = eigvecs[:, ::-1]
 
-        return (eigvals.tolist(), [eigvecs[:, i].tolist() for i in range(eigvecs.shape[1])])
+        # Convert to the required list format
+        eigvals_list = eigvals.tolist()
+        eigvecs_list = [eigvecs[:, i].tolist() for i in range(eigvecs.shape[1])]
+        return eigvals_list, eigvecs_list

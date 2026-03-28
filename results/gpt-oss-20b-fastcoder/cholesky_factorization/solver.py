@@ -1,4 +1,3 @@
-from typing import Any
 import numpy as np
 
 class Solver:
@@ -8,14 +7,15 @@ class Solver:
 
         Parameters
         ----------
-        problem : dict[str, np.ndarray]
-            Dictionary containing a single key ``'matrix'`` with the input matrix.
+        problem : dict
+            Dictionary with key `'matrix'` containing a 2‑D NumPy array.
 
         Returns
         -------
-        dict[str, dict[str, list[list[float]]]]
-            Dictionary with the lower triangular factor ``L``.
+        dict
+            Nested dictionary ``{'Cholesky': {'L': L.tolist()}}`` where
+            ``L`` is the lower‑triangular Cholesky factor.
         """
-        # Directly compute the Cholesky factor; no extra copies or loops.
+        # Direct call to the highly optimised BLAS/LAPACK routine via numpy
         L = np.linalg.cholesky(problem['matrix'])
-        return {"Cholesky": {"L": L}}
+        return {'Cholesky': {'L': L.tolist()}}

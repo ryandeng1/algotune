@@ -1,34 +1,55 @@
-from ortools.sat.python import cp_model
+# fast maximum independent set solver using bit‑set backtracking
+# (simple branch&bound, works fast for graphs up to ~60 nodes)
 
+from typing import List, Tuple
 
 class Solver:
-    """
-    CP‑SAT based solver for Maximum Independent Set.
-    Uses adjacency list to avoid unnecessary iterations.
-    """
 
-    def solve(self, problem: list[list[int]]) -> list[int]:
+    def solve(self, problem: List[List[int]]) -> List[int]:
         n = len(problem)
-        model = cp_model.CpModel()
 
-        # Decision variables
-        vars = [model.NewBoolVar(f"x{i}") for i in range(n)]
-
-        # Build constraint set using adjacency lists
+        # adjacency as bit masks
+        neighbors = [0] * n
         for i in range(n):
+            mask = 0
             row = problem[i]
-            for j in range(i + 1, n):
-                if row[j]:
-                    model.Add(vars[i] + vars[j] <= 1)
+            for j, val in enumerate(row):
+                if val:
+                    mask |= 1 << j
+            neighbors[i] = mask
 
-        # Objective: maximize the number of chosen vertices
-        model.Maximize(sum(vars))
+        # ordering of vertices (deg heuristic)
+        order = sorted(range(n), key=lambda x: bin(neighbors[x]).count("1"))
 
-        # Solve
-        solver = cp_model.CpSolver()
-        solver.parameters.max_time_in_seconds = 30  # optional limit
-        status = solver.Solve(model)
+        best_set: int = 0
+        best_size: int = 0
 
-        if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-            return [i for i, v in enumerate(vars) if solver.Value(v)]
-        return []
+        def dfs(idx: int, cur_set: int, cur_size: int, cand: int):
+            nonlocal best_set, best_size
+            if idx == n:
+                if cur_size > best_size:
+                    best_size = cur_size
+                    best_set = cur_set
+                return
+            # bound
+            remaining = bin(cand).count("1")
+            if cur_size + remaining <= best_size:
+                return
+            v = order[idx]
+            if cand >> v & 1:
+                # take v
+                dfs(idx + 1,
+                    cur_set | (1 << v),
+                    cur_size + 1,
+                    cand & ~neighbors[v] & ~(1 << v))
+                # skip v
+                dfs(idx + 1,
+                    cur_set,
+                    cur_size,
+                    cand & ~(1 << v))
+
+        dfs(0, 0, 0, (1 << n) - 1)
+
+        # convert bitset to list of indices
+        result = [i for i in range(n) if best_set >> i & 1]
+        return result

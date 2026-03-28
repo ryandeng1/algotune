@@ -1,35 +1,24 @@
 import numpy as np
 import cvxpy as cp
 
-def solve(problem: dict[str, int | float | list[float]]) -> dict[str, list[float]] | None:
-    """
-    Mean‑and‑variance portfolio optimisation
+class Solver:
+    def solve(self, problem):
+        μ = np.asarray(problem['μ'], dtype=float)
+        Σ = np.asarray(problem['Σ'], dtype=float)
+        γ = float(problem['γ'])
+        n = μ.size
 
-    Maximise  μᵀw - γ·wᵀΣw
-    subject to  sum(w) == 1,  w >= 0
-    """
-    μ = np.asarray(problem["μ"], dtype=float)
-    Σ = np.asarray(problem["Σ"], dtype=float)
-    γ = float(problem["γ"])
+        w = cp.Variable(n)
+        objective = cp.Maximize(μ @ w - γ * cp.quad_form(w, cp.psd_wrap(Σ)))
+        constraints = [cp.sum(w) == 1, w >= 0]
 
-    n = μ.size
-    w = cp.Variable(n)
+        prob = cp.Problem(objective, constraints)
+        try:
+            prob.solve(solver=cp.OSQP, eps_abs=1e-8, eps_rel=1e-8, max_iter=5000)
+        except cp.SolverError:
+            return None
 
-    # Objective function
-    objective = cp.Maximize(μ @ w - γ * cp.quad_form(w, Σ))
+        if w.value is None or not np.isfinite(w.value).all():
+            return None
 
-    # Constraints
-    constraints = [cp.sum(w) == 1, w >= 0]
-
-    # Solve the problem
-    prob = cp.Problem(objective, constraints)
-    try:
-        prob.solve(solver=cp.OSQP, warm_start=True, refresh=False)
-    except cp.error.SolverError:
-        return None
-
-    # Validate the solution
-    if w.value is None or not np.isfinite(w.value).all():
-        return None
-
-    return {"w": w.value.tolist()}
+        return {'w': w.value.tolist()}

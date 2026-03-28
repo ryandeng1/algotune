@@ -1,17 +1,26 @@
-from typing import Any
 import numpy as np
+from typing import Any
 
 class Solver:
     def solve(self, problem: dict[str, Any]) -> dict[str, list]:
         """
-        Solve the problem in O(n) expected time using np.argpartition.
+        Retain the k largest magnitude entries of the vector v and zero out the rest.
         """
-        v = np.asarray(problem.get('v')).ravel()
-        k = int(problem.get('k'))
-        n = v.size
-        # choose indices of the k largest absolute values
-        top_k = np.argpartition(-np.abs(v), k - 1)[:k]
-        # build pruned array
-        pruned = np.zeros_like(v)
-        pruned[top_k] = v[top_k]
-        return {'solution': pruned.tolist()}
+        v = np.asarray(problem['v'])
+        k = int(problem['k'])
+
+        # Flatten to 1‑D array
+        v = v.ravel()
+
+        # Find the indices of the k largest magnitude values
+        if k >= v.size:
+            # All elements are kept
+            pruned = v.copy()
+        else:
+            # Partition once to get the k largest magnitudes
+            idx = np.argpartition(np.abs(v), -k)[-k:]
+            mask = np.zeros(v.shape, dtype=bool)
+            mask[idx] = True
+            pruned = np.where(mask, v, 0.0)
+
+        return {"solution": pruned.tolist()}

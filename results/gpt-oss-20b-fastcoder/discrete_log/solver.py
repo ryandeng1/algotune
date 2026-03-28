@@ -1,38 +1,43 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
+from math import isqrt
+from typing import Dict, Any
 
-import math
-from typing import Dict
+# A lightweight baby‐step giant‐step implementation
+def discrete_log_bs(p: int, g: int, h: int) -> int:
+    """
+    Solve for x in g^x ≡ h (mod p) using the baby‑step giant‑step algorithm.
+    Works for prime p and g a primitive root modulo p.
+    """
+    if h == 1:
+        return 0
+
+    m = isqrt(p) + 1
+
+    # Baby steps: g^j for j in [0, m)
+    baby = {}
+    cur = 1
+    for j in range(m):
+        if cur not in baby:          # keep the smallest j
+            baby[cur] = j
+        cur = (cur * g) % p
+
+    # Pre‑compute g^(-m) mod p
+    inv_g_m = pow(g, p - 1 - m, p)   # g^{-m} ≡ g^{p-1-m} (mod p)
+    gamma = h
+    for i in range(m):
+        if gamma in baby:
+            return i * m + baby[gamma]
+        gamma = (gamma * inv_g_m) % p
+
+    raise ValueError("Discrete log not found")
 
 class Solver:
-    """Fast Baby‑Step Giant‑Step discrete‑log implementation."""
 
-    def _bsgs(self, p: int, g: int, h: int) -> int:
-        """Return x such that g^x ≡ h (mod p). Assumes p is prime and g is a primitive root."""
-        n = int(math.isqrt(p - 1)) + 1
-
-        # Baby steps: g^j (mod p), 0 <= j < n
-        table: Dict[int, int] = {}
-        cur = 1
-        for j in range(n):
-            if cur not in table:          # keep smallest j for correctness
-                table[cur] = j
-            cur = (cur * g) % p
-
-        # Precompute g^-n (mod p)
-        inv_g_n = pow(g, p - 1 - n, p)     # Fermat: g^(p-1) ≡ 1
-
-        cur = h
-        for i in range(n):
-            if cur in table:
-                return i * n + table[cur]
-            cur = (cur * inv_g_n) % p
-
-        raise ValueError("Discrete logarithm not found")
-    
     def solve(self, problem: Dict[str, int]) -> Dict[str, int]:
-        """Solve the discrete logarithm problem using an efficient BSGS algorithm."""
-        p = problem["p"]
-        g = problem["g"]
-        h = problem["h"]
-        return {"x": self._bsgs(p, g, h)}
+        """
+        Solve discrete logarithm using a fast baby‑step giant‑step implementation.
+        The function assumes that the input values are integers and that p is prime.
+        """
+        p = problem['p']
+        g = problem['g']
+        h = problem['h']
+        return {'x': discrete_log_bs(p, g, h)}

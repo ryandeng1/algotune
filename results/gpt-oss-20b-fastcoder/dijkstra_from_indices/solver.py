@@ -7,29 +7,36 @@ class Solver:
         self.directed = False
         self.min_only = True
 
-    def solve(self, problem):
+    def solve(self, problem: dict) -> dict:
         """
-        Compute shortest path distances from the given source nodes.
-        Returns a nested list with None for unreachable nodes.
+        Solve shortest path distances from given source indices using scipy's
+        sparse dijkstra implementation. Only distances are returned and
+        non‑reachable nodes are represented as None.
         """
-        # Build CSR matrix directly
+        # Build CSR matrix
         graph_csr = scipy.sparse.csr_matrix(
-            (problem['data'], problem['indices'], problem['indptr']),
-            shape=problem['shape']
+            (problem["data"], problem["indices"], problem["indptr"]),
+            shape=problem["shape"],
         )
-        source_indices = problem['source_indices']
 
-        # Run Dijkstra
-        dist_matrix = scipy.sparse.csgraph.dijkstra(
+        source_indices = problem["source_indices"]
+        if not source_indices:
+            return {"distances": []}
+
+        # Compute distances
+        dist = scipy.sparse.csgraph.dijkstra(
             csgraph=graph_csr,
             directed=self.directed,
             indices=source_indices,
-            min_only=self.min_only
+            min_only=self.min_only,
         )
 
-        # Convert to list and replace inf with None
-        if dist_matrix.ndim == 1:
-            return {'distances': [[None if np.isinf(d) else d for d in dist_matrix]]}
-        return {
-            'distances': [[None if np.isinf(d) else d for d in row] for row in dist_matrix]
-        }
+        # Convert np.inf to None
+        inf_mask = np.isinf(dist)
+        dist = dist.tolist()
+        for r, row in enumerate(dist):
+            for c, val in enumerate(row):
+                if inf_mask[r, c]:
+                    row[c] = None
+
+        return {"distances": dist}

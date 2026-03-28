@@ -1,27 +1,29 @@
 import numpy as np
-from typing import List
+from numpy.typing import NDArray
 
 class Solver:
-    def solve(self, problem: np.ndarray) -> List[List[complex]]:
+    def solve(self, problem: NDArray) -> list[list[complex]]:
         """
-        Solve the eigenvector problem for a non-symmetric matrix.
-        Returns the eigenvectors sorted by descending real part
-        (and then imaginary part) of the eigenvalues, each normalized to unit norm.
+        Solve the eigenvector problem for the given non-symmetric matrix.
+        Compute eigenvalues and eigenvectors using np.linalg.eig.
+        Sort the eigenpairs in descending order by the real part (and then imaginary part)
+        of the eigenvalues. Return the eigenvectors (each normalized to unit norm)
+        as a list of lists of complex numbers.
         """
         # Compute eigenvalues and right eigenvectors
-        eigenvalues, eigenvectors = np.linalg.eig(problem)
+        eigvals, eigvecs = np.linalg.eig(problem)
 
-        # Indices to sort by descending real part, then descending imaginary part
-        sort_idx = np.lexsort((-eigenvalues.imag, -eigenvalues.real))
+        # Get sorting indices: descending by real, then imaginary part
+        sort_idx = np.lexsort((-eigvals.imag, -eigvals.real))
 
-        # Reorder vectors
-        vectors = eigenvectors[:, sort_idx]
+        # Reorder eigenvectors accordingly
+        eigvecs_sorted = eigvecs[:, sort_idx]
 
-        # Normalize columns
-        norms = np.linalg.norm(vectors, axis=0, keepdims=True)
-        # Avoid division by zero; norms that are zero stay as zero vector
-        inv_norms = np.where(norms != 0, 1.0 / norms, 1.0)
-        vectors = vectors * inv_norms
+        # Normalize each eigenvector to unit norm
+        norms = np.linalg.norm(eigvecs_sorted, axis=0)
+        # Avoid division by zero (unlikely for non‑zero eigenvectors)
+        safe_norms = np.where(norms > 1e-12, norms, 1.0)
+        eigvecs_normalized = eigvecs_sorted / safe_norms
 
-        # Convert to list of lists (each column becomes a list)
-        return [vectors[:, i].tolist() for i in range(vectors.shape[1])]
+        # Convert to list of lists of complex numbers
+        return eigvecs_normalized.T.tolist()

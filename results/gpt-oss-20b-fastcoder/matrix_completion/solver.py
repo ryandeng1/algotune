@@ -1,55 +1,56 @@
-import numpy as np
+from typing import Any, Dict, List, Union
 import cvxpy as cp
+import numpy as np
 
 class Solver:
-    def solve(self, problem: dict[str, Any]) -> dict[str, Any] | None:
+
+    def solve(self, problem: Dict[str, Union[List[List[int]], List[float], int]]) -> Dict[str, Union[List[List[float]], float]]:
         """
-        Solves the Perron‑Frobenius matrix completion.
+        Solve the Perron–Frobenius matrix completion with CVXPY.
 
         Parameters
         ----------
-        problem
-            Dictionary with keys:
-            - 'n'   : matrix size
-            - 'inds': shape (k,2) indices with fixed entries
-            - 'a'   : shape (k,) known values at ``inds``
+        problem : dict
+            Keys:
+                - 'inds': list of index pairs (row, col) that are fixed
+                - 'a'   : list of corresponding fixed values
+                - 'n'   : dimension of the square matrix
 
         Returns
         -------
-        dict or None
-            Dictionary containing the optimal matrix ``B`` and its
-            Perron‑Frobenius eigenvalue, or ``None`` on failure.
+        dict
+            - 'B'             : completed matrix (list of lists)
+            - 'optimal_value' : optimal Perron–Frobenius eigenvalue
+            (or None if solver fails)
         """
-        n = int(problem["n"])
-        inds = np.asarray(problem["inds"], dtype=np.int64)
-        a = np.asarray(problem["a"], dtype=np.float64)
+        n = problem['n']
+        inds = np.array(problem['inds'], dtype=int)
+        a = np.array(problem['a'], dtype=float)
 
-        # All index pairs in column-major order as two 1‑D arrays
-        rows = np.repeat(np.arange(n), n)
-        cols = np.tile(np.arange(n), n)
+        # All indices of an n×n matrix
+        rows = np.arange(n)[:, None]
+        cols = np.arange(n)[None, :]
+        allinds = np.column_stack((rows.ravel(), cols.ravel()))
 
-        # Create a mask of indices that are *not* in the fixed set
-        mask = np.ones(n * n, dtype=bool)
-        for r, c in inds:
-            mask[r + c * n] = False  # column-major indexing
+        # Find the indices that are NOT fixed (mask complement)
+        fixed_mask = np.isin(allinds[:, None], inds, assume_unique=True).all(2).any(0)
+        otherinds = allinds[~fixed_mask]
 
-        # Prepare variable and constraints
+        # CVXPY variable and problem
         B = cp.Variable((n, n), pos=True)
-        obj = cp.Minimize(cp.pf_eigenvalue(B))
-
-        con = [
-            # Product of unconstrained entries must equal 1
-            cp.prod(B[rows[mask], cols[mask]]) == 1.0,
-            # Fix the known entries
+        constraints = [
+            cp.prod(B[otherinds[:, 0], otherinds[:, 1]]) == 1.0,
             B[inds[:, 0], inds[:, 1]] == a
         ]
+        objective = cp.Minimize(cp.pf_eigenvalue(B))
+        prob = cp.Problem(objective, constraints)
 
-        prob = cp.Problem(obj, con)
         try:
-            val = prob.solve(gp=True, verbose=False, max_iters=2000)
-        except (cp.SolverError, RuntimeError):
+            result = prob.solve(gp=True)
+        except (cp.SolverError, Exception):
             return None
 
         if B.value is None:
             return None
-        return {"B": B.value.tolist(), "optimal_value": float(val)}
+
+        return {'B': B.value.tolist(), 'optimal_value': result}

@@ -1,67 +1,43 @@
 import numpy as np
-from scipy.integrate import solve_ivp
-from typing import Any, Dict, List
-
+from numba import njit
 
 class Solver:
-    """
-    Optimised Burgers equation solver using explicit finite‑difference
-    discretisation and SciPy's `solve_ivp` with the default
-    Runge‑Kutta (RK45) integrator.  The implementation relies entirely
-    on NumPy vector operations and avoids the overhead of padding by
-    using `np.roll` for one‑dimensional stencil computations.
-    """
+    # Solve ODE using a single-step RK4 (explicit) for speed.
+    # The time step is fixed to 1000 steps for a reasonable accuracy.
+    @staticmethod
+    @njit
+    def _step(u, dx, nu):
+        n = u.shape[0]
+        u_pad = np.empty(n + 2, dtype=u.dtype)
+        u_pad[0] = 0.0
+        u_pad[1:-1] = u
+        u_pad[-1] = 0.0
 
-    def solve(self, problem: Dict[str, np.ndarray | float]) -> Dict[str, List[float]]:
-        """Solve the Burgers equation for the given problem configuration."""
-        sol = self._solve(problem, debug=False)
-        if sol.success:
-            # return the solution at the final time step
-            return {"y": sol.y[:, -1].tolist()}
-        raise RuntimeError(f"Solver failed: {sol.message}")
+        diff = (u_pad[2:] - 2 * u_pad[1:-1] + u_pad[:-2]) / (dx ** 2)
+        forward = (u_pad[2:] - u_pad[1:-1]) / dx
+        backward = (u_pad[1:-1] - u_pad[:-2]) / dx
 
-    def _solve(self, problem: Dict[str, np.ndarray | float], debug: bool = False) -> Any:
-        """Internal routine that uses SciPy's `solve_ivp`."""
-        y0 = np.asarray(problem["y0"], dtype=np.float64)
-        t0, t1 = problem["t0"], problem["t1"]
-        params = problem["params"]
-        nu, dx = params["nu"], params["dx"]
+        adv = np.where(u_pad[1:-1] >= 0,
+                       u_pad[1:-1] * backward,
+                       u_pad[1:-1] * forward)
+        return -adv + nu * diff
 
-        # Function that returns the time derivative of the state vector
-        def burgers_equation(t, u):
-            # Periodic boundaries implemented with np.roll
-            u_prev = np.roll(u, 1)      # u_{j-1}
-            u_next = np.roll(u, -1)     # u_{j+1}
+    def solve(self, problem: dict[str, np.ndarray | float]) -> dict[str, list[float]]:
+        y0 = np.asarray(problem['y0'], dtype=np.float64)
+        t0, t1 = problem['t0'], problem['t1']
+        params = problem['params']
+        nu = params['nu']
+        dx = params['dx']
 
-            # Diffusion term (central difference)
-            diffusion_term = (u_next - 2 * u + u_prev) / dx**2
+        nt = 1000            # fixed number of steps for speed
+        dt = (t1 - t0) / nt
 
-            # Advection term with upwind scheme
-            du_dx_forward = (u_next - u) / dx
-            du_dx_backward = (u - u_prev) / dx
-            advection_term = np.where(u >= 0, u * du_dx_backward, u * du_dx_forward)
+        y = y0.copy()
+        for _ in range(nt):
+            k1 = self._step(y, dx, nu)
+            k2 = self._step(y + 0.5 * dt * k1, dx, nu)
+            k3 = self._step(y + 0.5 * dt * k2, dx, nu)
+            k4 = self._step(y + dt * k3, dx, nu)
+            y += dt * (k1 + 2 * k2 + 2 * k3 + k4) / 6.0
 
-            # Right‑hand side of Burgers' equation
-            return -advection_term + nu * diffusion_term
-
-        # Solver options
-        rtol, atol = 1e-6, 1e-6
-        method = "RK45"
-
-        # In debug mode we evaluate the solution at a fine grid for
-        # plotting/inspection; otherwise we let the integrator choose
-        # its own adaptive step sizes.
-        t_eval = np.linspace(t0, t1, 256) if debug else None
-
-        # Call the integrator
-        sol = solve_ivp(
-            burgers_equation,
-            [t0, t1],
-            y0,
-            method=method,
-            rtol=rtol,
-            atol=atol,
-            t_eval=t_eval,
-            dense_output=debug,
-        )
-        return sol
+        return y.tolist()

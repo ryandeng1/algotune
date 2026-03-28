@@ -1,44 +1,53 @@
 import numpy as np
 from contextlib import nullcontext
+from typing import List
 
-# Detected if threadpool_limits is available; keep it optional
+# ------------------------------------------------------------------------------
+# Helper to keep a single thread for BLAS routines (used only if available)
+# ------------------------------------------------------------------------------
+
 try:
-    from threadpoolctl import threadpool_limits
+    from numba import threadpool_limits  # type: ignore
 except Exception:
     threadpool_limits = None
 
-
 def _single_thread_blas():
-    """Ensure BLAS works in single‑thread mode."""
-    return nullcontext() if threadpool_limits is None else threadpool_limits(limits=1)
+    if threadpool_limits is None:
+        return nullcontext()
+    return threadpool_limits(limits=1)
 
+# ------------------------------------------------------------------------------
+# Solver implementation
+# ------------------------------------------------------------------------------
 
 class Solver:
-    def solve(self, problem: list[float]) -> list[float]:
+    """
+    Solves for all real roots of a polynomial given by its coefficients in
+    descending order.
+    """
+
+    def solve(self, problem: List[float]) -> List[float]:
         """
-        Compute all real roots of a polynomial given by its coefficients.
+        Find all real roots of the polynomial defined by *problem*.
 
         Parameters
         ----------
         problem : list[float]
-            Coefficients [a_n, a_{n-1}, …, a_0] defining the polynomial
+            Polynomial coefficients [aₙ, aₙ₋₁, ..., a₀].
 
         Returns
         -------
         list[float]
-            Real roots sorted in decreasing order.
+            Sorted list of real roots in descending order.
         """
-        coeff = problem  # local alias
+        # Compute roots once in a single‑threaded BLAS environment.
         with _single_thread_blas():
-            roots = np.roots(coeff)
+            coeffs = np.asarray(problem, dtype=float)
+            roots = np.roots(coeffs)
 
-        # Discard roots with significant imaginary parts
-        img = np.imag(roots)
-        if np.any(np.abs(img) > 0.001):
-            roots = roots[np.abs(img) <= 0.001].real
-        else:
-            roots = roots.real
+        # Keep only roots with negligible imaginary part.
+        imag_tol = 1e-7  # tighter tolerance – faster than using np.real_if_close
+        real_roots = np.real(roots[np.abs(np.imag(roots)) <= imag_tol])
 
-        # Sort descending
-        roots.sort()
-        return roots[::-1].tolist()
+        # Sort in descending order and convert to Python list.
+        return np.sort(real_roots, kind="quicksort")[::-1].tolist()

@@ -1,77 +1,42 @@
+from typing import Any
 import numpy as np
 import scipy.sparse
 import scipy.sparse.csgraph
-from typing import Any, Dict, List
-
 
 class Solver:
     def __init__(self):
-        # Since all problems are undirected in this contest, keep this constant.
         self.directed = False
         self.min_only = True
 
-    def solve(self, problem: Dict[str, Any]) -> Dict[str, List[List[float]]]:
+    def solve(self, problem: dict[str, Any]) -> dict[str, list[list[float]]]:
         """
-        Computes the shortest‑path distances from the given source nodes via
-        `scipy.sparse.csgraph.dijkstra`.  The result is returned as a list of
-        lists, converting `numpy.inf` to `None` because the contest test harness
-        expects this shape.
-
-        Parameters
-        ----------
-        problem : dict
-            Must contain:
-                * 'data'   – edge weights (list or 1‑d array)
-                * 'indices' – column indices
-                * 'indptr'  – row pointer array
-                * 'shape'   – tuple (n_nodes, n_nodes)
-                * 'source_indices' – list or 1‑d array of start nodes
-
-        Returns
-        -------
-        dict
-            Contains key 'distances' with the computed matrix.
+        Solve a single‑source or multi‑source shortest‑path problem on a CSR graph.
+        Returns a nested list of distances (with ``None`` instead of ``np.inf``).
         """
-        try:
-            # Build CSR graph efficiently
-            graph_csr = scipy.sparse.csr_matrix(
-                (
-                    np.asarray(problem["data"], dtype=float),
-                    np.asarray(problem["indices"], dtype=int),
-                    np.asarray(problem["indptr"], dtype=int),
-                ),
-                shape=tuple(problem["shape"]),
-            )
 
-            sources = problem["source_indices"]
-            if not isinstance(sources, (list, np.ndarray)) or len(sources) == 0:
-                return {"distances": []}
+        # Build CSR matrix once
+        data = problem["data"]
+        indices = problem["indices"]
+        indptr = problem["indptr"]
+        shape = problem["shape"]
+        graph = scipy.sparse.csr_matrix((data, indices, indptr), shape=shape)
 
-            # Run Dijkstra
-            dist = scipy.sparse.csgraph.dijkstra(
-                csgraph=graph_csr,
-                directed=self.directed,
-                indices=sources,
-                min_only=self.min_only,
-            )
+        # Source nodes
+        sources = np.asarray(problem["source_indices"], dtype=int)
 
-            # Replace inf with None in a fast vectorized manner
-            if dist.ndim == 1:
-                row = dist.tolist()
-                for i, val in enumerate(row):
-                    if np.isinf(val):
-                        row[i] = None
-                return {"distances": [row]}
+        # Fast Dijkstra implementation
+        dist = scipy.sparse.csgraph.dijkstra(
+            csgraph=graph,
+            directed=self.directed,
+            indices=sources,
+            min_only=self.min_only,
+        )
 
-            # Multi‑source case
-            res = dist.tolist()
-            for r in range(len(res)):
-                row = res[r]
-                for c, val in enumerate(row):
-                    if np.isinf(val):
-                        row[c] = None
+        # Convert numpy array of shape (n,) or (k, n) to list of lists
+        # Replace +inf with None
+        if dist.ndim == 1:
+            out = [[None if np.isinf(d) else d for d in dist]]
+        else:
+            out = [[None if np.isinf(d) else d for d in row] for row in dist]
 
-            return {"distances": res}
-
-        except Exception:
-            return {"distances": []}
+        return {"distances": out}

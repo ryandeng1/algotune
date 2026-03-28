@@ -1,31 +1,57 @@
 import numpy as np
-from typing import Any
 from numpy.typing import NDArray
 
 class Solver:
     def solve(self, problem: dict) -> NDArray:
         """
-        Compute the cumulative integral along the last axis using the composite Simpson rule.
-        This manual implementation avoids the overhead of ``scipy.integrate.cumulative_simpson``.
+        Compute the cumulative integral along the last axis using a
+        vectorised Simpson's rule implementation. This avoids the
+        slower pure‑python loops inside scipy's `cumulative_simpson` and
+        works for any array shape.
         """
-        y = np.asarray(problem["y2"])
-        dx = float(problem["dx"])
+        y2: NDArray = problem["y2"]
+        dx: float | NDArray = problem["dx"]
+
+        # Ensure dx is a scalar or an array that can broadcast to y2.shape
+        dx = np.asarray(dx)
+        if dx.ndim == 0:
+            dx = float(dx)
 
         # Number of points along the last axis
-        n = y.shape[-1]
-        if n < 3:
-            # Not enough points for Simpson; fallback to trapezoidal
-            return np.cumsum(y, axis=-1) * dx
+        n = y2.shape[-1]
 
-        # Pre‑compute weights for Simpson's rule
-        # For points 0 and n-1 use 1/6*dx, others use 4/6*dx or 2/6*dx
-        coeff = np.empty(n, dtype=y.dtype)
-        coeff[:] = 2.0
-        coeff[0] = coeff[-1] = 1.0
-        coeff[1::2] = 4.0  # odd indices
-        coeff *= dx / 6.0
+        # Pre‑allocate result array
+        result = np.empty_like(y2)
 
-        # Cumulative integral: sum of y * coeff across the last axis
-        # Use np.cumsum on the weighted array
-        weighted = y * coeff
-        return np.cumsum(weighted, axis=-1)
+        # Simpson's rule requires an even number of intervals -> odd number of points.
+        # If n is even we drop the last point to keep an odd number of points.
+        if n % 2 == 0:
+            y2 = y2[..., :-1]
+            n -= 1
+
+        # Weights for Simpson's rule: 1/3, 4/3, 2/3, 4/3, …, 1/3
+        # Create a weights array of shape (n,)
+        weights = np.empty(n, dtype=y2.dtype)
+        weights[0] = 1.0 / 3.0
+        weights[-1] = 1.0 / 3.0
+        weights[1:-1:2] = 4.0 / 3.0   # odd indices (starting at 1)
+        weights[2:-2:2] = 2.0 / 3.0   # even indices (excluding ends)
+
+        # Expand weights to match y2's shape for broadcasting
+        # Ensure last axis is the one we multiply
+        for _ in range(y2.ndim - 1):
+            weights = np.expand_dims(weights, axis=0)
+
+        # Weighted sum along the last axis gives the cumulative integral
+        # We use a cumulative sum of the weighted values * dx
+        weighted = y2 * weights
+        # Cumulative sum along last axis
+        result = np.cumsum(weighted, axis=-1) * dx
+
+        # If we dropped a point earlier, pad the result with the last value
+        if n == y2.shape[-1] + 1:
+            # Append the last cumulative value along the last axis
+            last_col = result[..., -1][..., None]
+            result = np.concatenate([result, last_col], axis=-1)
+
+        return result

@@ -1,21 +1,28 @@
-from typing import Any
+from typing import Any, Dict, List
 import numpy as np
 
 class Solver:
-    def solve(self, problem: dict[str, Any]) -> dict[str, list]:
+    def solve(self, problem: Dict[str, Any]) -> Dict[str, List]:
         """
-        Return the vector consisting of the k largest‑in‑absolute value terms
-        from the input vector v; all other terms are set to 0.
+        Solve the l0 pruning problem: keep only the k elements of v with
+        the largest absolute values, setting all others to zero.
         """
-        v = np.asarray(problem.get("v", []), dtype=float).ravel()
-        k = int(problem.get("k", 0))
-        if k <= 0 or v.size == 0:
-            return {"solution": [0.0] * v.size}
+        v = np.asarray(problem['v'])
+        k = int(problem['k'])
 
-        # Find the indices of the k largest absolute values in linear time
-        idx = np.argpartition(np.abs(v), -k)[-k:]
-        # Create the pruned vector
-        pruned = np.empty_like(v)
-        pruned.fill(0.0)
-        pruned[idx] = v[idx]
-        return {"solution": pruned.tolist()}
+        # Work with a 1-D view of the data
+        v_flat = v.ravel()
+
+        # Find indices of the k largest-magnitude elements in linear time
+        if k > 0:
+            # argpartition returns indices that would partition the array
+            idx_top = np.argpartition(-np.abs(v_flat), k - 1)[:k]
+        else:
+            idx_top = np.array([], dtype=int)
+
+        # Reconstruct the full solution array
+        solution_arr = np.zeros_like(v_flat)
+        solution_arr[idx_top] = v_flat[idx_top]
+
+        # Return as a Python list
+        return {'solution': solution_arr.tolist()}

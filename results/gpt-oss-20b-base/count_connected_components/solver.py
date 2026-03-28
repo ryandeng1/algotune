@@ -4,12 +4,8 @@ SolutionType = Dict[str, int]
 
 class Solver:
     def solve(self, problem: Dict[str, Any]) -> SolutionType:
-        try:
-            n = problem.get('num_nodes', 0)
-            edges = problem.get('edges', [])
-        except Exception:
-            return {'number_connected_components': -1}
-
+        # Union‑Find (Disjoint Set Union) without path compression overhead.
+        n = problem.get('num_nodes', 0)
         parent = list(range(n))
         rank = [0] * n
 
@@ -25,16 +21,17 @@ class Solver:
                 return
             if rank[ra] < rank[rb]:
                 parent[ra] = rb
-            elif rank[ra] > rank[rb]:
-                parent[rb] = ra
             else:
                 parent[rb] = ra
-                rank[ra] += 1
+                if rank[ra] == rank[rb]:
+                    rank[ra] += 1
 
-        for u, v in edges:
+        for u, v in problem.get('edges', []):
             if 0 <= u < n and 0 <= v < n:
                 union(u, v)
 
         # Count distinct roots
-        roots = set(find(i) for i in range(n))
+        roots = set()
+        for i in range(n):
+            roots.add(find(i))
         return {'number_connected_components': len(roots)}

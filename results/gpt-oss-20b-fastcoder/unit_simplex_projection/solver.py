@@ -1,32 +1,31 @@
-from typing import Any
 import numpy as np
+from typing import Any, Dict
 
 class Solver:
-    def solve(self, problem: dict[str, Any]) -> dict[str, list]:
-        # Extract and flatten the input array
-        y = np.asarray(problem.get("y"), dtype=np.float64).ravel()
+    def solve(self, problem: Dict[str, Any]) -> Dict[str, list]:
+        """
+        Projection of y onto probability simplex in O(n log n) via sorting.
+        """
+        # Convert to 1‑D numpy array
+        y = np.asarray(problem["y"]).flat
         n = y.size
 
-        # Quick linear-time algorithm when the sum of all entries is already 1 and all non‑negative
-        if y.sum() == 1.0 and y.min() >= 0.0:
-            return {"solution": y.tolist()}
+        # Sort descending
+        sorted_y = np.sort(y)[::-1]      # shape (n,)
+        # Cumulative sum of sorted values, subtract 1
+        cumsum_y = np.cumsum(sorted_y) - 1.0
 
-        # Sort y in descending order and compute the cumulative sum
-        sorted_y = np.sort(y)[::-1]
-        sorted_cumsum = np.cumsum(sorted_y)
+        # Find rho = max{ j | sorted_y[j] > cumsum_y[j]/(j+1) }
+        pos = np.arange(1, n + 1, dtype=float)
+        cond = sorted_y > cumsum_y / pos
+        if not cond.any():
+            rho = 0
+        else:
+            rho = np.nonzero(cond)[0][-1]
 
-        # Compute the threshold index rho
-        # We look for the largest j such that sorted_y[j] > (sorted_cumsum[j] - 1) / (j + 1)
-        j = np.arange(1, n + 1)
-        rhs = (sorted_cumsum - 1) / j
-        mask = sorted_y > rhs
-        if not mask.any():
-            # All coordinates are 0, return the zero vector
-            return {"solution": [0.0] * n}
-        rho = mask.nonzero()[0][-1]
+        # Threshold
+        theta = cumsum_y[rho] / (rho + 1.0)
 
-        # Compute theta and the projection
-        theta = (sorted_cumsum[rho] - 1) / (rho + 1)
-        x = np.maximum(y - theta, 0)
-
+        # Projection
+        x = np.maximum(y - theta, 0.0)
         return {"solution": x.tolist()}

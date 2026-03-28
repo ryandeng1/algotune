@@ -1,42 +1,40 @@
 import numpy as np
-from typing import Any, Dict, List
 
 class Solver:
-    def solve(self, problem: Dict[str, Any]) -> Dict[str, List]:
+    def solve(self, problem: dict) -> dict:
         """
-        Solve the sparsity constrained quadratic program:
-            min ||x - v||_2^2  subject to  ||x||_1 <= k  and  x = sign(v) * w,
-        where w >= 0.  The solution can be obtained in O(n log n).
+        Efficient implementation of the l1‑pruning algorithm
+        described in https://doi.org/10.1109/CVPR.2018.00890.
+        The solution is obtained in O(n log n) time with fully
+        vectorised NumPy code.
         """
-        # ----- Pre‑processing -------------------------------------------------
-        v = np.asarray(problem["v"], dtype=np.float64).ravel()
+        v = np.asarray(problem["v"]).ravel()
         k = float(problem["k"])
 
-        # ----- Sub‑problem: compute w from |v| --------------------------------
-        u = np.abs(v)
-        # Sort descending
-        mu = np.sort(u)[::-1]                     # O(n log n)
-        # Cumulative sum
-        cumsum = np.cumsum(mu)                    # O(n)
-        # Potential theta values for every j
-        idx = np.arange(1, len(mu) + 1, dtype=np.float64)
-        theta_candidates = (cumsum - k) / idx      # element‑wise
+        # Absolute values sorted in descending order
+        mu = np.sort(np.abs(v))[::-1]
+        if mu.size == 0:
+            return {"solution": []}
 
-        # Find the first j such that mu[j] < theta_candidates[j]
-        # Equivalent to: select index j where mu < theta and pick that theta
-        # We use vectorized operations; when no such index, use the last one.
-        mask = mu < theta_candidates
+        # Cumulative sum of the sorted values
+        cumsum = np.cumsum(mu)
+
+        # Candidate thresholds for each prefix of mu
+        # T_j = (cumsum_j - k) / (j+1)
+        indices = np.arange(1, mu.size + 1, dtype=float)
+        thresholds = (cumsum - k) / indices
+
+        # Find the first index where mu_j < T_j
+        # If none satisfies, use the last possible threshold
+        mask = mu < thresholds
         if mask.any():
-            j = mask.argmax()                     # first True
-            theta = theta_candidates[j]
+            j = mask.argmax()   # first true index
+            theta = thresholds[j]
         else:
-            theta = theta_candidates[-1]
+            θ = thresholds[-1]
+            theta = θ
 
-        # Compute w
-        w = np.maximum(u - theta, 0.0)
+        # Soft‑thresholding with the computed theta
+        w = np.maximum(np.abs(v) - theta, 0.0) * np.sign(v)
 
-        # ----- Recover the sign of the original vector ----------------------
-        new_v = w * np.sign(v)
-
-        # ----- Return result ------------------------------------------------
-        return {"solution": new_v.tolist()}
+        return {"solution": w.tolist()}

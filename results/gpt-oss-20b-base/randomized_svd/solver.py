@@ -1,37 +1,46 @@
 import numpy as np
-from typing import Any, Dict, List
+from scipy.linalg import svd
+from scipy.sparse.linalg import svds
+from typing import Any
 
 class Solver:
-    def solve(self, problem: Dict[str, Any]) -> Dict[str, List[np.ndarray]]:
+    def solve(self, problem: dict[str, Any]) -> dict[str, list]:
         A = problem["matrix"]
         n_components = problem["n_components"]
-        matrix_type = problem.get("matrix_type", None)
+        matrix_type = problem["matrix_type"]
 
-        # Use different number of power iterations for ill‑conditioned matrices
+        # decide number of power iterations
         n_iter = 10 if matrix_type == "ill_conditioned" else 5
 
-        # Set deterministic random seed
-        rng = np.random.default_rng(42)
+        # if number of components is larger than or equal to the rank, use full SVD
+        m, n = A.shape
+        min_dim = min(m, n)
+        if n_components >= min_dim:
+            U, s, Vt = svd(A, full_matrices=False)
+            U = U[:, :n_components]
+            s = s[:n_components]
+            Vt = Vt[:n_components, :]
+        else:
+            # use sparse SVD with power iterations
+            # svds does not expose n_iter, so we implement a simple power iteration wrapper
+            def power_iteration(A, k, n_iter, rng):
+                # initial random matrix
+                X = rng.standard_normal((A.shape[1], k))
+                for _ in range(n_iter):
+                    X = A @ (A.T @ X)
+                    X, _ = np.linalg.qr(X)
+                return X
 
-        # Step 1: Random projection
-        n_features = A.shape[1]
-        random_matrix = rng.standard_normal((n_features, n_components))
-        Y = A @ random_matrix
+            rng = np.random.default_rng(42)
+            # orthonormal bases for power iterations
+            X = power_iteration(A, n_components, n_iter, rng)
+            B = A @ X
+            U_hat, s, Vt = svds(A, k=n_components, return_singular_vectors=True)
+            # svds returns in arbitrary order, sort
+            order = np.argsort(s)[::-1]
+            s = s[order]
+            U_hat = U_hat[:, order]
+            Vt = Vt[order, :]
 
-        # Step 2: Repeated QR to form an orthonormal basis for the Krylov subspace
-        for _ in range(n_iter):
-            Q, _ = np.linalg.qr(Y, mode="reduced")
-            Y = A @ (Q @ random_matrix.T)
-
-        Q, _ = np.linalg.qr(Y, mode="reduced")
-
-        # Step 3: Project A onto the subspace
-        B = Q.T @ A
-
-        # Step 4: Thin SVD of the small matrix B
-        U_hat, s, Vt = np.linalg.svd(B, full_matrices=False)
-
-        # Step 5: Lift U_hat back to the original space
-        U = Q @ U_hat
-
+            U = U_hat
         return {"U": U, "S": s, "V": Vt.T}

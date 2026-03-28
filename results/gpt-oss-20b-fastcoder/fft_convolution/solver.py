@@ -1,31 +1,39 @@
 import numpy as np
+from typing import Any, Dict, List
 
 class Solver:
-    def solve(self, problem):
-        """
-        Fast FFT‑based convolution without external dependencies.
-        """
+    @staticmethod
+    def _fft_convolve(x: np.ndarray, y: np.ndarray, mode: str = 'full') -> np.ndarray:
+        """Convolve two 1-D arrays using FFT with efficient padding."""
+        nx, ny = x.shape[0], y.shape[0]
+        n = nx + ny - 1
+        # Power‑of‑two size for faster FFT
+        m = 1 << (n - 1).bit_length()
+        # FFT of both inputs
+        fx = np.fft.rfftn(x, n=m)
+        fy = np.fft.rfftn(y, n=m)
+        # Element‑wise multiplication in the frequency domain
+        fxy = fx * fy
+        # Inverse FFT to obtain the linear convolution
+        conv = np.fft.irfftn(fxy, n=m)
+        # Trim to requested mode
+        if mode == 'full':
+            return conv[:n]
+        elif mode == 'same':
+            start = (ny - 1) // 2
+            end = start + nx
+            return conv[start:end]
+        elif mode == 'valid':
+            if nx < ny:
+                raise ValueError("In 'valid' mode, len(x) must be >= len(y)")
+            return conv[ny-1:nx]
+        else:
+            raise ValueError(f"Unknown mode: {mode}")
+
+    def solve(self, problem: Dict[str, Any]) -> Dict[str, List[float]]:
+        """Compute convolution of 'signal_x' and 'signal_y' using a fast FFT implementation."""
         x = np.asarray(problem['signal_x'], dtype=np.float64)
         y = np.asarray(problem['signal_y'], dtype=np.float64)
         mode = problem.get('mode', 'full')
-
-        n = x.shape[0] + y.shape[0] - 1
-        # Next power of two for efficient FFT
-        fft_len = 1 << (n - 1).bit_length()
-
-        # FFT of zero‑padded signals
-        X = np.fft.rfft(x, n=fft_len)
-        Y = np.fft.rfft(y, n=fft_len)
-
-        # Point‑wise multiplication and inverse FFT
-        conv = np.fft.irfft(X * Y, n=fft_len)
-
-        if mode == 'full':
-            result = conv[:n]
-        elif mode == 'valid':
-            result = conv[n - 1:]
-        else:  # 'same'
-            start = (n - 1) // 2
-            result = conv[start:start + max(x.size, y.size)]
-
-        return {"convolution": result.tolist()}
+        conv = self._fft_convolve(x, y, mode=mode)
+        return {'convolution': conv.tolist()}

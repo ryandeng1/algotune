@@ -1,35 +1,25 @@
-from typing import Any, Dict
 import numpy as np
-from scipy.linalg import solve_continuous_lyapunov, eigvals
+from scipy.linalg import solve_discrete_lyapunov
 
 class Solver:
-    def solve(self, problem: Dict[str, Any]) -> Dict[str, Any]:
+
+    def solve(self, problem: dict) -> dict:
         """
-        Determines asymptotic stability of a linear system described by matrix A.
-        If the system is stable, returns a Lyapunov matrix P that satisfies
-        A^T P + P A = -I.  The routine uses a direct spectral check and
-        the continuous‐time Lyapunov solver from SciPy (which is much faster
-        than a generic SDP solver).
-
-        Args:
-            problem: A dictionary containing the system matrix `A`.
-
-        Returns:
-            dict with keys:
-                - 'is_stable': bool
-                - 'P': list representation of the Lyapunov matrix (None if unstable)
+        Directly solves the discrete Lyapunov equation
+        Aᵀ P A − P = −I
+        and tests whether P is positive definite.
         """
-        A = np.asarray(problem["A"], dtype=float)
-        # Quick spectral test: all eigenvalues must have strictly negative real part
-        if np.any(np.real(eigvals(A)) >= 0):
-            return {"is_stable": False, "P": None}
-
-        # Solve the Lyapunov equation A^T P + P A = -I
+        A = np.array(problem['A'], dtype=float)
         try:
-            P = solve_continuous_lyapunov(A.T, -np.eye(A.shape[0]))
-            # Ensure symmetry (numerical errors can make it slightly asymmetric)
-            P = (P + P.T) / 2.0
-        except Exception:
-            return {"is_stable": False, "P": None}
+            # Solve the discrete Lyapunov equation
+            P = solve_discrete_lyapunov(A.T, np.eye(A.shape[0]))
+        except Exception as exc:
+            # Numerical failure → not stable
+            return {'is_stable': False, 'P': None}
 
-        return {"is_stable": True, "P": P.tolist()}
+        # Check positive definiteness: all eigenvalues > eps
+        eigs = np.linalg.eigvalsh(P)
+        if np.all(eigs > 1e-8):
+            return {'is_stable': True, 'P': P.tolist()}
+        else:
+            return {'is_stable': False, 'P': None}

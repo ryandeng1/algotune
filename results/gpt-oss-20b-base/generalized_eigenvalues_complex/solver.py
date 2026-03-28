@@ -4,22 +4,20 @@ from numpy.typing import NDArray
 
 class Solver:
     def solve(self, problem: tuple[NDArray, NDArray]) -> list[complex]:
-        """
-        Solve the generalized eigenvalue problem A · x = λ B · x.
-
-        The solution is a list of eigenvalues sorted first by real part,
-        then by imaginary part, both in descending order.
-        """
         A, B = problem
-        # Scale matrices to improve numerical stability
-        scale = np.linalg.norm(B) ** 0.5
-        B_scaled = B / scale
+
+        # Scale matrices for numerical stability
+        norm_B = np.linalg.norm(B, ord='fro')
+        scale = np.sqrt(norm_B) if norm_B != 0 else 1.0
         A_scaled = A / scale
+        B_scaled = B / scale
 
-        # Compute eigenvalues
-        eigs, _ = la.eig(A_scaled, B_scaled)
+        # Compute eigenvalues for the generalized problem
+        eigvals, _ = la.eig(A_scaled, B_scaled)
 
-        # Efficiently sort by real part descending, then imaginary part descending
-        # `np.lexsort` sorts by the last key first, so we provide (-imag, -real)
-        idx = np.lexsort((-eigs.imag, -eigs.real))
-        return eigs[idx].tolist()
+        # Sort: first by real part (descending), then by imaginary part (descending)
+        # np.lexsort sorts by the last key first
+        idx = np.lexsort((-eigvals.imag, -eigvals.real))
+        sorted_vals = eigvals[idx]
+
+        return sorted_vals.tolist()

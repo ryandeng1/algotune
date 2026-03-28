@@ -1,45 +1,112 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
 import numpy as np
-import scipy.optimize
+import numba as nb
 
-# Assuming these are defined elsewhere:
-# _task_f_vec and _task_f_vec_prime
+# ------------------------------------------------------------------
+# Helper functions (vectorised via numba)
+# ------------------------------------------------------------------
+@nb.njit
+def f_vec(x, a0, a1, a2, a3, a4, a5):
+    """
+    Computes the polynomial values for each element of x.
+    """
+    return a0 * x**5 + a1 * x**4 + a2 * x**3 + a3 * x**2 + a4 * x + a5
 
+@nb.njit
+def fprime_vec(x, a0, a1, a2, a3, a4, a5):
+    """
+    Computes the derivative of the polynomial for each element of x.
+    """
+    return 5*a0*x**4 + 4*a1*x**3 + 3*a2*x**2 + 2*a3*x + a4
+
+# ------------------------------------------------------------------
+# Solver Class
+# ------------------------------------------------------------------
 class Solver:
+    """
+    Fast vectorised Newton–Raphson solver for a quintic polynomial.
+    """
     def __init__(self):
-        self.a2 = 1e-9
+        # Coefficients of the polynomial (fixed constants)
+        self.a2 = 1e-09
         self.a3 = 0.004
         self.a4 = 10.0
         self.a5 = 0.27456
-        self.fprime = _task_f_vec_prime
-        self.func = _task_f_vec
+        self.max_iter = 30
+        self.tol = 1e-12
 
     def solve(self, problem: dict[str, list[float]]) -> dict[str, list[float]]:
-        # Convert inputs to numpy arrays
-        x0 = np.asanyarray(problem.get("x0", []), dtype=float)
-        a0 = np.asanyarray(problem.get("a0", []), dtype=float)
-        a1 = np.asanyarray(problem.get("a1", []), dtype=float)
+        """
+        Finds the root of the polynomial f(x)=0 for every entry using
+        a vectorised and highly optimised Newton iteration.
 
-        n = x0.size
-        if a0.size != n or a1.size != n:
-            return {"roots": [float("nan")] * n}
+        Parameters
+        ----------
+        problem : dict
+            Must contain lists 'x0', 'a0', 'a1' of equal length.
 
-        args = (a0, a1, self.a2, self.a3, self.a4, self.a5)
-
+        Returns
+        -------
+        dict
+            Dictionary with key 'roots': list of roots (NaN on failure).
+        """
         try:
-            roots = scipy.optimize.newton(
-                self.func, x0, fprime=self.fprime, args=args
-            )
-            if np.isscalar(roots):
-                roots = np.array([roots], dtype=float)
-            else:
-                roots = np.asarray(roots, dtype=float)
-            if roots.size != n:
-                # Pad or truncate to the expected length
-                if roots.size < n:
-                    roots = np.concatenate([roots, np.full(n - roots.size, np.nan)])
-                else:
-                    roots = roots[:n]
+            x0_arr = np.asarray(problem['x0'], dtype=np.float64)
+            a0_arr = np.asarray(problem['a0'], dtype=np.float64)
+            a1_arr = np.asarray(problem['a1'], dtype=np.float64)
         except Exception:
-            roots = np.full(n, np.nan, dtype=float)
+            return {'roots': []}
 
-        return {"roots": roots.tolist()}
+        if not (x0_arr.shape == a0_arr.shape == a1_arr.shape):
+            return {'roots': []}
+
+        n = x0_arr.size
+        # Initialise output with NaNs (in case of divergence)
+        roots = np.full(n, np.nan, dtype=np.float64)
+
+        # Prepare constants for numba routine
+        a2 = self.a2
+        a3 = self.a3
+        a4 = self.a4
+        a5 = self.a5
+        max_iter = self.max_iter
+        tol = self.tol
+
+        # ------------------------------------------------------------------
+        # Vectorised Newton loop (numba accelerated)
+        # ------------------------------------------------------------------
+        @nb.njit
+        def newton_vec(x, a0, a1, a2, a3, a4, a5, max_iter, tol):
+            root = np.empty_like(x)
+            convergence = np.full(x.shape, False, dtype=nb.boolean)
+            for i in range(max_iter):
+                f_val = f_vec(x, a0, a1, a2, a3, a4, a5)
+                f_der = fprime_vec(x, a0, a1, a2, a3, a4, a5)
+                # Avoid division by zero
+                mask = (f_der != 0.0) & (~convergence)
+                if not mask.any():
+                    break
+                dx = np.empty_like(x)
+                dx[mask] = f_val[mask] / f_der[mask]
+                x[mask] -= dx[mask]
+                con = np.abs(dx) <= tol
+                convergence[mask] = con[mask]
+            # Collect converged roots
+            root[convergence] = x[convergence]
+            root[~convergence] = np.nan
+            return root
+
+        roots = newton_vec(np.copy(x0_arr),
+                           a0_arr,
+                           a1_arr,
+                           a2,
+                           a3,
+                           a4,
+                           a5,
+                           max_iter,
+                           tol)
+
+        # Ensure list view for the answer
+        return {'roots': roots.tolist()}

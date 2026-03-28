@@ -1,56 +1,81 @@
+from typing import Any
 import numpy as np
 from scipy.integrate import solve_ivp
-from typing import Any, Dict, List
+from numba import njit
 
+# ----------------------------------------------------------------------
+# Numba‑accelerated core routine
+# ----------------------------------------------------------------------
+@njit
+def _accels_timestep(positions, masses, softening):
+    """
+    Compute 3‑D N‑body gravitational accelerations for a full time step.
+    """
+    n = positions.shape[0]
+    acc = np.empty_like(positions)
+    for i in range(n):
+        a_i = np.zeros(3, dtype=np.float64)
+        pos_i = positions[i]
+        for j in range(n):
+            if i == j:          # skip self interaction
+                continue
+            r = positions[j] - pos_i
+            dist_sq = r[0] * r[0] + r[1] * r[1] + r[2] * r[2] + softening * softening
+            inv_r3 = masses[j] / (dist_sq * np.sqrt(dist_sq))
+            a_i[0] += inv_r3 * r[0]
+            a_i[1] += inv_r3 * r[1]
+            a_i[2] += inv_r3 * r[2]
+        acc[i] = a_i
+    return acc
+
+# ----------------------------------------------------------------------
+# Main solver class
+# ----------------------------------------------------------------------
 class Solver:
-    def solve(self, problem: Dict[str, np.ndarray | float]) -> Dict[str, List[float]]:
+    def solve(self, problem: dict[str, np.ndarray | float]) -> dict[str, list[float]]:
         sol = self._solve(problem, debug=False)
         if sol.success:
             return sol.y[:, -1].tolist()
-        raise RuntimeError(f"Solver failed: {sol.message}")
+        raise RuntimeError(f'Solver failed: {sol.message}')
 
-    def _solve(self, problem: Dict[str, np.ndarray | float], debug: bool = True) -> Any:
-        y0: np.ndarray = np.asarray(problem["y0"], dtype=np.float64)
-        t0, t1 = problem["t0"], problem["t1"]
-        masses: np.ndarray = np.asarray(problem["masses"], dtype=np.float64)
-        softening: float = problem["softening"]
-        N = int(problem["num_bodies"])
+    def _solve(self, problem: dict[str, np.ndarray | float], debug=True) -> Any:
+        y0 = np.asarray(problem['y0'], dtype=np.float64)
+        t0, t1 = problem['t0'], problem['t1']
+        masses = np.asarray(problem['masses'], dtype=np.float64)
+        softening = float(problem['softening'])
+        num_bodies = int(problem['num_bodies'])
+        nvars = num_bodies * 6          # positions + velocities
 
-        def nbody(t: float, y: np.ndarray) -> np.ndarray:
-            # Reshape once
-            positions = y[: N * 3].reshape(N, 3)
-            velocities = y[N * 3 :].reshape(N, 3)
+        # ------------------------------------------------------------------
+        # ODE system
+        # ------------------------------------------------------------------
+        def nbody_problem(t, y):
+            # view y as 2D (num_bodies, 6) then split
+            y_reshaped = y.reshape(num_bodies, 6)
+            positions = y_reshaped[:, :3]
+            velocities = y_reshaped[:, 3:]
 
-            # Pairwise displacement, shape (N,N,3)
-            diff = positions[:, None, :] - positions[None, :, :]
-            # squared distance
-            dist_sq = np.sum(diff ** 2, axis=2) + softening ** 2
-            # 1 / dist^3
-            inv_dist3 = np.divide(
-                masses, dist_sq ** 1.5, out=np.zeros_like(masses), where=~np.eye(N, dtype=bool)
-            )
-
-            # Acceleration: sum over j
-            # shape (N,3)
-            accel = np.sum(diff * inv_dist3[:, None, None], axis=1)
-            # Concatenate derivatives
-            dp_dt = velocities.reshape(-1)
-            dv_dt = accel.reshape(-1)
+            # derivatives
+            dp_dt = velocities.reshape(-1)                     # dpos/dt = vel
+            accelerations = _accels_timestep(positions, masses, softening)
+            dv_dt = accelerations.reshape(-1)                 # dvel/dt = accel
             return np.concatenate([dp_dt, dv_dt])
 
-        rtol = 1e-8
-        atol = 1e-8
-        method = "RK45"
-        t_eval = np.linspace(t0, t1, 1000) if debug else None
+        # ------------------------------------------------------------------
+        # Integration options
+        # ------------------------------------------------------------------
+        rtol, atol = 1e-8, 1e-8
+        method = 'RK45'
+        t_eval = None
+        if debug:
+            # produce 1000 equally spaced evaluation points for debugging
+            t_eval = np.linspace(t0, t1, 1000)
 
-        sol = solve_ivp(
-            nbody,
-            [t0, t1],
-            y0,
-            method=method,
-            rtol=rtol,
-            atol=atol,
-            t_eval=t_eval,
-            dense_output=debug,
-        )
-        return sol
+        return solve_ivp(nbody_problem,
+                         [t0, t1],
+                         y0,
+                         method=method,
+                         rtol=rtol,
+                         atol=atol,
+                         t_eval=t_eval,
+                         dense_output=debug)

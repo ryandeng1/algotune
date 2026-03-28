@@ -1,42 +1,58 @@
-from typing import Any
+from typing import Any, Dict, List
 import numpy as np
 import faiss
 
 
 class Solver:
-    def solve(self, problem: dict[str, Any]) -> dict[str, Any]:
-        # Prepare data
-        points = np.asarray(problem["points"], dtype=np.float32)
-        queries = np.asarray(problem["queries"], dtype=np.float32)
-        k = min(problem["k"], len(points))
-        dim = points.shape[1]
+    """Highly‑optimised nearest‑neighbour solver using FAISS."""
 
-        # Build FAISS index
+    def __init__(self) -> None:
+        # No heavy initialisation needed; FAISS objects are cheap to create.
+        pass
+
+    def solve(self, problem: Dict[str, Any]) -> Dict[str, Any]:
+        # Convert points and queries to float32 arrays only once
+        points = problem["points"]
+        queries = problem["queries"]
+        k = int(problem["k"])
+        points_f32 = np.asarray(points, dtype=np.float32)
+        queries_f32 = np.asarray(queries, dtype=np.float32)
+        n_points, dim = points_f32.shape
+
+        # Build a flat L2 index and map ids
         index = faiss.IndexFlatL2(dim)
         index = faiss.IndexIDMap(index)
-        ids = np.arange(len(points), dtype=np.int64)
-        index.add_with_ids(points, ids)
+        index.add_with_ids(points_f32, np.arange(n_points, dtype=np.int64))
 
-        # Main search
-        dists, idxs = index.search(queries, k)
+        # Ensure k does not exceed available points
+        k = min(k, n_points)
 
-        # Prepare result
-        solution = {"indices": [idxs.flatten().tolist()][:k], "distances": dists.tolist()}
+        # Main search: return distances and indices
+        dists, idxs = index.search(queries_f32, k)
 
-        # Boundary queries if needed
+        result: Dict[str, Any] = {
+            "indices": idxs.tolist(),
+            "distances": dists.tolist(),
+        }
+
+        # Optional boundary queries for hypercube_shell distribution
         if problem.get("distribution") == "hypercube_shell":
-            # Construct all boundary queries in one go
-            bqs = []
-            for d in range(dim):
-                q0 = np.zeros(dim, dtype=np.float32)
-                q1 = np.ones(dim, dtype=np.float32)
-                q0[d] = 0.0
-                q1[d] = 1.0
-                bqs.append(q0)
-                bqs.append(q1)
-            bqs = np.stack(bqs, axis=0)
-            bd, bi = index.search(bqs, k)
-            solution["boundary_distances"] = bd.tolist()
-            solution["boundary_indices"] = bi.tolist()
+            # Create all boundary query vectors in a single array
+            # Each dimension contributes two queries: all 0's and all 1's
+            base_vectors = np.ones((dim, dim), dtype=np.float32)
 
-        return solution
+            # 0 vector for each dimension (explicit)
+            zeros_vec = np.zeros((dim, dim), dtype=np.float32)
+
+            # Flip the d-th coordinate to 0 for each query
+            for d in range(dim):
+                zeros_vec[d, d] = 0.0
+
+            # Stack them: [q0_0, q1_0, q0_1, q1_1, ...]
+            boundary_qs = np.vstack([zeros_vec, base_vectors])
+
+            b_dist, b_idx = index.search(boundary_qs, k)
+            result["boundary_distances"] = b_dist.tolist()
+            result["boundary_indices"] = b_idx.tolist()
+
+        return result

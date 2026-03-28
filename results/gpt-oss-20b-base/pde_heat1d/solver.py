@@ -1,42 +1,53 @@
 from typing import Any
 import numpy as np
-from scipy.integrate import solve_ivp
 
 class Solver:
-    def solve(self, problem: dict[str, np.ndarray | float]) -> dict[str, list[float]]:
-        sol = self._solve(problem, debug=False)
-        if sol.success:
-            return sol.y[:, -1].tolist()
-        raise RuntimeError(f"Solver failed: {sol.message}")
+    """
+    A fast, deterministic solver for the 1‑D heat equation with homogeneous Dirichlet
+    boundary conditions.  The implementation uses a fully vectorised explicit
+    Euler scheme and does *not* call `scipy.integrate.solve_ivp`, which is a
+    significant source of overhead for stiff problems.  The time step is chosen
+    automatically to respect the Courant‑Friedrichs‑Lewy (CFL) condition for
+    stability:
+            dt <= dx**2 / (2 * alpha)
+    The solver returns the state at time `t1`, matching the interface of
+    `solve_ivp` when `dense_output=True` (i.e. the last time point in the
+    integration).
+    """
 
-    # -------------------------------------------------------------
-    def _solve(self, problem: dict[str, np.ndarray | float], debug: bool = True) -> Any:
-        # Extract data once for speed
+    def solve(self, problem: dict[str, np.ndarray | float]) -> dict[str, list[float]]:
+        """Return the state of the PDE at the final time."""
+        sol = self._solve(problem, debug=False)
+        return sol
+
+    def _solve(self, problem: dict[str, np.ndarray | float], debug=True) -> Any:
+        # Extract problem parameters
         y0 = np.asarray(problem["y0"], dtype=np.float64)
         t0, t1 = problem["t0"], problem["t1"]
         params = problem["params"]
-        alpha, dx = params["alpha"], params["dx"]
 
-        # Pre‑allocate padded array structure to avoid reallocating in each step
-        m = y0.size
-        padded = np.empty(m + 2, dtype=np.float64)
+        alpha = float(params["alpha"])
+        dx = float(params["dx"])
 
-        def heat_eq(t: float, u: np.ndarray) -> np.ndarray:
-            # Apply fixed Dirichlet BCs (u[0] = u[-1] = 0) via padding
-            padded[0], padded[1:-1], padded[-1] = 0.0, u, 0.0
-            u_xx = (padded[2:] - 2 * padded[1:-1] + padded[:-2]) / (dx * dx)
-            return alpha * u_xx
+        # Choose time step according to the CFL condition.
+        dt = dx**2 / (2 * alpha)  # stability limit for explicit Euler
+        n_steps = int(np.ceil((t1 - t0) / dt))
+        dt = (t1 - t0) / n_steps  # adjust to reach t1 exactly
 
-        rtol, atol = 1e-6, 1e-6
-        method = "RK45"
-        t_eval = np.linspace(t0, t1, 1000) if debug else None
-        return solve_ivp(
-            heat_eq,
-            (t0, t1),
-            y0,
-            method=method,
-            rtol=rtol,
-            atol=atol,
-            t_eval=t_eval,
-            dense_output=debug,
-        )
+        # Pad the field once, then update the interior each step.
+        u = np.empty_like(y0)
+        for step in range(n_steps):
+            # Forward Euler update for interior points
+            u[1:-1] = (
+                y0[1:-1]
+                - alpha * dt / dx**2
+                * (y0[2:] - 2 * y0[1:-1] + y0[:-2])
+                + 0.0  # boundary terms are zero due to Dirichlet conditions
+            )
+            # Update boundaries (homogeneous Dirichlet: zero)
+            u[0] = 0.0
+            u[-1] = 0.0
+            y0[:] = u  # prepare for next step
+
+        # Return the final state as a list just like the original interface
+        return {"y": y0.tolist()}

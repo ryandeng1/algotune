@@ -1,97 +1,55 @@
 import numpy as np
 from ortools.sat.python import cp_model
+from typing import List, Tuple
 
-def solver(problem: np.ndarray) -> list[tuple[int, int]]:
-    """
-    Solve the maximum independent set on the chessboard graph where edges connect
-    two cells on the same row, column or diagonal without an obstacle between them.
 
-    Parameters
-    ----------
-    problem : np.ndarray
-        Boolean grid: 0 for empty, 1 for obstacle.
+def _queen_reach(instance: np.ndarray, r: int, c: int) -> List[Tuple[int, int]]:
+    """Return all empty cells reachable from (r, c) in all 8 directions."""
+    n, m = instance.shape
+    cells = []
+    for dr, dc in ((-1, -1), (-1, 0), (-1, 1),
+                   (0, -1),          (0, 1),
+                   (1, -1),  (1, 0), (1, 1)):
+        nr, nc = r + dr, c + dc
+        while 0 <= nr < n and 0 <= nc < m:
+            if instance[nr, nc]:
+                break
+            cells.append((nr, nc))
+            nr += dr
+            nc += dc
+    return cells
 
-    Returns
-    -------
-    list[tuple[int, int]]
-        Positions of queens in an optimal placement.
-    """
-    n, m = problem.shape
-    model = cp_model.CpModel()
 
-    # Boolean variables for each cell
-    queens = [[model.NewBoolVar(f'q_{r}_{c}') for c in range(m)] for r in range(n)]
+class Solver:
+    def solve(self, problem: np.ndarray) -> List[Tuple[int, int]]:
+        """
+        Solve the Queens with Obstacles Problem. The board is represented as a 2-D numpy
+        boolean array where `True` indicates an obstacle.  The function returns a list of
+        coordinates where queens can be placed such that no queen can attack another.
+        """
+        # Pre‑filter empty cells and compute reachable sets
+        n, m = problem.shape
+        empty_cells = [(r, c) for r in range(n) for c in range(m) if not problem[r, c]]
+        reach_map = {cell: _queen_reach(problem, *cell) for cell in empty_cells}
 
-    # Impose zero on obstacle cells
-    for r in range(n):
-        for c in range(m):
-            if problem[r, c]:
-                model.Add(queens[r][c] == 0)
+        model = cp_model.CpModel()
+        # Create a variable for each empty cell
+        var = {(r, c): model.NewBoolVar(f'q_{r}_{c}') for r, c in empty_cells}
 
-    # Helper to add "at most one" constraints along segments
-    def add_at_most_one(indices):
-        if indices:
-            vars_ = [queens[i] for i in indices]
-            model.Add(sum(vars_) <= 1)
+        # For every queen variable, ensure that no other queen lies in its reach area
+        for (r, c), reach in reach_map.items():
+            if reach:
+                model.Add(sum(var[pos] for pos in reach) == 0).OnlyEnforceIf(var[(r, c)])
 
-    # Rows
-    for r in range(n):
-        seg = []
-        for c in range(m):
-            if problem[r, c]:
-                add_at_most_one(seg)
-                seg = []
-            else:
-                seg.append((r, c))
-        add_at_most_one(seg)
+        # Objective: maximize number of placed queens
+        model.Maximize(sum(var.values()))
 
-    # Columns
-    for c in range(m):
-        seg = []
-        for r in range(n):
-            if problem[r, c]:
-                add_at_most_one(seg)
-                seg = []
-            else:
-                seg.append((r, c))
-        add_at_most_one(seg)
+        solver = cp_model.CpSolver()
+        # Small speed improvements
+        solver.parameters.search_branching = cp_model.BREADTH_FIRST_SEARCH
+        solver.parameters.rational_processing = True
 
-    # Diagonals (top-left to bottom-right)
-    for k in range(-n + 1, m):
-        seg = []
-        for r in range(n):
-            c = r + k
-            if 0 <= c < m:
-                if problem[r, c]:
-                    add_at_most_one(seg)
-                    seg = []
-                else:
-                    seg.append((r, c))
-        add_at_most_one(seg)
-
-    # Anti-diagonals (top-right to bottom-left)
-    for k in range(n + m - 1):
-        seg = []
-        for r in range(n):
-            c = k - r
-            if 0 <= c < m:
-                if problem[r, c]:
-                    add_at_most_one(seg)
-                    seg = []
-                else:
-                    seg.append((r, c))
-        add_at_most_one(seg)
-
-    # Objective: maximize number of queens
-    model.Maximize(sum(queens[r][c] for r in range(n) for c in range(m)))
-
-    # Solve
-    solver = cp_model.CpSolver()
-    solver.parameters.max_time_in_seconds = 30.0
-    status = solver.Solve(model)
-
-    if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-        return [(r, c) for r in range(n) for c in range(m) if solver.Value(queens[r][c])]
-    return []
-
-# Example usage:  solve(np.array([[0,0,1],[0,0,0],[1,0,0]]))
+        status = solver.Solve(model)
+        if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+            return [(r, c) for (r, c), v in var.items() if solver.Value(v)]
+        return []

@@ -1,11 +1,16 @@
 import numpy as np
+from numpy.typing import NDArray
 
 class Solver:
-    def solve(self, problem: np.ndarray) -> list[float]:
+    def solve(self, problem: NDArray) -> list[float]:
         """
-        Return eigenvalues of a symmetric matrix in descending order.
+        Solve the eigenvalues problem for the given symmetric matrix.
+        The solution returned is a list of eigenvalues in descending order.
+
+        :param problem: A symmetric numpy matrix.
+        :return: List of eigenvalues in descending order.
         """
-        # eigvalsh returns sorted ascending eigenvalues for Hermitian matrices
-        vals = np.linalg.eigvalsh(problem)
-        # reverse to descending order
-        return vals[::-1].tolist()
+        # eigvalsh is faster than eigh when only eigenvalues are needed
+        ev = np.linalg.eigvalsh(problem)   # ascending order
+        # reverse for descending order
+        return ev[::-1].tolist()

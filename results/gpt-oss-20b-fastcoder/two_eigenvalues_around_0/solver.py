@@ -1,26 +1,29 @@
-from typing import List, Dict
+from typing import Any
 import numpy as np
 
 class Solver:
-
-    def solve(self, problem: Dict[str, List[List[float]]]) -> List[float]:
+    def solve(self, problem: dict[str, list[list[float]]]) -> list[float]:
         """
         Find the two eigenvalues of a symmetric matrix that are closest to zero.
-        The function is optimized to avoid Python‑level sorting and to use
-        NumPy's efficient C‑level routines.
+
+        The implementation uses NumPy's efficient eigenvalue routine for Hermitian matrices
+        and a two‑step partial sort (np.partition) to avoid sorting the entire array,
+        which gives a noticeable speed gain for large matrices.
         """
-        # Convert to a NumPy array (memory‑efficient; dtype=float already)
-        matrix = np.asarray(problem['matrix'], dtype=float)
+        # Convert input matrix to a NumPy array of type float
+        mat = np.array(problem['matrix'], dtype=float, copy=False)
 
-        # Compute all eigenvalues of the symmetric matrix (fast on CPU)
-        eig_vals = np.linalg.eigvalsh(matrix)
+        # Compute all eigenvalues of a symmetric matrix (Hermitian)
+        eigs = np.linalg.eigvalsh(mat)
 
-        # Find indices of the two eigenvalues with smallest absolute value
-        # Using np.argpartition gives order‑independent access in O(n)
-        abs_vals = np.abs(eig_vals)
-        idx = np.argpartition(abs_vals, 2)[:2]
-
-        # Extract them and sort by absolute value for deterministic output
-        result = eig_vals[idx]
-        result.sort(key=lambda x: abs(x))
-        return result.tolist()
+        # Find indices of the two eigenvalues with the smallest absolute value
+        # using a partial sort: np.partition partially sorts the array so that
+        # the first `k` elements are the smallest `k` (though not sorted themselves).
+        k = 2
+        abs_eigs = np.abs(eigs)
+        indices = np.argpartition(abs_eigs, k-1)[:k]
+        # Extract the selected eigenvalues
+        selected = eigs[indices]
+        # Sort them by absolute value to meet the specification
+        selected_sorted = sorted(selected, key=abs)
+        return selected_sorted

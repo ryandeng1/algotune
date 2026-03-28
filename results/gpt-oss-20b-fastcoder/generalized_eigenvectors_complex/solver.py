@@ -1,40 +1,29 @@
-from typing import Any
 import numpy as np
-import scipy.linalg as la
+from scipy.linalg import eig
 from numpy.typing import NDArray
 
 class Solver:
     def solve(self, problem: tuple[NDArray, NDArray]) -> tuple[list[complex], list[list[complex]]]:
-        """
-        Solve the generalized eigenvalue problem A · x = λ B · x
-        and return sorted eigenvalues together with corresponding unit-norm eigenvectors.
-        """
         A, B = problem
-
-        # Scale both matrices to reduce numerical problems
-        scale = np.sqrt(np.linalg.norm(B))
+        # scale both matrices by the square root of ||B||₂ for numerical stability
+        scale = np.sqrt(np.linalg.norm(B, ord=2))
         A_scaled = A / scale
         B_scaled = B / scale
 
-        # Compute eigenpairs (A_over_B)
-        eigvals, eigvecs = la.eig(A_scaled, B_scaled)
+        # solve generalized eigenproblem
+        eigvals, eigvecs = eig(A_scaled, B_scaled, left=False, right=True, check_finite=False)
 
-        # Normalise eigenvectors to unit Euclidean norm
+        # normalize eigenvectors to unit norm
         norms = np.linalg.norm(eigvecs, axis=0)
-        # Avoid divide-by-zero (unlikely for legitimate problems)
-        mask = norms > 1e-15
-        eigvecs[:, mask] = eigvecs[:, mask] / norms[mask]
+        nonzero = norms > 1e-15
+        eigvecs[:, nonzero] /= norms[nonzero]
 
-        # Sort by real part, then imaginary part, descending
-        order = np.argsort(
-            np.lexsort((-eigvals.imag, -eigvals.real)),
-            kind="quicksort",
-        )
+        # sort by real part descending, then imag part descending
+        order = np.lexsort((-eigvals.imag, -eigvals.real))
         eigvals = eigvals[order]
         eigvecs = eigvecs[:, order]
 
-        # Convert to python lists
-        eigvals_list = [complex(v) for v in eigvals]
-        eigvecs_list = [list(row) for row in eigvecs.T]
-
-        return eigvals_list, eigvecs_list
+        # convert to lists
+        eigval_list = eigvals.tolist()
+        eigvec_list = [vec.tolist() for vec in eigvecs.T]
+        return eigval_list, eigvec_list

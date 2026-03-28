@@ -1,14 +1,17 @@
 from typing import NamedTuple, List
 
+
 class Rectangle(NamedTuple):
     width: int
     height: int
     rotatable: bool
 
+
 class Instance(NamedTuple):
     container_width: int
     container_height: int
     rectangles: List[Rectangle]
+
 
 class RectanglePlacement(NamedTuple):
     i: int
@@ -16,42 +19,74 @@ class RectanglePlacement(NamedTuple):
     y: int
     rotated: bool
 
+
 class Solver:
-    def solve(self, problem: Instance) -> List[RectanglePlacement]:
-        # Simple first‑fit greedy placement: place each rectangle at the next available
-        # top‑left position, rotating if allowed and fits better.
-        placements: List[RectanglePlacement] = []
-        used = []
-        for idx, rect in enumerate(problem.rectangles):
-            best_pos = None
-            best_rot = False
-            for y in range(problem.container_height - min(rect.height, rect.width) + 1):
-                for x in range(problem.container_width - min(rect.width, rect.height) + 1):
-                    # Test rotation
-                    for rot in (False, True) if rect.rotatable else (False,):
-                        w, h = (rect.width, rect.height) if not rot else (rect.height, rect.width)
-                        if x + w > problem.container_width or y + h > problem.container_height:
-                            continue
-                        # Check collision
-                        collision = False
-                        for ux, uy, w2, h2, _ in used:
-                            if not (x + w <= ux or ux + w2 <= x or y + h <= uy or uy + h2 <= y):
-                                collision = True
-                                break
-                        if not collision:
-                            best_pos = (x, y)
-                            best_rot = rot
-                            break
-                if best_pos is not None:
-                    break
-            if best_pos:
-                x, y = best_pos
-                w, h = (rect.width, rect.height) if not best_rot else (rect.height, rect.width)
-                placements.append(RectanglePlacement(idx, x, y, best_rot))
-                used.append((x, y, w, h, rect.rotatable))
-        return placements
+    """Fast heuristic solver: first‑fit with optional rotation."""
 
     def _typesafe_instance(self, instance):
         if isinstance(instance, Instance):
             return instance
-        return Instance(instance[0], instance[1], [Rectangle(*r) for r in instance[2]])
+        return Instance(instance[0], instance[1],
+                         [Rectangle(*r) for r in instance[2]])
+
+    def solve(self, problem: Instance) -> List[RectanglePlacement]:
+        problem = self._typesafe_instance(problem)
+        w0, h0 = problem.container_width, problem.container_height
+        rects = problem.rectangles
+
+        # sort by area descending to pack bigger first
+        order = sorted(range(len(rects)),
+                       key=lambda i: rects[i].width * rects[i].height,
+                       reverse=True)
+
+        # current skyline: list of (x, y, width)
+        skyline = [(0, 0, w0)]
+        placed = []
+
+        for idx in order:
+            rect = rects[idx]
+            best = None
+            best_size = None
+
+            # try both orientations
+            for rot in (False, True) if rect.rotatable else (False,):
+                rw, rh = (rect.height, rect.width) if rot else (rect.width, rect.height)
+                for seg_idx, (sx, sy, sw) in enumerate(skyline):
+                    if rw <= sw:
+                        # place at sx, sy
+                        new_y = sy
+                        # ensure rectangle height fits in container
+                        if new_y + rh > h0:
+                            continue
+                        size = rw * rh
+                        if best is None or size > best_size:
+                            best = (seg_idx, sx, new_y, rw, rh, rot)
+                            best_size = size
+
+            if best:
+                seg_idx, cx, cy, rw, rh, rot = best
+                # update skyline: split segment
+                seg_x, seg_y, seg_w = skyline[seg_idx]
+                before = skyline[:seg_idx]
+                after = skyline[seg_idx + 1:]
+                skyline = before
+                if seg_w > rw:
+                    skyline.append((seg_x + rw, seg_y, seg_w - rw))
+                skyline += after
+                # merge adjacent same y
+                merged = []
+                for x, y, w in skyline:
+                    if merged and merged[-1][1] == y and merged[-1][2] == w:
+                        merged[-1] = (merged[-1][0], merged[-1][1], merged[-1][2] + w)
+                    else:
+                        merged.append((x, y, w))
+                skyline = merged
+                placed.append(RectanglePlacement(idx, cx, cy, rot))
+                # update vertical position of skyline segments that overlap placed rect
+                for i, (x, y, w) in enumerate(skyline):
+                    if x < cx + rw <= x + w:
+                        skyline[i] = (x, cy + rh, w)
+                # re‑sort skyline by x to keep order
+                skyline.sort()
+
+        return placed

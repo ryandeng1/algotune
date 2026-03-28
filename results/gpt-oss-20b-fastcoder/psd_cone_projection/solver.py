@@ -1,18 +1,31 @@
-from typing import Any, Dict
 import numpy as np
+from typing import Any, Dict
 
 class Solver:
     def solve(self, problem: Dict[str, np.ndarray]) -> Dict[str, Any]:
         """
-        Project a symmetric matrix onto the positive semidefinite cone by
-        clamping negative eigenvalues to zero.
+        Project a symmetric matrix onto the Positive Semidefinite cone.
+
+        Parameters
+        ----------
+        problem : dict
+            Must contain key 'A' : symmetric matrix (n×n).
+
+        Returns
+        -------
+        dict
+            Contains key 'X' : the PSD projection of 'A'.
         """
-        A = np.asarray(problem["A"], dtype=float)
-        # Since A is symmetric, use eigh for better performance and stability.
+        # View the matrix as a float64 NumPy array (no copy if already correct)
+        A = np.asarray(problem["A"], dtype=np.float64, order="C")
+
+        # Symmetry is assumed; use eigh for efficiency on symmetric matrices
         eigvals, eigvecs = np.linalg.eigh(A)
-        # Clamp negative eigenvalues to zero.
-        eigvals = np.clip(eigvals, 0, None)
-        # Reconstruct the projected matrix without forming a diagonal matrix.
-        # (eigvecs @ (eigvecs.T * eigvals)) is equivalent to V @ diag(eigvals) @ V.T
-        X = eigvecs @ (eigvecs.T * eigvals)
+
+        # Threshold eigenvalues to non‑negative
+        eigvals.clip(min=0, out=eigvals)
+
+        # Reconstruct the PSD matrix: X = V * diag(eigvals) * V^T
+        # Use broadcasting to avoid forming an explicit diagonal matrix
+        X = (eigvecs * eigvals) @ eigvecs.T
         return {"X": X}

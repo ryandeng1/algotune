@@ -1,36 +1,36 @@
 from typing import Any
+import numpy as np
+import numba as nb
 
 class Solver:
-    def solve(self, problem: dict[str, Any]) -> dict[str, list]:
-        y = problem["y"]
-        # Ensure a 1‑D NumPy array for vectorised operations
-        y_arr = (y if isinstance(y, (list, tuple)) else y).copy()
-        if not hasattr(y_arr, "__len__"):
-            y_arr = [y_arr]
 
-        y_arr = y_arr if isinstance(y_arr, list) else y_arr.tolist()
-        n = len(y_arr)
-
-        # Fast projection onto the probability simplex
-        # 1. Sort in descending order
-        # 2. Find the largest k such that y_sorted[k] > (sum(y_sorted[:k+1]) - 1) / (k+1)
-        # 3. Compute theta and project
-        import numpy as np
-        y_np = np.array(y_arr, dtype=float)
-        # descending sort
-        idx = np.argsort(-y_np)
-        y_sorted = y_np[idx]
-        # cumulative sum offset by -1
+    @staticmethod
+    @nb.njit
+    def _project(y: np.ndarray) -> np.ndarray:
+        """
+        Fast Euclidean projection onto the probability simplex.
+        Implementation follows the algorithm from the paper
+        https://arxiv.org/pdf/1309.1541.
+        """
+        n = y.size
+        # Sort in descending order
+        y_sorted = np.sort(y)[::-1]
+        # Compute cumulative sums
         cumsum = np.cumsum(y_sorted) - 1.0
-        # create divisor array
-        div = np.arange(1, n + 1, dtype=float)
-        # boolean mask where condition holds
-        mask = y_sorted > cumsum / div
-        # last true index
-        rho = mask.argmax() if not mask.all() else n - 1
-        # compute theta
-        theta = cumsum[rho] / (rho + 1.0)
-        # projection
-        proj = y_np - theta
-        proj[proj < 0] = 0.0
-        return {"solution": proj.tolist()}
+        # Find rho: largest i such that y_sorted[i] > cumsum[i]/(i+1)
+        rho = 0
+        for i in range(n):
+            if y_sorted[i] > cumsum[i] / (i + 1):
+                rho = i
+        theta = cumsum[rho] / (rho + 1)
+        # Compute projection
+        x = np.empty(n, dtype=y.dtype)
+        for i in range(n):
+            xi = y[i] - theta
+            x[i] = xi if xi > 0 else 0.0
+        return x
+
+    def solve(self, problem: dict[str, Any]) -> dict[str, list]:
+        y = np.asarray(problem.get('y')).flatten()
+        x = self._project(y)
+        return {'solution': x.tolist()}

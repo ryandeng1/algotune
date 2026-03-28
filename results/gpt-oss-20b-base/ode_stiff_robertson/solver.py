@@ -1,49 +1,52 @@
-from typing import Any, List, Dict
+from typing import Any
 import numpy as np
+from scipy.integrate import solve_ivp
+from numba import njit
 
 class Solver:
-    def solve(self, problem: Dict[str, Any]) -> Dict[str, List[float]]:
+    @staticmethod
+    @njit(nopython=True)
+    def _rober_ro(t, y, k1, k2, k3):
+        y1, y2, y3 = y[0], y[1], y[2]
+        f0 = -k1 * y1 + k3 * y2 * y3
+        f1 = k1 * y1 - k2 * y2 * y2 - k3 * y2 * y3
+        f2 = k2 * y2 * y2
+        return np.array([f0, f1, f2])
+
+    def solve(self, problem: dict[str, np.ndarray | float]) -> dict[str, list[float]]:
         sol = self._solve(problem, debug=False)
         if sol.success:
-            # return the last state as a plain list of floats
-            return {'x0': sol.y[0, -1], 'x1': sol.y[1, -1], 'x2': sol.y[2, -1]}
-        else:
-            raise RuntimeError(f'Solver failed: {sol.message}')
+            return sol.y[:, -1].tolist()
+        raise RuntimeError(f'Solver failed: {sol.message}')
 
-    def _solve(self, problem: Dict[str, Any], debug: bool = True) -> Any:
-        y0 = np.array(problem['y0'], dtype=float, copy=False)
+    def _solve(self, problem: dict[str, np.ndarray | float], debug=True) -> Any:
+        y0 = np.array(problem['y0'], dtype=np.float64)
         t0, t1 = float(problem['t0']), float(problem['t1'])
-        k_vals = tuple(float(k) for k in problem['k'])
-        k1, k2, k3 = k_vals
+        k = tuple(problem['k'])
+        k1, k2, k3 = k[0], k[1], k[2]
 
-        # Simple explicit RK4 integrator (1000 steps)
-        N = 1000
-        h = (t1 - t0) / N
+        def rober_scalar(t, y):
+            return self._rober_ro(t, y, k1, k2, k3)
 
-        y = y0.copy()
-
-        def f(t, y):
-            y1, y2, y3 = y
-            return (
-                -k1 * y1 + k3 * y2 * y3,
-                k1 * y1 - k2 * y2 ** 2 - k3 * y2 * y3,
-                k2 * y2 ** 2,
+        rtol = 1e-11
+        atol = 1e-9
+        method = 'Radau'
+        if debug:
+            t_eval = np.clip(
+                np.exp(np.linspace(np.log(1e-6), np.log(t1), 1000)),
+                t0, t1
             )
+        else:
+            t_eval = None
 
-        for _ in range(N):
-            k1_vec = f(t0, y)
-            k2_vec = f(t0 + 0.5 * h, y + 0.5 * h * np.array(k1_vec))
-            k3_vec = f(t0 + 0.5 * h, y + 0.5 * h * np.array(k2_vec))
-            k4_vec = f(t0 + h, y + h * np.array(k3_vec))
-            y += (h / 6.0) * (np.array(k1_vec) + 2 * np.array(k2_vec) +
-                               2 * np.array(k3_vec) + np.array(k4_vec))
-            t0 += h
-
-        # Build a mock result object to stay compatible with the original interface
-        class Result:
-            def __init__(self, y):
-                self.y = y
-                self.success = True
-                self.message = ""
-
-        return Result(y.reshape(3, 1))
+        sol = solve_ivp(
+            rober_scalar,
+            [t0, t1],
+            y0,
+            method=method,
+            rtol=rtol,
+            atol=atol,
+            t_eval=t_eval,
+            dense_output=debug
+        )
+        return sol

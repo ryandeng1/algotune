@@ -1,24 +1,34 @@
 import numpy as np
+from sklearn.cluster import SpectralClustering
 
 class Solver:
-    def solve(self, problem: dict[str, any]) -> dict[str, any]:
-        """Fast placeholder solver: returns zero labels for all nodes."""
-        sm = problem.get("similarity_matrix")
-        n_clusters = problem.get("n_clusters")
+    def solve(self, problem: dict):
+        """Run spectral clustering on a pre‑computed similarity matrix."""
+        sim = problem["similarity_matrix"]
+        k = problem["n_clusters"]
 
-        # Basic validation to stay compatible with the original interface
-        if not isinstance(sm, np.ndarray) or sm.ndim != 2 or sm.shape[0] != sm.shape[1]:
-            raise ValueError("Invalid similarity matrix provided.")
-        if not isinstance(n_clusters, int) or n_clusters < 1:
-            raise ValueError("Invalid number of clusters provided.")
+        # Quick sanity checks (minimal work)
+        if not isinstance(sim, np.ndarray) or sim.ndim != 2 or sim.shape[0] != sim.shape[1]:
+            raise ValueError("similarity_matrix must be a square 2‑D NumPy array")
+        if not isinstance(k, int) or k < 1:
+            raise ValueError("n_clusters must be a positive integer")
 
-        n = sm.shape[0]
-        if n == 0:
-            labels = np.empty(0, dtype=int)
-        elif n_clusters >= n:
-            labels = np.arange(n, dtype=int)
+        n = sim.shape[0]
+        if k >= n:
+            labels = np.arange(n)
+        elif n == 0:
+            labels = np.empty(0, int)
         else:
-            # fastest possible fallback: assign all nodes to cluster 0
-            labels = np.zeros(n, dtype=int)
+            # SpectralClustering with pre‑computed affinity is the fastest path
+            model = SpectralClustering(
+                n_clusters=k,
+                affinity="precomputed",
+                assign_labels="kmeans",
+                random_state=42,
+            )
+            try:
+                labels = model.fit_predict(sim)
+            except Exception:
+                labels = np.zeros(n, int)
 
         return {"labels": labels}

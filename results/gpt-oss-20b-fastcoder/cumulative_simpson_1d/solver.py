@@ -1,40 +1,34 @@
 import numpy as np
 from numpy.typing import NDArray
-from typing import Any
 
 class Solver:
+    """
+    Optimised solver for the cumulative Simpson integral.
+    """
+
     def solve(self, problem: dict) -> NDArray:
-        """
-        Compute the cumulative integral of the 1D array using Simpson's rule in a
-        fully vectorised, self‑contained implementation.  It avoids the overhead
-        of calling the scipy function and works with any 1‑D numeric array
-        (int, float, complex, etc.).
-        """
-        y: NDArray = np.asarray(problem["y"])
-        dx: float = float(problem.get("dx", 1.0))
+        y: NDArray[np.float64] = problem["y"].astype(np.float64, copy=False)
+        dx = float(problem["dx"])
 
         n = y.size
         if n < 2:
-            return np.full_like(y, np.nan)
+            return np.zeros_like(y)
 
-        # Build the weight pattern for Simpson: 1 4 2 4 2 ... 4 1
-        # For odd n the last weight is 1, for even n the last weight is 4.
-        # Duplicate the pattern to match the length, trimming to exact size.
-        base = np.array([1, 4, 2], dtype=y.dtype)
-        full = []
-        i = 0
-        while len(full) < n:
-            if i == 0:
-                full.append(base[0])
-            elif i == n - 1:
-                full.append(base[0]) if (n % 2 == 1) else full.append(base[1])
-                break
-            else:
-                full.append(base[1 if (i % 2) else 2])
-            i += 1
-        weights = np.array(full, dtype=y.dtype)
+        # Pre‑allocate result array
+        result = np.empty(n, dtype=np.float64)
 
-        # Weighted cumulative sum and scaling
-        cum = np.cumsum(y * weights) * (dx / 3.0)
+        # Simpson's constants for cumulative sum
+        w = np.empty(n, dtype=np.float64)
+        w[0] = 1.0                 # first point weight
+        if n > 1:
+            # interior points
+            w[1:n - 1] = np.where(
+                np.arange(1, n - 1) % 2, 4.0, 2.0
+            )
+            w[-1] = 1.0                # last point weight
 
-        return cum
+        # Cumulative sum of weighted y
+        cumw = np.cumsum(w * y)
+        result = dx / 3.0 * cumw
+
+        return result

@@ -4,16 +4,16 @@ CHACHA_KEY_SIZE = 32
 POLY1305_TAG_SIZE = 16
 
 class Solver:
-    def solve(self, problem: dict) -> dict:
-        key = problem["key"]
-        nonce = problem["nonce"]
-        plaintext = problem["plaintext"]
-        ad = problem["associated_data"]
+    def solve(self, problem: dict[str, bytes]) -> dict[str, bytes]:
+        key = problem['key']
+        nonce = problem['nonce']
+        plaintext = problem['plaintext']
+        associated_data = problem['associated_data']
 
-        # no error handling for speed
         chacha = ChaCha20Poly1305(key)
-        ct_tag = chacha.encrypt(nonce, plaintext, ad)
+        ct = chacha.encrypt(nonce, plaintext, associated_data)
+
         return {
-            "ciphertext": ct_tag[:-POLY1305_TAG_SIZE],
-            "tag": ct_tag[-POLY1305_TAG_SIZE:],
+            'ciphertext': ct[:-POLY1305_TAG_SIZE],
+            'tag': ct[-POLY1305_TAG_SIZE:]
         }

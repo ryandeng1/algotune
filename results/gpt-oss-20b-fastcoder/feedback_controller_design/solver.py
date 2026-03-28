@@ -1,53 +1,36 @@
+from typing import Any
 import numpy as np
-import cvxpy as cp
+import scipy.linalg as la
 
-# --------------------------------------------------------------------
-# The solver below is deliberately simple: it sets up a small SDP
-# that only uses the CVXPY bmat helper and the fast SCS solver.
-# --------------------------------------------------------------------
-def solve(problem: dict) -> dict:
-    """
-    Solves a linear-quadratic regulator (LQR) style SDP for feedback gain K
-    and Lyapunov matrix P.
-    """
-    # ----- 1. Prepare data ------------------------------------------------
-    A = np.asarray(problem["A"])
-    B = np.asarray(problem["B"])
-    n, m = A.shape[0], B.shape[1]
+class Solver:
+    def solve(self, problem: dict[str, Any]) -> dict[str, Any]:
+        """
+        Computes a stabilizing feedback gain K and the Lyapunov matrix P for the
+        continuous‑time pair (A,B) using the LQR solution with Q=I, R=I.
+        """
+        A = np.atleast_2d(np.asarray(problem['A'], dtype=float))
+        B = np.atleast_2d(np.asarray(problem['B'], dtype=float))
+        n = A.shape[0]
+        m = B.shape[1]
 
-    # ----- 2. Declare CVXPY variables ------------------------------------
-    Q = cp.Variable((n, n), PSD=True)   # PD ensures constraint is positive definite
-    L = cp.Variable((m, n))
+        # Check controllability rank
+        ctrl_mat = B
+        for i in range(1, n):
+            ctrl_mat = np.concatenate((ctrl_mat, np.linalg.matrix_power(A, i) @ B), axis=1)
+        if np.linalg.matrix_rank(ctrl_mat) < n:
+            return {'is_stabilizable': False, 'K': None, 'P': None}
 
-    # ----- 3. Constraints -------------------------------------------------
-    # Block-matrix inequality: [ Q,  Q Aᵀ + Lᵀ Bᵀ ;
-    #                            A Q + B L,  Q ]  >> I_{2n}
-    blk = cp.bmat([[Q, Q @ A.T + L.T @ B.T],
-                   [A @ Q + B @ L,     Q]])
-    constraints = [blk >> np.eye(2 * n),   # block LMI
-                   Q >> np.eye(n)]        # ensure Q is bounded away from singular
+        # Solve Continuous Algebraic Riccati Equation with Q=I, R=I
+        try:
+            P = la.solve_continuous_are(A, B, np.eye(n), np.eye(m))
+        except la.LinAlgError:
+            return {'is_stabilizable': False, 'K': None, 'P': None}
 
-    # ----- 4. Problem definition -----------------------------------------
-    prob = cp.Problem(cp.Minimize(0), constraints)
+        # LQR optimal state feedback gain
+        K = np.linalg.inv(np.eye(m)) @ B.T @ P
 
-    # ----- 5. Solve ------------------------------------------------------
-    try:
-        prob.solve(solver=cp.SCS, verbose=False, eps=1e-6, max_iters=5000)
-    except Exception:
-        return {"is_stabilizable": False, "K": None, "P": None}
-
-    if prob.status not in ["optimal", "optimal_inaccurate"]:
-        return {"is_stabilizable": False, "K": None, "P": None}
-
-    # ----- 6. Post‑processing ---------------------------------------------
-    try:
-        Q_val = Q.value
-        L_val = L.value
-        P_mat = np.linalg.inv(Q_val)
-        K_mat = L_val @ P_mat
-    except Exception:
-        return {"is_stabilizable": False, "K": None, "P": None}
-
-    return {"is_stabilizable": True,
-            "K": K_mat.tolist(),
-            "P": P_mat.tolist()}
+        return {
+            'is_stabilizable': True,
+            'K': K.astype(float).tolist(),
+            'P': P.astype(float).tolist()
+        }

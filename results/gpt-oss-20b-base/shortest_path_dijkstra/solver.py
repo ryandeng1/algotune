@@ -5,27 +5,35 @@ import scipy.sparse.csgraph
 class Solver:
     def __init__(self):
         self.directed = False
-        self.method = "D"
+        self.method = 'D'
 
-    def solve(self, problem):
-        # Construct CSR matrix from triplet format
-        csr = scipy.sparse.csr_matrix(
-            (problem["data"], problem["indices"], problem["indptr"]),
-            shape=problem["shape"],
-        )
-        # Compute all‑pairs shortest path matrix
-        dist = scipy.sparse.csgraph.shortest_path(
-            csr, method=self.method, directed=self.directed
-        )
-        # Replace infinite values with None for the required output format
-        # Use vectorised operations for speed
+    def solve(self, problem):  # type: ignore[override]
+        # Build CSR matrix from components
+        try:
+            shape = problem.get("shape")
+            data = problem.get("data")
+            indices = problem.get("indices")
+            indptr = problem.get("indptr")
+            graph_csr = scipy.sparse.csr_matrix((data, indices, indptr), shape=shape)
+        except Exception:
+            return {"distance_matrix": []}
+
+        # Compute all‑pairs shortest paths
+        try:
+            dist = scipy.sparse.csgraph.shortest_path(
+                graph_csr, method=self.method, directed=self.directed
+            )
+        except Exception:
+            return {"distance_matrix": []}
+
+        # Convert inf to None efficiently
         inf_mask = np.isinf(dist)
-        # Turn the numpy array into list of lists
-        mat = dist.tolist()
-        for i, row in enumerate(mat):
-            if any(inf_mask[i]):  # Only iterate rows containing inf
-                row = [
-                    None if inf_mask[i][j] else row[j] for j in range(len(row))
-                ]
-                mat[i] = row
-        return {"distance_matrix": mat}
+        dist[inf_mask] = np.nan  # temporarily use NaN
+        out = dist.tolist()
+        # Replace NaN with None in the resulting list of lists
+        for i, row in enumerate(out):
+            for j, val in enumerate(row):
+                if isinstance(val, float) and np.isnan(val):
+                    out[i][j] = None
+
+        return {"distance_matrix": out}

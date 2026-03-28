@@ -1,34 +1,58 @@
 import numpy as np
-import cvxpy as cp
 
 class Solver:
-    def solve(self, problem: dict[str, any]) -> dict[str, list]:
+    def solve(self, problem: dict[str, list]) -> dict[str, list]:
         """
-        Solve the lp centering problem using CVXPY.
-
-        :param problem: A dictionary of the lp centering problem's parameters.
-        :return: A dictionary with key:
-                 "solution": a 1D list with n elements representing the solution to the lp centering problem.
+        Solve the lp centering problem:
+            minimize  cᵀx - Σ log(x)
+            subject to  A x = b ,  x > 0
+        using the KKT conditions and a Newton method for the
+        dual variables.  The method is purely NumPy based and
+        therefore significantly faster than a generic CVXPY call.
         """
-        # Convert inputs to numpy arrays (float64) for better performance
         c = np.asarray(problem["c"], dtype=np.float64)
         A = np.asarray(problem["A"], dtype=np.float64)
         b = np.asarray(problem["b"], dtype=np.float64)
 
-        n = c.size
-        x = cp.Variable(n)
+        m, n = A.shape
+        # initial dual variable (m-dim)
+        lam = np.zeros(m, dtype=np.float64)
 
-        # Objective: minimize linear term minus sum of logs (strictly concave)
-        objective = cp.Minimize(c @ x - cp.sum(cp.log(x)))
-        constraints = [A @ x == b]
-        prob = cp.Problem(objective, constraints)
+        # Newton iterations for λ
+        max_iter = 100
+        tol = 1e-10
+        for _ in range(max_iter):
+            # Compute denominators d_i = c_i - (Aᵀ λ)_i
+            A_T_lam = A.T @ lam
+            d = c - A_T_lam
+            # if any denominator <= 0, add small shift and break
+            if np.any(d <= 0):
+                d = np.maximum(d, 1e-12)
 
-        # Use a fast interior-point solver (Cerberus is efficient for this type of problem)
-        prob.solve(solver=cp.CERBERUS, verbose=False, eps_abs=1e-7, eps_rel=1e-7, max_iter=500)
+            # Current primal variables
+            x = 1.0 / d
 
-        # Standard CVXPY status check
-        if prob.status not in {"optimal", "optimal_inaccurate"}:
-            raise RuntimeError(f"Solver did not find optimal solution: {prob.status}")
+            # Residual g(λ) = A x - b
+            g = A @ x - b
+            if np.linalg.norm(g, ord=np.inf) < tol:
+                break
 
-        # Return solution as a plain Python list
-        return {"solution": x.value.tolist()}
+            # Jacobian J = -A * diag(d^{-2}) * Aᵀ
+            w = d ** -2
+            # Compute J * v efficiently: Jv = -A * (w * (Aᵀ v))
+            def Jv(v):
+                return -A @ (w * (A.T @ v))
+
+            # Solve linear system J * delta = g
+            # Using a simple linear solver via np.linalg.solve on J explicitly
+            # J is symmetric negative definite; we can use np.linalg.solve on dense matrix
+            J = -A @ np.diag(w) @ A.T
+            delta = np.linalg.solve(J, g)
+
+            lam -= delta
+
+        # Final primal solution
+        A_T_lam = A.T @ lam
+        d = c - A_T_lam
+        x = 1.0 / d
+        return {"solution": x.tolist()}

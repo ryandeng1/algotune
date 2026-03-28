@@ -1,32 +1,35 @@
+from typing import Dict, List
 import numpy as np
 import ot
 
 class Solver:
-    def solve(self, problem: dict[str, np.ndarray]) -> dict[str, list[list[float]]]:
+    """
+    EMD solver using the accelerated linear programming routine from POT.
+    """
+    def solve(self, problem: Dict[str, np.ndarray]) -> Dict[str, List[List[float]]]:
         """
-        Solve the EMD problem using ot.lp.emd.
-
         Parameters
         ----------
-        problem : dict[str, np.ndarray]
-            Dictionary with keys 'source_weights', 'target_weights',
-            and 'cost_matrix' containing NumPy arrays.
+        problem : dict
+            Dictionary containing:
+                * 'source_weights' : 1‑D array of shape (n, ) – weights of the source.
+                * 'target_weights' : 1‑D array of shape (m, ) – weights of the target.
+                * 'cost_matrix'    : 2‑D array of shape (n, m) – transport cost between every pair.
 
         Returns
         -------
-        dict[str, list[list[float]]]
-            Dictionary containing the optimal transport plan matrix G
-            under the key 'transport_plan'.
+        dict
+            Dictionary with key "transport_plan" whose value is the optimal
+            plan G as a list of lists of floats.
         """
-        # Retrieve problem data
-        a = problem['source_weights']
-        b = problem['target_weights']
-        M = problem['cost_matrix']
+        # Ensure inputs are 1‑D float64 and contiguous
+        a = np.asarray(problem["source_weights"], dtype=np.float64, order="C")
+        b = np.asarray(problem["target_weights"], dtype=np.float64, order="C")
+        M = np.asarray(problem["cost_matrix"], dtype=np.float64, order="C")
 
-        # Ensure correct memory layout for the cost matrix
-        M_cont = np.ascontiguousarray(M, dtype=np.float64)
+        # Compute the optimal transport plan using POT's linear programming solver.
+        # `check_marginals=False` skips a redundant feasibility test which saves time.
+        G = ot.lp.emd(a, b, M, check_marginals=False)
 
-        # Compute optimal transport plan using underlying C implementation
-        G = ot.lp.emd(a, b, M_cont, check_marginals=False)
-
-        return {'transport_plan': G}
+        # Convert to native Python list of lists for the required output format.
+        return {"transport_plan": G.tolist()}

@@ -1,27 +1,44 @@
 import numpy as np
-from scipy.sparse import csr_matrix
+from scipy import sparse
 from scipy.sparse.linalg import eigsh
 
-def solve(problem: dict) -> list[float]:
-    """Return the k smallest eigenvalues of a symmetric matrix."""
-    mat = problem["matrix"].asformat("csr")
-    k = int(problem["k"])
-    n = mat.shape[0]
+class Solver:
+    def solve(self, problem: dict[str, Any]) -> list[float]:
+        """
+        Return the k smallest eigenvalues of a symmetric matrix.
+        """
+        mat: sparse.spmatrix = problem['matrix'].asformat('csr')
+        n = mat.shape[0]
+        k = int(problem['k'])
 
-    # If k is large or matrix is small, use dense computation
-    if k >= n or n < 2 * k + 1:
-        vals = np.linalg.eigvalsh(mat.toarray())
-        return [float(v) for v in vals[:k]]
+        # For very small matrices assemble dense and use fast LAPACK routine
+        if n <= 2000:   # threshold can be tuned
+            vals = np.linalg.eigvalsh(mat.toarray())[:k]
+            return [float(v) for v in vals]
 
-    # Otherwise use Lanczos via eigsh
-    try:
-        vals = eigsh(mat,
-                     k=k,
-                     which="SM",
-                     return_eigenvectors=False,
-                     maxiter=n * 200,
-                     ncv=min(n - 1, max(2 * k + 1, 20)))[0]
-    except Exception:
-        vals = np.linalg.eigvalsh(mat.toarray())[:k]
+        # For larger matrices use the sparse eigsh routine
+        # If k >= n, fall back to dense
+        if k >= n:
+            vals = np.linalg.eigvalsh(mat.toarray())[:k]
+            return [float(v) for v in vals]
 
-    return [float(v) for v in np.sort(np.real(vals))]
+        # Ensure k < n and matrix is not too small
+        ncv = min(n - 1, max(2 * k + 1, 20))
+        maxiter = n * 200
+
+        try:
+            vals = eigsh(
+                mat,
+                k=k,
+                which="SM",
+                return_eigenvectors=False,
+                maxiter=maxiter,
+                ncv=ncv,
+            )
+        except Exception:
+            # Fallback to dense routine if sparse fails
+            vals = np.linalg.eigvalsh(mat.toarray())[:k]
+        else:
+            vals = np.sort(vals)
+
+        return [float(v) for v in vals]

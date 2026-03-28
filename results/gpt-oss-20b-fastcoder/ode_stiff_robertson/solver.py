@@ -2,20 +2,19 @@ import numpy as np
 from scipy.integrate import solve_ivp
 
 class Solver:
-    def solve(self, problem):
-        sol = self._solve(problem, debug=False)
-        if not sol.success:
-            raise RuntimeError(f"Solver failed: {sol.message}")
-        return sol.y[:, -1].tolist()
+    def solve(self, problem: dict[str, np.ndarray | float]) -> dict[str, list[float]]:
+        sol = self._solve(problem)
+        if sol.success:
+            return sol.y[:, -1].tolist()
+        raise RuntimeError(f"Solver failed: {sol.message}")
 
-    def _solve(self, problem, debug=True):
+    def _solve(self, problem: dict[str, np.ndarray | float]) -> Any:
         y0 = np.asarray(problem["y0"], dtype=float)
         t0, t1 = float(problem["t0"]), float(problem["t1"])
-        k = tuple(problem["k"])
+        k1, k2, k3 = problem["k"]
 
         def rober(t, y):
             y1, y2, y3 = y
-            k1, k2, k3 = k
             return np.array(
                 [
                     -k1 * y1 + k3 * y2 * y3,
@@ -25,22 +24,15 @@ class Solver:
                 dtype=float,
             )
 
-        rtol, atol = 1e-11, 1e-9
-        method = "Radau"
-        if debug:
-            t_eval = np.clip(
-                np.exp(np.linspace(np.log(1e-6), np.log(t1), 1000)), t0, t1
-            )
-        else:
-            t_eval = None
-
-        return solve_ivp(
+        # Stiff problem: use Radau; no dense output or t_eval to speed up.
+        sol = solve_ivp(
             rober,
-            [t0, t1],
+            (t0, t1),
             y0,
-            method=method,
-            t_eval=t_eval,
-            rtol=rtol,
-            atol=atol,
-            dense_output=debug,
+            method="Radau",
+            rtol=1e-12,
+            atol=1e-10,
+            vectorized=False,
+            dense_output=False,
         )
+        return sol

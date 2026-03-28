@@ -1,32 +1,50 @@
+from typing import Any
 import numpy as np
-from typing import Any, Dict, List
 
 class Solver:
-    def solve(self, problem: Dict[str, Any]) -> Dict[str, List]:
-        v = np.asarray(problem['v']).ravel()
-        k = problem['k']
 
-        # Subproblem solver using vectorisation
+    def solve(self, problem: dict[str, Any]) -> dict[str, list]:
+        """
+        Solve the problem using the algorithm described in
+        https://doi.org/10.1109/CVPR.2018.00890.
+
+        This optimization problem is a Quadratic Program (QP).
+        However, it can be solved exactly in O(n log n).
+
+        :param problem: A dictionary of the problem's parameters.
+        :return: A dictionary with key:
+                 "solution": a 1D list with n elements representing the solution
+                 to the l1_pruning task.
+        """
+        v = np.array(problem['v'], dtype=np.float64)
+        k = float(problem['k'])
+        v = v.ravel()
+
+        # sub‑problem solver (vectorised)
         def subproblem_sol(vn: np.ndarray, z: float) -> np.ndarray:
-            mu = np.sort(vn, kind='mergesort')[::-1]  # descending
-            cumsum = np.cumsum(mu)
-            denom = np.arange(1, mu.size + 1)
-            theta_candidates = (cumsum - z) / denom
-            # Find first index where mu < theta
-            mask = mu < theta_candidates
-            idx = np.argmax(mask)
-            if mask.any() and idx < mask.size:
-                theta = theta_candidates[idx]
+            # sort descending
+            mu = np.sort(vn)[::-1]
+            # cumulative sum of sorted values
+            cum = np.cumsum(mu, dtype=np.float64)
+            # indices 1..n
+            rn = np.arange(1, mu.size + 1, dtype=np.float64)
+            # candidate thresholds
+            theta_candidate = (cum - z) / rn
+            # condition: mu[j] < theta_candidate[j]
+            cond = mu < theta_candidate
+            # first index where condition holds
+            j = np.argmax(cond)
+            if cond[j]:
+                theta = theta_candidate[j]
             else:
                 theta = 0.0
+            # compute solution
             return np.maximum(vn - theta, 0.0)
 
         u = np.abs(v)
         b = subproblem_sol(u, k)
         new_v = b * np.sign(v)
 
-        # Only keep non‑zero entries (pruning)
-        pruned = np.zeros_like(v, dtype=float)
-        pruned[new_v != 0] = new_v[new_v != 0]
-
+        # Prune zeros
+        pruned = np.where(new_v != 0, new_v, 0.0)
         return {'solution': pruned.tolist()}

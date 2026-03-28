@@ -1,43 +1,49 @@
-from collections import deque
-from typing import Dict, List
+from typing import Any, Dict, List
+import numpy as np
+from scipy.sparse import csr_matrix
+from scipy.sparse.csgraph import shortest_path
 
-def solve(problem: Dict[str, List[List[int]]]) -> Dict[str, float]:
-    """
-    Computes the global efficiency of an undirected graph without using NetworkX.
-    Global efficiency = (1 / (n*(n-1))) * sum_{i!=j} 1/d(i,j) where d(i,j) is the shortest
-    path length between i and j.  Pairs with no path are ignored in the sum.
+class Solver:
+    def solve(self, problem: Dict[str, List[List[int]]]) -> Dict[str, float]:
+        """
+        Calculates the global efficiency of the graph using SciPy instead of NetworkX
+        for better performance on large sparse graphs.
 
-    The adjacency list is 0-indexed.
-    """
-    adj = problem['adjacency_list']
-    n = len(adj)
-    if n <= 1:
-        return {'global_efficiency': 0.0}
+        Args:
+            problem: A dictionary containing the adjacency list of the graph.
+                     {"adjacency_list": adj_list}
 
-    # Preprocess adjacency lists to ensure each neighbor set is a list (already is)
-    # Prepare a list of neighbors for faster iteration
-    neighbors = adj  # alias
+        Returns:
+            A dictionary containing the global efficiency.
+            {"global_efficiency": efficiency_value}
+        """
+        adj_list = problem['adjacency_list']
+        n = len(adj_list)
+        if n <= 1:
+            return {"global_efficiency": 0.0}
 
-    total_inv = 0.0  # sum of 1/d(i,j)
+        # Build adjacency matrix (unweighted, undirected)
+        rows, cols = [], []
+        for u, neighbors in enumerate(adj_list):
+            for v in neighbors:
+                if u < v:          # avoid duplicate edges
+                    rows.append(u)
+                    cols.append(v)
+                    rows.append(v)
+                    cols.append(u)
+        data = np.ones(len(rows), dtype=np.float64)
+        adjacency = csr_matrix((data, (rows, cols)), shape=(n, n))
 
-    # For each source node, run BFS to compute distances
-    for s in range(n):
-        dist = [-1] * n
-        dist[s] = 0
-        q = deque([s])
-        while q:
-            u = q.popleft()
-            d_u = dist[u] + 1
-            for w in neighbors[u]:
-                if dist[w] == -1:
-                    dist[w] = d_u
-                    q.append(w)
-        # accumulate 1/d for all j > s to avoid double counting
-        for t in range(s + 1, n):
-            d = dist[t]
-            if d > 0:
-                total_inv += 2.0 / d  # contribute both (s,t) and (t,s)
+        # Compute shortest path lengths; unweighted graph => use 'unweighted' metric
+        dist_matrix = shortest_path(adjacency, directed=False, unweighted=True)
 
-    denom = n * (n - 1)
-    efficiency = total_inv / denom if denom else 0.0
-    return {'global_efficiency': float(efficiency)}
+        # Compute global efficiency: average 1/d over all distinct node pairs
+        # Ignore infinite distances (disconnected pairs)
+        mask = dist_matrix > 0          # distances > 0 (exclude self, keep connected)
+        reachable = dist_matrix[mask]
+        if reachable.size == 0:
+            return {"global_efficiency": 0.0}
+
+        efficiency_sum = np.sum(1.0 / reachable)
+        efficiency = efficiency_sum / (n * (n - 1))
+        return {"global_efficiency": float(efficiency)}

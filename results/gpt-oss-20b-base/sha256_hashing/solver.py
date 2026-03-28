@@ -3,7 +3,15 @@ from typing import Any, Dict
 
 class Solver:
     def solve(self, problem: Dict[str, Any]) -> Dict[str, bytes]:
-        """Return the SHA-256 digest of the given bytes."""
-        # `hashlib.sha256` is a C implementation and significantly faster
-        # than the pure‑Python fallback used by the cryptography library.
-        return {"digest": hashlib.sha256(problem["plaintext"]).digest()}
+        """
+        Compute the SHA-256 hash of the plaintext using the stdlib hashlib.
+        This implementation is faster and more lightweight than the cryptography
+        based approach.
+        """
+        plaintext = problem["plaintext"]
+        # hashlib expects bytes; if plaintext is a string encode it (utf-8 by default)
+        if isinstance(plaintext, str):
+            plaintext = plaintext.encode()
+        # Compute digest in one step (fast, no Python-level looping)
+        hash_value = hashlib.sha256(plaintext).digest()
+        return {"digest": hash_value}

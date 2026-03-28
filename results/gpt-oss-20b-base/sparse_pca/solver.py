@@ -1,55 +1,52 @@
 import numpy as np
-from typing import Any, Dict
+from sklearn.decomposition import SparsePCA
+from sklearn.preprocessing import StandardScaler
 
 class Solver:
-    def solve(self, problem: Dict[str, Any]) -> Dict[str, Any]:
+    def solve(self, problem: dict) -> dict:
         """
-        Fast greedy sparse PCA by truncating the leading eigenvectors.
+        Solve the sparse PCA problem using scikit-learn's SparsePCA
+        which is considerably faster than a full cvxpy formulation.
         """
-        # Parse input
-        A = np.asarray(problem["covariance"], dtype=float)
-        n_components = int(problem["n_components"])
-        sparsity = float(problem["sparsity_param"])
+        cov = np.array(problem['covariance'])
+        n_components = int(problem['n_components'])
+        sparsity_param = float(problem['sparsity_param'])
+        n = cov.shape[0]
 
-        # Eigen-decomposition of the covariance matrix
-        eigvals, eigvecs = np.linalg.eigh(A)
-        # Keep only positive eigenvalues (noise filtering)
-        pos = eigvals > 0
-        eigvals = eigvals[pos]
-        eigvecs = eigvecs[:, pos]
-        # Sort by decreasing magnitude
-        order = np.argsort(eigvals)[::-1]
-        eigvals = eigvals[order]
-        eigvecs = eigvecs[:, order]
+        # Construct a synthetic dataset that yields the given covariance.
+        # We use a standard normal and scale it to match the covariance.
+        rng = np.random.default_rng(seed=42)
+        Z = rng.standard_normal((n_components * 10, n))
+        # Whiten the data and apply the covariance matrix
+        scaler = StandardScaler()
+        X = scaler.fit_transform(Z)
+        X = X @ np.linalg.cholesky(cov)
 
-        # Select the required number of components
-        n_used = min(len(eigvals), n_components)
-        components = eigvecs[:, :n_used]
+        # Fit SparsePCA
+        spca = SparsePCA(
+            n_components=n_components,
+            alpha=sparsity_param,
+            random_state=42,
+            max_iter=500,
+            tol=1e-3,
+            n_jobs=-1,
+            copy=True,
+        )
+        try:
+            spca.fit(X)
+        except Exception:
+            return {'components': [], 'explained_variance': []}
 
-        # Enforce sparsity by zeroing out small coefficients
-        # sparsity is interpreted as the proportion of non‑zero entries
-        n_nonzero = max(1, int(np.round(sparsity * A.shape[0])))
-        for j in range(components.shape[1]):
-            col = components[:, j]
-            # Find indices of the largest |coefficients|
-            idx = np.argsort(np.abs(col))[-n_nonzero:]
-            mask = np.zeros_like(col, dtype=bool)
-            mask[idx] = True
-            components[:, j] = col * mask
-
-        # Ensure each component has unit norm (optional)
-        norms = np.linalg.norm(components, axis=0)
-        if np.any(norms > 0):
-            components = components / norms
+        # SparsePCA returns components_ of shape (n_components, n_features)
+        # We need to transpose to match the expected output shape (n, n_components)
+        components = spca.components_.T
 
         # Compute explained variance for each component
-        explained_variance = []
-        for j in range(components.shape[1]):
-            c = components[:, j]
-            var = float(c.T @ A @ c)
-            explained_variance.append(var)
+        explained_variance = [
+            float(components[:, i].T @ cov @ components[:, i]) for i in range(n_components)
+        ]
 
         return {
-            "components": components.tolist(),
-            "explained_variance": explained_variance,
+            'components': components.tolist(),
+            'explained_variance': explained_variance,
         }

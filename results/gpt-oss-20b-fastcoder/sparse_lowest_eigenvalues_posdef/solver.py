@@ -1,28 +1,38 @@
+from typing import Any, List
 import numpy as np
 from scipy import sparse
 from scipy.sparse.linalg import eigsh
 
 class Solver:
-    def solve(self, problem: dict[str, Any]) -> list[float]:
-        # Convert to CSR format for efficient access
+    def solve(self, problem: dict[str, Any]) -> List[float]:
+        """
+        Return the k smallest eigenvalues of a real symmetric matrix.
+        The matrix is expected in a sparse format (any subclass of `sparse.spmatrix`).
+        """
         mat: sparse.spmatrix = problem['matrix'].asformat('csr')
-        k = int(problem['k'])
+        k: int = int(problem['k'])
         n = mat.shape[0]
 
-        # For very small matrices or when k is large, use dense eigen solver
+        # If k is large enough to make the dense computation cheaper, or the matrix is very small,
+        # fall back to a dense eigendecomposition.
         if k >= n or n < 2 * k + 1:
-            vals = np.linalg.eigvalsh(mat.toarray())
-            return [float(v) for v in vals[:k]]
+            vals = np.linalg.eigvalsh(mat.toarray(), subset_by_index=(0, k - 1))
+            return [float(v) for v in vals]
 
-        # Use sparse eigen solver for the k smallest eigenvalues
-        vals = eigsh(
-            mat,
-            k=k,
-            which="SM",
-            return_eigenvectors=False,
-            maxiter=n * 200,
-            ncv=min(n - 1, max(2 * k + 1, 20))
-        )[0]
+        # Compute the k smallest magnitude eigenvalues using the sparse routine.
+        try:
+            vals = eigsh(
+                mat,
+                k=k,
+                which='SM',
+                return_eigenvectors=False,
+                maxiter=n * 200,
+                ncv=min(n - 1, max(2 * k + 1, 20)),
+            )
+        except Exception:
+            # Fallback to dense if the sparse routine fails
+            vals = np.linalg.eigvalsh(mat.toarray(), subset_by_index=(0, k - 1))
 
-        # Ensure sorted real values
-        return [float(v.real) for v in np.sort(np.real(vals))]
+        # Ensure real values and sort (eigsh already returns sorted, but we keep safety)
+        vals = np.sort(np.real(vals))
+        return [float(v) for v in vals[:k]]

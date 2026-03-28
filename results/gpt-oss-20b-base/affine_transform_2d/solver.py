@@ -1,18 +1,29 @@
 import numpy as np
-from scipy import ndimage
+import scipy.ndimage
 
 class Solver:
     def __init__(self):
-        self.mode = "constant"
+        # Pre‑define the common parameters for the transform
+        self.mode = 'constant'
         self.order = 3
 
     def solve(self, problem: dict[str, any]) -> dict[str, any]:
         """
-        Applies an affine transformation to a 2D image using scipy.ndimage.affine_transform.
+        Apply a 2‑D affine transformation to the input image using
+        scipy.ndimage.affine_transform. The result is returned as a
+        dictionary containing the transformed image array.
         """
-        image = np.asarray(problem["image"])
-        matrix = np.asarray(problem["matrix"])
-        transformed_image = ndimage.affine_transform(
-            image, matrix, order=self.order, mode=self.mode
+        image = problem["image"]
+        matrix = problem["matrix"]
+
+        # `affine_transform` expects the transformation matrix that maps
+        # output coordinates to input coordinates.  We assume the provided
+        # matrix already satisfies this specification.
+        transformed_image = scipy.ndimage.affine_transform(
+            image,
+            matrix,
+            order=self.order,
+            mode=self.mode,
         )
+
         return {"transformed_image": transformed_image}

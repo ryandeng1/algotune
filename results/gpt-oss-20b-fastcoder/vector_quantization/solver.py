@@ -1,56 +1,34 @@
 import numpy as np
 import faiss
-from typing import Any, Dict
+from typing import Any
 
 class Solver:
-    def solve(self, problem: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Perform vector quantization with Faiss KMeans.
+    """
+    Vector Quantisation using Faiss k‑means.
+    """
 
-        Parameters
-        ----------
-        problem : dict
-            Must contain:
-            - 'vectors': List[List[float]] or np.ndarray of shape (n, d)
-            - 'k'       : int, number of centroids
+    def solve(self, problem: dict[str, Any]) -> dict[str, Any]:
+        # Extract and cast efficiently
+        vectors = np.asarray(problem["vectors"], dtype=np.float32)
+        k = int(problem["k"])
+        dim = vectors.shape[1]
 
-        Returns
-        -------
-        dict
-            {
-                'centroids'        : list of centroids (k × d),
-                'assignments'      : list of assignments (len n),
-                'quantization_error' : float, mean squared error
-            }
-        """
-        # Convert to float32 numpy array once
-        vectors = np.asarray(problem['vectors'], dtype=np.float32)
-        k = int(problem['k'])
-        n, dim = vectors.shape
-
-        # Use the fastest possible KMeans settings
-        kmeans = faiss.Kmeans(
-            dim,
-            k,
-            niter=20,          # fewer iterations, good enough for most cases
-            nredo=1,           # no redundant restarts
-            verbose=False,
-            seed=0
-        )
+        # K‑means: fewer iterations give a good trade‑off in most tests.
+        kmeans = faiss.Kmeans(dim, k, niter=20, verbose=False, seed=0)
         kmeans.train(vectors)
 
+        # Direct distance/assignment via Faiss flat index
         centroids = kmeans.centroids
-        # Build flat index for nearest-centroid search
         index = faiss.IndexFlatL2(dim)
         index.add(centroids)
-
-        # Query nearest centroid for all vectors
         distances, assignments = index.search(vectors, 1)
 
-        mean_error = float(np.mean(distances))
+        # Mean squared error (already squared distance)
+        mse = float(np.mean(distances))
 
+        # Convert to pure Python objects for the expected API
         return {
-            'centroids': centroids.tolist(),
-            'assignments': assignments.reshape(-1).tolist(),
-            'quantization_error': mean_error
+            "centroids": centroids.tolist(),
+            "assignments": assignments.flatten().tolist(),
+            "quantization_error": mse,
         }

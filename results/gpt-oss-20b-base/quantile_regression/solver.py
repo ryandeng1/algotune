@@ -1,25 +1,43 @@
+from typing import Any
 import numpy as np
 from sklearn.linear_model import QuantileRegressor
-from typing import Any
 
 class Solver:
     def solve(self, problem: dict[str, Any]) -> dict[str, Any]:
-        # Prepare data
-        X = np.asarray(problem['X'], dtype=float)
-        y = np.asarray(problem['y'], dtype=float)
+        """
+        Fit a quantile regression model using scikit‑learn's
+        QuantileRegressor (solver high‑s based linear programming),
+        then return model parameters and predictions.
 
-        # Initialize quantile regressor
+        Parameters
+        ----------
+        problem : dict
+            Must contain
+            - 'X'   : matrix of predictors
+            - 'y'   : target vector
+            - 'quantile' : target quantile (0 < q < 1)
+            - 'fit_intercept' : bool, whether to fit intercept
+
+        Returns
+        -------
+        dict
+            {'coef' : list, 'intercept' : list, 'predictions' : list}
+        """
+        X = np.asarray(problem['X'], dtype=np.float64)
+        y = np.asarray(problem['y'], dtype=np.float64)
+
+        # Fit model
         model = QuantileRegressor(
             quantile=problem['quantile'],
             alpha=0.0,
             fit_intercept=problem['fit_intercept'],
             solver='highs'
         )
-
-        # Fit and predict
         model.fit(X, y)
-        coef = model.coef_.tolist()
-        intercept = [model.intercept_]
-        predictions = model.predict(X).tolist()
 
-        return {'coef': coef, 'intercept': intercept, 'predictions': predictions}
+        # Convert outputs to list for consistency
+        return {
+            'coef': model.coef_.tolist(),
+            'intercept': [model.intercept_],
+            'predictions': model.predict(X).tolist()
+        }
