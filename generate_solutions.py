@@ -115,7 +115,6 @@ def build_code_opt_prompt_with_output_instructions(original_code: str) -> str:
         f"{package_line}"
         f"Task: Optimize the provided `solve` function to make it run as fast as possible.\n"
         f"IMPORTANT: Compilation time of your init function will not count towards your function's runtime.\n"
-        f"- Provide a full replacement for this code.\n"
         f"Return exactly one Python code block containing the full contents of `solver.py`.\n"
         f"Your code must define a class named `Solver` with a callable `solve` method.\n"
         f"--- source code ---\n{original_code}\n"
