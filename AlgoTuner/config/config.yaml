@@ -224,3 +224,13 @@ models:
       verbosity: "high"
     usage:
       include: true
+
+  vllm-local:
+    model_name: "openai/gpt-oss-20b"
+    api_key_env: "VLLM_API_KEY"
+    api_base: "http://127.0.0.1:8000/v1"
+    temperature: 1.0
+    top_p: 1.0
+    drop_params: true
+    # Optional. Leave unset to use the server/model default output cap.
+    # max_tokens: 4096
