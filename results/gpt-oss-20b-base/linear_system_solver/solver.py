@@ -2,27 +2,37 @@ import numpy as np
 from typing import Any, List, Dict
 
 class Solver:
-    def solve(self, problem: Dict[str, Any]) -> List[float]:
+    """
+    Optimised solver for linear systems Ax = b.
+    Uses NumPy's highly‑optimised ``linalg.solve`` routine with
+    explicit dtype handling and contiguous arrays for the fastest data
+    layout.  The function operates in O(n³) time, which is optimal for a
+    dense linear‑system solver on platforms that expose BLAS/LAPACK.
+    """
+
+    @staticmethod
+    def solve(problem: Dict[str, Any]) -> List[float]:
         """
-        Solve the linear system Ax = b using NumPy's optimized solver.
+        Solve the linear system Ax = b.
 
         Parameters
         ----------
         problem : dict
-            Dictionary containing the square matrix 'A' and the right hand-side 'b'.
+            A dictionary containing:
+                - "A": 2‑D array‑like matrix of shape (n, n)
+                - "b": 1‑D array‑like vector of length n
 
         Returns
         -------
         list[float]
-            Solution vector x as a plain Python list.
+            The solution vector x.
         """
-        # Use np.asarray to avoid making a copy if the input is already a NumPy array
-        A = np.asarray(problem["A"])
-        b = np.asarray(problem["b"])
+        # Ensure we have NumPy arrays, avoid unnecessary copies
+        A = np.asarray(problem["A"], dtype=np.float64, order="C")
+        b = np.asarray(problem["b"], dtype=np.float64, order="C")
 
-        # np.linalg.solve is highly optimized (calls LAPACK) and handles both dense
-        # and (via data layout) sparse-like structures efficiently.
+        # Directly call the fast LAPACK routine via linalg.solve
         x = np.linalg.solve(A, b)
 
-        # Convert to Python list only once; .tolist() is efficient for small arrays
+        # Return a plain Python list of floats
         return x.tolist()

@@ -1,36 +1,75 @@
-from typing import Any
+# solver.py
+"""
+Highly‑optimised solver for the SDP based feedback controller design
+"""
+
+from __future__ import annotations
+
 import numpy as np
-import scipy.linalg as la
+import cvxpy as cp
+from typing import Any, Dict
+
 
 class Solver:
-    def solve(self, problem: dict[str, Any]) -> dict[str, Any]:
-        """
-        Computes a stabilizing feedback gain K and the Lyapunov matrix P for the
-        continuous‑time pair (A,B) using the LQR solution with Q=I, R=I.
-        """
-        A = np.atleast_2d(np.asarray(problem['A'], dtype=float))
-        B = np.atleast_2d(np.asarray(problem['B'], dtype=float))
-        n = A.shape[0]
-        m = B.shape[1]
+    """
+    Solve a controller design LMI:
+        | Q            Q Aᵀ + Lᵀ Bᵀ |
+        | A Q + B L    Q             |  >  I_2n
+        Q > I_n
 
-        # Check controllability rank
-        ctrl_mat = B
-        for i in range(1, n):
-            ctrl_mat = np.concatenate((ctrl_mat, np.linalg.matrix_power(A, i) @ B), axis=1)
-        if np.linalg.matrix_rank(ctrl_mat) < n:
-            return {'is_stabilizable': False, 'K': None, 'P': None}
+    Returns the feedback gain K = L Q⁻¹ and the Lyapunov matrix P = Q⁻¹
+    if the problem is feasible.
+    """
 
-        # Solve Continuous Algebraic Riccati Equation with Q=I, R=I
+    def solve(self, problem: Dict[str, Any]) -> Dict[str, Any]:
+        # Extract matrices
+        A = np.asarray(problem["A"], dtype=np.float64)
+        B = np.asarray(problem["B"], dtype=np.float64)
+        n, m = A.shape[0], B.shape[1]
+
+        # SDP variables
+        Q = cp.Variable((n, n), symmetric=True)
+        L = cp.Variable((m, n))
+
+        # Build constraints
+        #   [ Q ,       Q A.T + L.T B.T ]
+        #   [ A Q + B L ,           Q   ]  >>  I_2n
+        top = cp.hstack([Q, Q @ A.T + L.T @ B.T])
+        bottom = cp.hstack([A @ Q + B @ L, Q])
+        blk = cp.vstack([top, bottom])
+
+        constraints = [
+            blk >> np.eye(2 * n, dtype=np.float64),
+            Q >> np.eye(n, dtype=np.float64),
+        ]
+
+        # Problem definition
+        prob = cp.Problem(cp.Minimize(0), constraints)
+
+        # Solve – use SCS for speed; fall back to ECOS if needed
         try:
-            P = la.solve_continuous_are(A, B, np.eye(n), np.eye(m))
-        except la.LinAlgError:
-            return {'is_stabilizable': False, 'K': None, 'P': None}
+            prob.solve(solver=cp.SCS, verbose=False, eps=1e-6, max_iters=2000)
+            status = prob.status
+        except Exception:
+            # If SCS fails, try ECOS
+            prob.solve(solver=cp.ECOS, verbose=False)
+            status = prob.status
 
-        # LQR optimal state feedback gain
-        K = np.linalg.inv(np.eye(m)) @ B.T @ P
+        # Check feasibility
+        if status in {"optimal", "optimal_inaccurate"}:
+            Q_val = Q.value
+            L_val = L.value
 
-        return {
-            'is_stabilizable': True,
-            'K': K.astype(float).tolist(),
-            'P': P.astype(float).tolist()
-        }
+            # Compute K = L Q⁻¹ using solve for numerical stability
+            K_val = np.linalg.solve(Q_val.T, L_val.T).T  # equivalent to L @ Q⁻¹
+
+            # Lyapunov matrix
+            P_val = np.linalg.inv(Q_val)
+
+            return {
+                "is_stabilizable": True,
+                "K": K_val.tolist(),
+                "P": P_val.tolist(),
+            }
+
+        return {"is_stabilizable": False, "K": None, "P": None}

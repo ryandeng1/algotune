@@ -1,47 +1,96 @@
-from typing import Any
+# solver.py
+# -------------------------------------------------
+# Optimised solver for QP problems of the form:
+#   min 0.5 * x^T P x + q^T x
+#   s.t. G x <= h
+#        A x == b
+# -------------------------------------------------
+# Uses cvxpy + OSQP with maximally aggressive tolerances and no verbose output.
+# -------------------------------------------------
+
+from __future__ import annotations
+
+from typing import Any, Dict
+
 import cvxpy as cp
 import numpy as np
 
+# ------------------------------------------------------------------
+# Utility: create a CVXPY variable only once per run size
+# ------------------------------------------------------------------
+def _create_variable(n: int) -> cp.Variable:
+    return cp.Variable(n, name="x")
+
+# ------------------------------------------------------------------
+# Solver class -------------------------------------------------------
+# ------------------------------------------------------------------
 class Solver:
+    """
+    Very small, fast QP solver based on cvxpy + OSQP.
+
+    The method :py:meth:`solve` accepts a problem dictionary of the form::
+
+        {
+            "P": 2‑D array_like  # symmetric positive‑semidefinite matrix
+            "q": 1‑D array_like  # linear term
+            "G": 2‑D array_like  # inequality matrix
+            "h": 1‑D array_like  # inequality rhs
+            "A": 2‑D array_like  # equality matrix
+            "b": 1‑D array_like  # equality rhs
+        }
+
+    It returns a dictionary::
+
+        {"solution": list, "objective": float}
+    """
+
+    def __init__(self) -> None:
+        # we keep a cache of variables of a given size to avoid repeated
+        # allocation; a simple dict keyed by dimension.
+        self._var_cache: Dict[int, cp.Variable] = {}
+
+    def _get_variable(self, n: int) -> cp.Variable:
+        if n not in self._var_cache:
+            self._var_cache[n] = _create_variable(n)
+        return self._var_cache[n]
+
     def solve(self, problem: dict[str, Any]) -> dict[str, Any]:
-        # Convert all inputs to NumPy arrays
-        P = np.asarray(problem["P"], dtype=np.float64)
-        q = np.asarray(problem["q"], dtype=np.float64)
-        G = np.asarray(problem["G"], dtype=np.float64)
-        h = np.asarray(problem["h"], dtype=np.float64)
-        A = np.asarray(problem["A"], dtype=np.float64)
-        b = np.asarray(problem["b"], dtype=np.float64)
+        # Convert inputs to np.ndarray; ``copy=False`` prevents needless copies
+        P = np.asarray(problem["P"], dtype=float, copy=False)
+        q = np.asarray(problem["q"], dtype=float, copy=False)
+        G = np.asarray(problem["G"], dtype=float, copy=False)
+        h = np.asarray(problem["h"], dtype=float, copy=False)
+        A = np.asarray(problem["A"], dtype=float, copy=False)
+        b = np.asarray(problem["b"], dtype=float, copy=False)
 
         n = P.shape[0]
-        # Ensure P is symmetric
-        P = (P + P.T) / 2.0
+        # enforce symmetry explicitly on the left-hand side of the quadratic form
+        P = (P + P.T) * 0.5
 
-        # Define the optimization variable
-        x = cp.Variable(n)
+        # Initialise variable
+        x = self._get_variable(n)
 
-        # Objective: 0.5 * x^T P x + q^T x
+        # Build objective: use psd_wrap to keep the matrix fixed and symmetric
         objective = 0.5 * cp.quad_form(x, cp.psd_wrap(P)) + q @ x
 
-        # Constraints
-        constraints = []
-        if G.size:
-            constraints.append(G @ x <= h)
-        if A.size:
-            constraints.append(A @ x == b)
+        # Build constraints; use list comprehensions for speed
+        constraints = [G @ x <= h, A @ x == b]
 
-        # Create and solve the problem using OSQP
+        # Solve the problem
         prob = cp.Problem(cp.Minimize(objective), constraints)
-        optimal_value = prob.solve(
+        # OSQP is our choice of solver; set strict tolerances and silence output
+        optimal_value: float = prob.solve(
             solver=cp.OSQP,
+            verbose=False,
             eps_abs=1e-8,
             eps_rel=1e-8,
-            max_iter=2_000_000,  # allow many iterations if needed
         )
 
-        # Check solver status
+        # Sanity check
         if prob.status not in (cp.OPTIMAL, cp.OPTIMAL_INACCURATE):
-            raise ValueError(f"Solver failed (status = {prob.status})")
+            raise ValueError(f"Solver failed (status={prob.status})")
 
+        # Return solution and objective
         return {
             "solution": x.value.tolist(),
             "objective": float(optimal_value),

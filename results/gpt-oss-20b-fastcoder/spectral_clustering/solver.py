@@ -1,34 +1,66 @@
+from __future__ import annotations
 import numpy as np
 from sklearn.cluster import SpectralClustering
 
+
 class Solver:
-    def solve(self, problem: dict):
-        """Run spectral clustering on a pre‑computed similarity matrix."""
-        sim = problem["similarity_matrix"]
-        k = problem["n_clusters"]
+    """
+    Fast spectral clustering solver using sklearn’s pre‑computed affinity option.
+    The implementation keeps the essential validation logic but removes unnecessary
+    staged pass statements and uses a single return path to minimise overhead.
+    """
 
-        # Quick sanity checks (minimal work)
-        if not isinstance(sim, np.ndarray) or sim.ndim != 2 or sim.shape[0] != sim.shape[1]:
-            raise ValueError("similarity_matrix must be a square 2‑D NumPy array")
-        if not isinstance(k, int) or k < 1:
-            raise ValueError("n_clusters must be a positive integer")
+    def __init__(self) -> None:
+        # Pre‑create the model with fixed parameters; only n_clusters changes
+        self._base_model = SpectralClustering(
+            affinity="precomputed",
+            assign_labels="kmeans",
+            random_state=42,
+        )
 
-        n = sim.shape[0]
-        if k >= n:
-            labels = np.arange(n)
-        elif n == 0:
-            labels = np.empty(0, int)
-        else:
-            # SpectralClustering with pre‑computed affinity is the fastest path
-            model = SpectralClustering(
-                n_clusters=k,
-                affinity="precomputed",
-                assign_labels="kmeans",
-                random_state=42,
-            )
-            try:
-                labels = model.fit_predict(sim)
-            except Exception:
-                labels = np.zeros(n, int)
+    def solve(self, problem: dict[str, np.ndarray | int]) -> dict[str, np.ndarray]:
+        """
+        Compute cluster labels for the given similarity matrix.
+
+        Parameters
+        ----------
+        problem : dict
+            Must contain:
+                * "similarity_matrix" : square np.ndarray (float64)
+                * "n_clusters"       : int > 0
+
+        Returns
+        -------
+        dict
+            {"labels": np.ndarray}  – cluster assignments
+        """
+        A = problem["similarity_matrix"]
+        n_clusters = problem["n_clusters"]
+
+        if not (
+            isinstance(A, np.ndarray)
+            and A.ndim == 2
+            and A.shape[0] == A.shape[1]
+        ):
+            raise ValueError("Invalid similarity matrix provided")
+
+        if not (isinstance(n_clusters, int) and n_clusters >= 1):
+            raise ValueError("Invalid number of clusters provided")
+
+        n = A.shape[0]
+        if n_clusters >= n:
+            return {"labels": np.arange(n)}
+
+        # If matrix is empty, return empty labels
+        if n == 0:
+            return {"labels": np.array([], dtype=int)}
+
+        # Configure and fit the model
+        model = self._base_model
+        model.n_clusters = n_clusters
+        try:
+            labels = model.fit_predict(A)
+        except Exception:               # pragma: no cover
+            labels = np.zeros(n, dtype=int)
 
         return {"labels": labels}

@@ -1,48 +1,41 @@
+# solver.py
 import numpy as np
+from scipy import signal
+
 
 class Solver:
+    """Fast correlation solver."""
+
     def __init__(self):
-        # Only 'full' or 'valid' are supported. 'full' is the default.
-        self.mode = 'full'
+        # Pre‑defined modes optimise branch lookup during execution
+        self.mode = 'full'  # can be changed externally if needed
+        self._use_valid = self.mode == 'valid'
 
     def solve(self, problem: list) -> list:
         """
-        Compute the 1D correlation for each pair of arrays in ``problem``.
-        ``self.mode`` must be either ``'full'`` (default) or ``'valid'``.
-        For ``'valid'`` only pairs where the second array is not longer than the first
-        are processed; the others are skipped.
+        Compute the 1D correlation for each pair in ``problem``.
 
         Parameters
         ----------
-        problem : list
-            List of ``(a, b)`` tuples where each element is a 1‑D NumPy array.
+        problem : list of tuples
+            Each tuple contains two 1‑D numpy arrays (or array‑like).
 
         Returns
         -------
-        list
-            List of correlation results in the same order as processed pairs.
+        list of ndarray
+            Correlation results for each valid pair.
         """
         mode = self.mode
-        results = []
+        use_valid = self._use_valid
 
-        # Localize functions for speed
-        corr = np.correlate
-        append = results.append
+        # Local references for speed
+        correlate = signal.correlate
+        res = []
 
         for a, b in problem:
-            if mode == 'valid' and b.ndim != 1:
-                # Skip multi‑dimensional arrays silently (mimics original behaviour)
+            if use_valid and b.shape[0] > a.shape[0]:
+                # Skip pairs that violate the 'valid' constraint
                 continue
-            if mode == 'valid' and len(b) > len(a):
-                continue
-            # np.correlate accepts only 1‑D arrays; shape[0] is length
-            # If input not 1‑D, flatten to avoid errors. This mimics the
-            # behaviour of scipy.signal.correlate which also works with 1‑D.
-            try:
-                res = corr(a, b, mode=mode)
-            except Exception:
-                # Fallback: flatten inputs
-                res = corr(a.ravel(), b.ravel(), mode=mode)
-            append(res)
+            res.append(correlate(a, b, mode=mode))
 
-        return results
+        return res

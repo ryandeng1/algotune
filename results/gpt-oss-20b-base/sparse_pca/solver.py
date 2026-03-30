@@ -1,52 +1,92 @@
+# solver.py
+from typing import Any, Dict, List
 import numpy as np
-from sklearn.decomposition import SparsePCA
-from sklearn.preprocessing import StandardScaler
+import cvxpy as cp
+
 
 class Solver:
-    def solve(self, problem: dict) -> dict:
-        """
-        Solve the sparse PCA problem using scikit-learn's SparsePCA
-        which is considerably faster than a full cvxpy formulation.
-        """
-        cov = np.array(problem['covariance'])
-        n_components = int(problem['n_components'])
-        sparsity_param = float(problem['sparsity_param'])
-        n = cov.shape[0]
+    """
+    Sparse PCA solver.
+    The implementation is deliberately lightweight:
+    * All heavy linear‑algebra is done with NumPy.
+    * The optimisation problem is set up in CVXPY as a single convex program.
+    * Result extraction is fully vectorised to avoid repeated Python loops.
+    """
 
-        # Construct a synthetic dataset that yields the given covariance.
-        # We use a standard normal and scale it to match the covariance.
-        rng = np.random.default_rng(seed=42)
-        Z = rng.standard_normal((n_components * 10, n))
-        # Whiten the data and apply the covariance matrix
-        scaler = StandardScaler()
-        X = scaler.fit_transform(Z)
-        X = X @ np.linalg.cholesky(cov)
+    def solve(self, problem: Dict[str, Any]) -> Dict[str, List]:
+        """
+        Solve a sparse PCA problem.
 
-        # Fit SparsePCA
-        spca = SparsePCA(
-            n_components=n_components,
-            alpha=sparsity_param,
-            random_state=42,
-            max_iter=500,
-            tol=1e-3,
-            n_jobs=-1,
-            copy=True,
+        Parameters
+        ----------
+        problem : dict
+            Dictionary containing the keys
+                - 'covariance'      : 2‑D float list or ndarray
+                - 'n_components'    : int (requested number of components)
+                - 'sparsity_param'  : float (regularisation weight)
+
+        Returns
+        -------
+        dict
+            Dictionary with keys
+                - 'components'       : list of lists, shape (n_features, n_components)
+                - 'explained_variance': list of variance explained by each component
+        """
+        # ---------------------------------------------------------------------
+        # 1) Basic data extraction and preparation
+        # ---------------------------------------------------------------------
+        A = np.asarray(problem["covariance"], dtype=np.float64)  # covariance matrix
+        n_components = int(problem["n_components"])
+        sparsity = float(problem["sparsity_param"])
+
+        n = A.shape[0]
+
+        # ---------------------------------------------------------------------
+        # 2) Compute top eigen‑values/vectors (only positive ones)
+        # ---------------------------------------------------------------------
+        eigvals, eigvecs = np.linalg.eigh(A)
+        pos = eigvals > 0.0
+        eigvals = eigvals[pos]
+        eigvecs = eigvecs[:, pos]
+
+        # sort descending
+        idx = np.argsort(eigvals)[::-1]
+        eigvals = eigvals[idx]
+        eigvecs = eigvecs[:, idx]
+
+        # Trim to the requested number of components
+        k = min(len(eigvals), n_components)
+        sqrt_eig = np.sqrt(eigvals[:k])
+        B = eigvecs[:, :k] * sqrt_eig  # shape (n, k)
+
+        # ---------------------------------------------------------------------
+        # 3) CVXPY optimisation
+        # ---------------------------------------------------------------------
+        X = cp.Variable((n, k))
+        objective = cp.Minimize(
+            cp.sum_squares(B - X) + sparsity * cp.norm1(X)
         )
+        constraints = [cp.norm(X[:, i]) <= 1.0 for i in range(k)]
+        prob = cp.Problem(objective, constraints)
+
         try:
-            spca.fit(X)
+            prob.solve(solver=cp.OSQP, warm_start=True)  # fast convex solver
         except Exception:
-            return {'components': [], 'explained_variance': []}
+            return {"components": [], "explained_variance": []}
 
-        # SparsePCA returns components_ of shape (n_components, n_features)
-        # We need to transpose to match the expected output shape (n, n_components)
-        components = spca.components_.T
+        if prob.status not in {cp.OPTIMAL, cp.OPTIMAL_INACCURATE} or X.value is None:
+            return {"components": [], "explained_variance": []}
 
-        # Compute explained variance for each component
-        explained_variance = [
-            float(components[:, i].T @ cov @ components[:, i]) for i in range(n_components)
-        ]
+        # ---------------------------------------------------------------------
+        # 4) Extract components and compute explained variance
+        # ---------------------------------------------------------------------
+        components = X.value  # shape (n, k)
+        # Variance explained: vᵀ A v for each component v
+        explained_variance = (
+            np.einsum("ij,ji->i", components.T, A @ components).tolist()
+        )
 
         return {
-            'components': components.tolist(),
-            'explained_variance': explained_variance,
+            "components": components.tolist(),
+            "explained_variance": explained_variance,
         }

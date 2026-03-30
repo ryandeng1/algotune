@@ -1,15 +1,34 @@
+from typing import Any, List, Tuple
 import numpy as np
 from numpy.typing import NDArray
-from scipy.linalg import eigh
+
 
 class Solver:
-    def solve(self, problem: tuple[NDArray, NDArray]) -> list[float]:
+
+    def solve(self, problem: Tuple[NDArray, NDArray]) -> List[float]:
         """
-        Solve the generalized eigenvalue problem A x = λ B x for symmetric A and SPD B.
-        Returns eigenvalues sorted in descending order.
+        Solve the generalized symmetric eigenvalue problem A · x = λ B · x.
+
+        The algorithm uses
+        * Cholesky decomposition of B: B = L · Lᵀ
+        * Transformation to a standard eigenvalue problem
+          Â = L⁻¹ · A · L⁻ᵀ with an efficient solve instead of matrix inversion
+        * numpy.linalg.eigh to compute all eigenvalues of the symmetric Â.
+
+        The returned eigenvalues are sorted in descending order.
         """
         A, B = problem
-        # Use SciPy's generalized eigenvalue routine for symmetric-definite problems
-        evals, _ = eigh(A, B, eigvals_only=True, subset_by_index=[0, -1])
-        # eigh returns values sorted in ascending order
-        return evals[::-1].tolist()
+
+        # Cholesky factorisation of the positive‑definite matrix B
+        L = np.linalg.cholesky(B)
+
+        # Solve L x = A for x → M = L⁻¹ A, avoiding explicit inversion
+        M = np.linalg.solve(L, A)
+
+        # Symmetric equivalent: Â = L⁻¹ A L⁻ᵀ = M · Mᵀ (because M = L⁻¹ A)
+        # Using transpose solve for the second term.
+        Atilde = M @ np.linalg.solve(L.T, M.T)
+
+        # eigh returns eigenvalues in ascending order; reverse to descending
+        eigvals = np.linalg.eigh(Atilde)[0][::-1]
+        return eigvals.tolist()

@@ -1,14 +1,43 @@
 import numpy as np
+from typing import List
+
+# --------------------------------------------------------------------
+# Solver class
+# --------------------------------------------------------------------
 
 class Solver:
-    def solve(self, problem: list[float]) -> list[float]:
-        # Compute the polynomial roots
+    """
+    Solver for finding all real roots of a polynomial.
+    """
+
+    @staticmethod
+    def solve(problem: List[float]) -> List[float]:
+        """
+        Compute the real roots of a polynomial given by its coefficients.
+
+        Args:
+            problem: List of coefficients [aₙ, aₙ₋₁, …, a₀] for
+                     p(x) = aₙxⁿ + aₙ₋₁xⁿ⁻¹ + … + a₀.
+
+        Returns:
+            Sorted (descending) list of real roots.
+        """
+        # Fast path: if the polynomial is linear, solve analytically
+        deg = len(problem) - 1
+        if deg == 1:
+            return [-(problem[1] / problem[0])]
+
+        # Compute complex roots using numpy's efficient LAPACK routine
         roots = np.roots(problem)
 
-        # Keep only real parts when the imaginary part is negligible
+        # Treat very small imaginary parts as zero (tolerance 1e-3)
         roots = np.real_if_close(roots, tol=0.001)
 
-        # Extract real numbers and sort them in descending order
-        real_roots = np.sort(roots.astype(np.float64))[::-1]
+        # Keep only the real part
+        roots = np.real(roots)
 
-        return real_roots.tolist()
+        # Sort descending
+        roots.sort()
+        roots = roots[::-1]
+
+        return roots.tolist()

@@ -1,65 +1,61 @@
+# solver.py
+from typing import Any, Dict
+import cvxpy as cp
 import numpy as np
-from scipy.optimize import minimize
 
 class Solver:
-    def __init__(self):
+    """Fast solver for the CVaR projection problem."""
+
+    def __init__(self) -> None:
+        # defaults used by the original implementation
         self.beta = 0.95
         self.kappa = 0.1
 
-    def solve(self, problem: dict) -> dict:
+    def solve(self, problem: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Compute the projection onto the CVaR constraint set using a fast SLSQP solver.
+        Project x0 onto the set {x | sum_largest(Ax, k) <= alpha}
+        where k = floor((1‑beta)*n_scenarios), alpha = kappa*k.
 
         Parameters
         ----------
         problem : dict
-            Dictionary containing:
-                - 'x0': Initial point to project.
-                - 'loss_scenarios': Matrix of loss scenarios.
-                - optional 'beta' and 'kappa' parameters.
+            Must contain:
+            - 'x0' : array‑like, shape (n_dims,)
+            - 'loss_scenarios' : array‑like, shape (n_scenarios, n_dims)
+            May optionally contain 'beta' and 'kappa'.
 
         Returns
         -------
         dict
-            Dictionary with key 'x_proj' containing the projected point as a list.
+            {'x_proj': list of projected coordinates} or an empty list if
+            the problem failed to solve.
         """
-        # Prepare data
+        # Convert inputs to NumPy arrays once
         x0 = np.asarray(problem['x0'], dtype=np.float64)
         A = np.asarray(problem['loss_scenarios'], dtype=np.float64)
+
         beta = float(problem.get('beta', self.beta))
         kappa = float(problem.get('kappa', self.kappa))
 
         n_scenarios, n_dims = A.shape
-        k = int((1 - beta) * n_scenarios)
+        # Compute k and alpha
+        k = int(np.floor((1 - beta) * n_scenarios))
         alpha = kappa * k
 
-        # Objective: 0.5 * ||x - x0||^2
-        def objective(x):
-            diff = x - x0
-            return 0.5 * np.dot(diff, diff)
+        # Problem definition
+        x = cp.Variable(n_dims)
+        obj = cp.Minimize(cp.sum_squares(x - x0))
+        con = [cp.sum_largest(A @ x, k) <= alpha]
+        prob = cp.Problem(obj, con)
 
-        # Constraint: sum of largest k entries of A @ x <= alpha
-        def constraint(x):
-            y = A.dot(x)
-            # efficient partial sort to get k largest
-            if k <= 0:
-                return -alpha  # always satisfied
-            # Use np.partition for O(n) selection
-            largest_k = np.partition(y, -k)[-k:]
-            return np.sum(largest_k) - alpha
-
-        const = {'type': 'ineq', 'fun': constraint}
-
-        # Run SLSQP
-        res = minimize(
-            objective,
-            x0=x0,
-            method='SLSQP',
-            constraints=[const],
-            options={'ftol': 1e-9, 'disp': False, 'maxiter': 500}
-        )
-
-        if not res.success or res.x is None:
+        # Solve with a fast solver (SCS is the fastest for dense problems here)
+        try:
+            prob.solve(solver=cp.SCS, verbose=False,
+                       eps=1e-6, max_iters=2000)
+        except Exception:
             return {'x_proj': []}
 
-        return {'x_proj': res.x.tolist()}
+        if prob.status not in {cp.OPTIMAL, cp.OPTIMAL_INACCURATE} or x.value is None:
+            return {'x_proj': []}
+
+        return {'x_proj': x.value.tolist()}

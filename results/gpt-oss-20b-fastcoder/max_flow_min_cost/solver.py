@@ -1,34 +1,41 @@
-from typing import Any
+from typing import Any, List
+
 import networkx as nx
 import numpy as np
 
 
 def dict_to_graph(data):
-    cap = data['capacity']
-    cost = data['cost']
-    n = len(cap)
+    """Build a directed graph from the problem dictionary."""
+    n = len(data["capacity"])
     G = nx.DiGraph()
-    edges = []
+    G.add_nodes_from(range(n))
+    capacity = data["capacity"]
+    cost = data["cost"]
     for i in range(n):
-        for j, c in enumerate(cap[i]):
-            if c:
-                edges.append((i, j, {'capacity': c, 'weight': cost[i][j]}))
-    G.add_edges_from(edges)
-    return G, data['s'], data['t']
+        for j in range(n):
+            cap = capacity[i][j]
+            if cap:
+                G.add_edge(i, j, capacity=cap, weight=cost[i][j])
+    return G, data["s"], data["t"]
 
 
 class Solver:
-    def solve(self, problem: dict[str, Any]) -> list[list[Any]]:
-        n = len(problem['capacity'])
+    def solve(self, problem: dict[str, Any]) -> List[List[Any]]:
+        """
+        Minimum cost flow using NetworkX's efficient implementation.
+        Returns the flow matrix with no extraneous overhead.
+        """
+        n = len(problem["capacity"])
         G, s, t = dict_to_graph(problem)
-        try:
-            flow_dict = nx.maximum_flow_min_cost(G, s, t)[1]
-        except Exception:
-            return [[0] * n for _ in range(n)]
 
-        # Build matrix from flow_dict
-        sol = [[0] * n for _ in range(n)]
-        for i, out in flow_dict.items():
-            for j, f in out.items():
-                sol[i][j] = f
-        return sol
+        # Compute min‑cost flow once
+        flow_dict = nx.max_flow_min_cost(G, s, t)
+
+        # Pre‑allocate an integer matrix
+        result = np.zeros((n, n), dtype=int)
+
+        # Fill only non‑zero entries
+        for u, d in flow_dict.items():
+            result[u, list(d.keys())] = list(d.values())
+
+        return result.tolist()

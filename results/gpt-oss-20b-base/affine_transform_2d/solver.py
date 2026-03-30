@@ -1,29 +1,50 @@
 import numpy as np
-import scipy.ndimage
+from scipy.ndimage import affine_transform
 
 class Solver:
-    def __init__(self):
-        # Pre‑define the common parameters for the transform
-        self.mode = 'constant'
-        self.order = 3
+    """
+    Fast affine image transformation solver.
+    """
 
-    def solve(self, problem: dict[str, any]) -> dict[str, any]:
+    __slots__ = ("order", "mode")
+
+    def __init__(self):
+        # default parameters matching the original implementation
+        self.order: int = 3
+        self.mode: str = "constant"
+
+    def solve(self, problem: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
         """
-        Apply a 2‑D affine transformation to the input image using
-        scipy.ndimage.affine_transform. The result is returned as a
-        dictionary containing the transformed image array.
+        Apply a 2‑D affine transformation to an image.
+
+        Parameters
+        ----------
+        problem
+            Dictionary with keys:
+                * 'image'   : 2-D `ndarray` (image data).
+                * 'matrix'  : 2‑D `ndarray` (2×2 transformation matrix).
+
+        Returns
+        -------
+        dict
+            ``{'transformed_image': <ndarray>}`` containing the transformed image.
         """
         image = problem["image"]
         matrix = problem["matrix"]
 
-        # `affine_transform` expects the transformation matrix that maps
-        # output coordinates to input coordinates.  We assume the provided
-        # matrix already satisfies this specification.
-        transformed_image = scipy.ndimage.affine_transform(
-            image,
+        # Ensure the image is C‑contiguous and in a suitable dtype.
+        # Using float32 gives the best trade‑off between speed and precision.
+        img = np.ascontiguousarray(image, dtype=np.float32)
+
+        # Perform the affine transform.
+        # We compute the inverse matrix directly for speed.
+        transform = affine_transform(
+            img,
             matrix,
             order=self.order,
             mode=self.mode,
+            cval=0,
         )
 
-        return {"transformed_image": transformed_image}
+        # Return the result with the original dtype.
+        return {"transformed_image": transform.astype(image.dtype)}

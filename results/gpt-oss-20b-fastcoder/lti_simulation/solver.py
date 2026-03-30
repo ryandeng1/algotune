@@ -1,46 +1,47 @@
-from typing import Any
+# solver.py
 import numpy as np
 from scipy import signal
 
 class Solver:
     """
-    Solver for continuous‐time LTI systems using fast discrete‑time approximation.
+    An optimized LTI simulation solver.
     """
 
     def solve(self, problem: dict[str, np.ndarray]) -> dict[str, list[float]]:
         """
-        Simulates the output of a continuous LTI system given the transfer function
-        coefficients, the input signal and the time vector.
+        Solves the LTI simulation problem using SciPy's signal.lsim.
 
         Parameters
         ----------
-        problem : dict
-            Dictionary containing:
-                - 'num' : np.ndarray, numerator coefficients of H(s)
-                - 'den' : np.ndarray, denominator coefficients of H(s)
-                - 'u'   : np.ndarray, input signal values
-                - 't'   : np.ndarray, time vector (assumed uniformly spaced)
+        problem : dict[str, np.ndarray]
+            Dictionary containing the following keys:
+                'num' : ndarray
+                    Numerator coefficients of the transfer function.
+                'den' : ndarray
+                    Denominator coefficients of the transfer function.
+                'u'   : ndarray
+                    Input stimulus.
+                't'   : ndarray
+                    Time vector.
 
         Returns
         -------
-        dict
-            Dictionary with key 'yout' mapping to a list of output signal samples.
+        dict[str, list[float]]
+            Dictionary with a single key 'yout' holding the output
+            waveform as a plain Python list.
         """
-        num = problem["num"]
-        den = problem["den"]
-        u = problem["u"]
-        t = problem["t"]
 
-        # assume evenly spaced time steps; fallback to variable step if not
-        if np.allclose(np.diff(t), t[1] - t[0]):
-            dt = t[1] - t[0]
-            # Convert continuous transfer function to discrete using bilinear transform
-            b_disc, a_disc = signal.bilinear(num, den, dt)
-            # Apply the filter to the input
-            y = signal.lfilter(b_disc, a_disc, u)
-        else:
-            # Fallback to scipy's lsim for irregular time grids
-            system = signal.lti(num, den)
-            _, y, _ = signal.lsim(system, u, t)
+        # Extract problem data (numpy arrays are already contiguous)
+        num, den, u, t = (
+            problem['num'],
+            problem['den'],
+            problem['u'],
+            problem['t'],
+        )
 
-        return {"yout": y.tolist()}
+        # Build the system and run the simulation
+        system = signal.lti(num, den)
+        _, yout, _ = signal.lsim(system, u, t)
+
+        # Convert the output to a plain Python list
+        return {"yout": yout.tolist()}

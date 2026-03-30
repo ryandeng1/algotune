@@ -1,42 +1,54 @@
+# solver.py
 import math
-import numpy as np
+from typing import Dict
 import cvxpy as cp
+import numpy as np
 from scipy.special import xlogy
 
 class Solver:
-    def solve(self, problem: dict) -> dict:
-        P = np.array(problem["P"])
+    """
+    Maximize mutual information for a discrete memoryless channel.
+    The problem is:     max_x   sum_i ( sum_j P_{j,i} log2(P_{j,i} / (P x)_j) )
+                      s.t.   sum_i x_i = 1,  x_i >= 0
+    where P is an (m × n) probability transition matrix.
+    """
+
+    def solve(self, problem: Dict[str, np.ndarray]) -> Dict[str, object] | None:
+        P = np.array(problem["P"], dtype=np.float64)
+        # shape must be (m, n) with m rows (outputs) and n columns (inputs)
         m, n = P.shape
-        # P must be (n, m) – channel transition matrix (outcomes × inputs)
-        if P.shape != (n, m) or not (n > 0 and m > 0):
+        if not (m > 0 and n > 0):
             return None
 
-        # Decision variable: input distribution over n symbols
-        x = cp.Variable(shape=n, nonneg=True)
-        y = P @ x  # distribution of outputs
+        # pre‑compute constants
+        log2 = math.log(2.0)
+        # log2(P) with zeros replaced by 0 (log2(0) is -∞ but xlogy handles it)
+        log2P = np.zeros_like(P)
+        nonzero = P > 0
+        log2P[nonzero] = np.log2(P[nonzero])
 
-        # Expected self‑information of the channel conditioned on input
-        c = np.sum(xlogy(P, P), axis=0) / math.log(2.0)
-        mutual_information = c @ x + cp.sum(cp.entr(y) / math.log(2.0))
-        objective = cp.Maximize(mutual_information)
-        constraints = [cp.sum(x) == 1]
-        prob = cp.Problem(objective, constraints)
+        # Numpy vector for column‑wise sums of P * log2(P)
+        # c_j = sum_i P_{i,j} log2(P_{i,j})
+        c = np.sum(P * log2P, axis=0)
 
+        # CVXPY variables
+        x = cp.Variable(n)
+        y = P @ x
+
+        # Mutual information expressed in bits
+        mutual_info = c @ x + cp.sum(cp.entr(y) / log2)
+
+        prob = cp.Problem(cp.Maximize(mutual_info), [cp.sum(x) == 1, x >= 0])
+
+        # Fast solver: SCS (default) with fewer iterations
         try:
-            # The HIGHS solver is fast and free; defaults to dense matrices
-            prob.solve(solver=cp.GUROBI, verbose=False)
+            prob.solve(solver=cp.SCS, verbose=False, max_iters=2000)
+        except cp.SolverError:
+            return None
         except Exception:
-            try:
-                prob.solve(solver=cp.GLPK, verbose=False)
-            except Exception:
-                try:
-                    prob.solve(solver=cp.COIN, verbose=False)
-                except Exception:
-                    try:
-                        prob.solve(solver=cp.ECOS, verbose=False)
-                    except Exception:
-                        return None
+            return None
 
         if prob.value is None:
             return None
+
         return {"x": x.value.tolist(), "C": prob.value}

@@ -1,78 +1,115 @@
+# solver.py
+# Optimised Solver for the Capacitated Facility Location Problem
+# -------------------------------------------------------------------
+# Python 3.10, CVXPY (HIGHS solver) with vectorised constraints.
+# -------------------------------------------------------------------
+
+from __future__ import annotations
 from typing import Any, Dict, List
+
+import cvxpy as cp
 import numpy as np
-from ortools.linear_solver import pywraplp
+
 
 class Solver:
     """
-    Fast MIP solver for Capacitated Facility Location using OR-Tools CBC.
+    Optimised solver for the Capacitated Facility Location Problem.
     """
 
     def solve(self, problem: Dict[str, Any]) -> Dict[str, Any]:
-        fixed_costs = np.asarray(problem["fixed_costs"], dtype=np.float64)
-        capacities = np.asarray(problem["capacities"], dtype=np.float64)
-        demands = np.asarray(problem["demands"], dtype=np.float64)
-        transport = np.asarray(problem["transportation_costs"], dtype=np.float64)
+        """
+        Parameters
+        ----------
+        problem : dict
+            * 'fixed_costs'   : list/array of length #facilities
+            * 'capacities'    : list/array of length #facilities
+            * 'demands'       : list/array of length #customers
+            * 'transportation_costs' : 2‑D array (#facilities × #customers)
 
-        n_facilities = fixed_costs.size
-        n_customers = demands.size
+        Returns
+        -------
+        dict
+            * 'objective_value' : float
+            * 'facility_status' : list[bool]
+            * 'assignments'     : List[List[float]]
+        """
+        # ------------------------------------------------------------------
+        # 1. Convert inputs to numpy arrays
+        # ------------------------------------------------------------------
+        fixed_costs = np.asarray(problem["fixed_costs"], dtype=float)
+        capacities = np.asarray(problem["capacities"], dtype=float)
+        demands = np.asarray(problem["demands"], dtype=float)
+        transport_costs = np.asarray(problem["transportation_costs"], dtype=float)
 
-        # Create solver
-        solver = pywraplp.Solver.CreateSolver("CBC")
-        if not solver:
+        n_fac = fixed_costs.size
+        n_cus = demanded_size = demands.size
+
+        # ------------------------------------------------------------------
+        # 2. CVXPY variables
+        # ------------------------------------------------------------------
+        y = cp.Variable(n_fac, boolean=True)                      # facility open
+        x = cp.Variable((n_fac, n_cus), boolean=True)            # allocations
+
+        # ------------------------------------------------------------------
+        # 3. Objective
+        # ------------------------------------------------------------------
+        obj = cp.Minimize(fixed_costs @ y + cp.sum(cp.multiply(transport_costs, x)))
+
+        # ------------------------------------------------------------------
+        # 4. Constraints – fully vectorised
+        # ------------------------------------------------------------------
+        constraints = []
+
+        # 4.1 Every customer served exactly once
+        constraints.append(cp.sum(x, axis=0) == 1)
+
+        # 4.2 Capacity constraints
+        #     sum_j d_j * x_{ij} <= cap_i * y_i  for all i
+        constraints.append(cp.sum(cp.multiply(x, demands), axis=1) <= capacities * y)
+
+        # 4.3 Allocations only to open facilities
+        #     x_{ij} <= y_i  ->  x <= y[:,None]
+        constraints.append(x <= y[:, None])
+
+        # ------------------------------------------------------------------
+        # 5. Solve
+        # ------------------------------------------------------------------
+        prob = cp.Problem(obj, constraints)
+
+        try:
+            prob.solve(solver=cp.HIGHS, verbose=False)
+        except Exception:
+            # In case of any solver error return infeasible result
             return {
                 "objective_value": float("inf"),
-                "facility_status": [False] * n_facilities,
-                "assignments": [[0.0] * n_customers for _ in range(n_facilities)],
+                "facility_status": [False] * n_fac,
+                "assignments": [[0.0] * n_cus for _ in range(n_fac)],
             }
 
-        # Decision variables
-        y = [solver.IntVar(0, 1, f"y_{i}") for i in range(n_facilities)]
-        x = [
-            [solver.IntVar(0, 1, f"x_{i}_{j}") for j in range(n_customers)]
-            for i in range(n_facilities)
-        ]
-
-        # Each customer must be assigned to exactly one facility
-        for j in range(n_customers):
-            solver.Add(solver.Sum(x[i][j] for i in range(n_facilities)) == 1)
-
-        # Capacity constraints
-        for i in range(n_facilities):
-            solver.Add(
-                solver.Sum(demands[j] * x[i][j] for j in range(n_customers))
-                <= capacities[i] * y[i]
-            )
-
-        # Link constraints: cannot use a facility if it is closed
-        for i in range(n_facilities):
-            for j in range(n_customers):
-                solver.Add(x[i][j] <= y[i])
-
-        # Objective
-        obj = solver.Sum(
-            fixed_costs[i] * y[i] + solver.Sum(transport[i][j] * x[i][j] for j in range(n_customers))
-            for i in range(n_facilities)
-        )
-        solver.Minimize(obj)
-
-        # Solve
-        status = solver.Solve()
-
-        if status != pywraplp.Solver.OPTIMAL and status != pywraplp.Solver.FEASIBLE:
+        # ------------------------------------------------------------------
+        # 6. Check optimality
+        # ------------------------------------------------------------------
+        if prob.status not in (cp.OPTIMAL, cp.OPTIMAL_INACCURATE):
             return {
                 "objective_value": float("inf"),
-                "facility_status": [False] * n_facilities,
-                "assignments": [[0.0] * n_customers for _ in range(n_facilities)],
+                "facility_status": [False] * n_fac,
+                "assignments": [[0.0] * n_cus for _ in range(n_fac)],
             }
 
-        # Retrieve results
-        facility_status: List[bool] = [bool(round(y[i].SolutionValue())) for i in range(n_facilities)]
-        assignments: List[List[float]] = [
-            [round(x[i][j].SolutionValue()) for j in range(n_customers)] for i in range(n_facilities)
-        ]
+        # ------------------------------------------------------------------
+        # 7. Post‑processing – round to binary
+        # ------------------------------------------------------------------
+        y_vals = np.clip(np.round(y.value), 0, 1).astype(int)
+        x_vals = np.clip(np.round(x.value), 0, 1).astype(int)
 
+        facility_status: List[bool] = [bool(v) for v in y_vals.tolist()]
+        assignments: List[List[int]] = x_vals.tolist()
+
+        # ------------------------------------------------------------------
+        # 8. Return results
+        # ------------------------------------------------------------------
         return {
-            "objective_value": solver.Objective().Value(),
+            "objective_value": float(prob.value),
             "facility_status": facility_status,
             "assignments": assignments,
         }

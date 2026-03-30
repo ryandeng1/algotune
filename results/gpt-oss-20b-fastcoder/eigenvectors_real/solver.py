@@ -1,25 +1,40 @@
-from typing import Any
+# solver.py
 import numpy as np
 from numpy.typing import NDArray
+from typing import Tuple, List
 
 class Solver:
-    def solve(self, problem: NDArray) -> tuple[list[float], list[list[float]]]:
+    """
+    Solves an eigenvalue problem for a real symmetric matrix.
+    Returns eigenvalues in descending order together with their eigenvectors
+    (each normalised to unit length) sorted the same way.
+    """
+
+    def solve(self, problem: NDArray) -> Tuple[List[float], List[List[float]]]:
         """
-        Solve the eigenvalue problem for the given real symmetric matrix.
-        The solution returned is a tuple (eigenvalues, eigenvectors) where:
-          - eigenvalues is a list of floats sorted in descending order.
-          - eigenvectors is a list of lists, where each inner list represents the corresponding
-            eigenvector (normalized to have unit length), sorted corresponding to the eigenvalues.
+        Compute real eigenvalues and eigenvectors of a symmetric matrix.
 
-        :param problem: A numpy array representing the real symmetric matrix.
-        :return: Tuple (eigenvalues, eigenvectors)
+        Parameters
+        ----------
+        problem : NDArray
+            Symmetric real matrix.
+
+        Returns
+        -------
+        Tuple[List[float], List[List[float]]]
+            First element is a list of eigenvalues sorted in decreasing order.
+            Second element is a list of the corresponding eigenvectors,
+            each expressed as a list of floats.
         """
-        # Compute eigenvalues and eigenvectors (ascending order)
-        vals, vecs = np.linalg.eigh(problem)
+        # eigh returns eigenvalues in ascending order with columns as eigenvectors
+        eig_vals, eig_vecs = np.linalg.eigh(problem)
 
-        # Reverse to get descending order
-        vals = vals[::-1]
-        vecs = vecs[:, ::-1]
+        # reverse order to get descending eigenvalues
+        eig_vals = eig_vals[::-1]
+        eig_vecs = eig_vecs[:, ::-1]
 
-        # Convert to Python lists
-        return (vals.tolist(), vecs.T.tolist())
+        # Convert to Python lists efficiently
+        eig_vals_list = eig_vals.tolist()
+        eig_vecs_list = eig_vecs.T.tolist()  # rows correspond to vectors
+
+        return eig_vals_list, eig_vecs_list

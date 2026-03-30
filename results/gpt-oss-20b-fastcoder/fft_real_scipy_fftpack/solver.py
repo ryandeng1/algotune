@@ -1,25 +1,25 @@
-from typing import Any
+# solver.py
 import numpy as np
 from numpy.typing import NDArray
 
 class Solver:
     """
-    Fast N‑dimensional FFT implementation using :mod:`numpy.fft`.
+    Solver that computes the N‑dimensional Fast Fourier Transform of a problem
+    array using the highly tuned `numpy.fft.fftn` implementation.
     """
+
     def solve(self, problem: NDArray) -> NDArray:
         """
-        Compute the N‑dimensional Fourier Transform of *problem*.
+        Compute the N-dimensional FFT of `problem`.
 
         Parameters
         ----------
         problem : NDArray
-            Arbitrary‑dimensional array of real or complex numbers.
+            Multi‑dimensional input array.
 
         Returns
         -------
         NDArray
-            N‑dimensional FFT of *problem*.
+            The FFT of the input array.
         """
-        # Use numpy's native FFT (FFTW backend when available) which
-        # is typically faster than scipy.fftpack.fftn for large arrays.
         return np.fft.fftn(problem)

@@ -1,42 +1,74 @@
+# solver.py
 import numpy as np
+from typing import Dict, List
+
 
 class Solver:
-    def __init__(self):
+    def __init__(self) -> None:
+        # Teleportation probability
         self.alpha = 0.85
         self.max_iter = 100
         self.tol = 1e-06
 
-    def solve(self, problem: dict[str, list[list[int]]]) -> dict[str, list[float]]:
-        adj = problem['adjacency_list']
+    def _pagerank(self, adj: List[List[int]]) -> List[float]:
+        """
+        Compute PageRank using a vectorised power‑iteration algorithm.
+        The input adjacency list is converted to a NumPy 0/1 matrix.
+        """
         n = len(adj)
         if n == 0:
-            return {'pagerank_scores': []}
+            return []
         if n == 1:
-            return {'pagerank_scores': [1.0]}
+            return [1.0]
 
-        # Build transition matrix in CSR format for efficiency
-        rows, cols, data = [], [], []
-        out_deg = np.array([len(neigh) for neigh in adj], dtype=np.int32)
-        for u, neigh in enumerate(adj):
-            if neigh:  # non‑damped nodes
-                rows.extend([u]*len(neigh))
-                cols.extend(neigh)
-                data.extend([1.0/len(neigh)]*len(neigh))
-        M = np.zeros((n, n), dtype=np.float64)
-        M[rows, cols] = data
+        # Build adjacency matrix (boolean for speed)
+        data = np.zeros((n, n), dtype=np.uint8)
+        for src, dsts in enumerate(adj):
+            if dsts:
+                data[src, dsts] = 1
 
-        # Handle dangling nodes (out_deg == 0)
-        dangling = (out_deg == 0).astype(float)
-        # Personalization vector (uniform)
-        e = np.full(n, 1.0 / n)
+        # Row‑normalise so each row sums to 1; dangling rows -> all zeros
+        row_sums = data.sum(axis=1, keepdims=True)
+        dangling = row_sums.squeeze() == 0
+        # Avoid division by zero
+        row_sums[row_sums == 0] = 1
+        M = data / row_sums
 
         # Power iteration
-        r = np.full(n, 1.0 / n)
-        for _ in range(self.max_iter):
-            r_next = self.alpha * (M @ r + dangling @ r / n) + (1 - self.alpha) * e
-            if np.linalg.norm(r_next - r, 1) < self.tol:
-                r = r_next
-                break
-            r = r_next
+        rank = np.full(n, 1.0 / n, dtype=np.float64)
+        click = np.zeros(n, dtype=np.float64)
 
-        return {'pagerank_scores': r.tolist()}
+        for _ in range(self.max_iter):
+            # Contribution from links
+            click[:] = M.T @ rank
+
+            # Handle dangling nodes: distribute uniformly
+            if dangling.any():
+                click += rank[dangling].sum() / n
+
+            # Teleportation (damping)
+            rank[:] = self.alpha * click + (1.0 - self.alpha) / n
+
+            # Convergence check
+            if np.linalg.norm(rank - click, ord=1) < self.tol:
+                break
+
+        return rank.tolist()
+
+    def solve(self, problem: Dict[str, List[List[int]]]) -> Dict[str, List[float]]:
+        """
+        Calculates the PageRank scores for the graph.
+
+        Parameters
+        ----------
+        problem : dict
+            {"adjacency_list": adj_list}
+
+        Returns
+        -------
+        dict
+            {"pagerank_scores": [score_node_0, score_node_1, ...]}
+        """
+        adj_list = problem.get("adjacency_list", [])
+        scores = self._pagerank(adj_list)
+        return {"pagerank_scores": scores}

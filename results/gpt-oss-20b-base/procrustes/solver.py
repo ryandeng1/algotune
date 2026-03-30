@@ -1,31 +1,63 @@
+# solver.py
+from __future__ import annotations
 import numpy as np
-from typing import Dict
 
 class Solver:
-    def solve(self, problem: Dict[str, np.ndarray]) -> Dict[str, Dict[str, list]]:
+    """
+    Solver for the Orthogonal Procrustes Problem (OPP).
+    The algorithm is:
+    1. Compute M = B @ A.T
+    2. Compute the SVD of M:  M = U @ S @ Vt
+    3. Return G = U @ Vt  (an orthogonal matrix)
+    """
+
+    @staticmethod
+    def _safe_numpy_array(x, dtype=np.float64):
         """
-        Solve the OPP instance by computing the orthogonal matrix G = U V^T from
-        the SVD of M = B Aᵀ. Uses NumPy's efficient routines and avoids
-        unnecessary copies.
+        Convert the input to a NumPy array without extra copies if the input
+        is already a NumPy array of the desired dtype and contiguity.
         """
+        if isinstance(x, np.ndarray) and x.dtype == dtype:
+            return np.ascontiguousarray(x)
+        return np.asarray(x, dtype=dtype, order="C")
+
+    def solve(self, problem: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
+        """
+        Solve the OPP instance.
+
+        Parameters
+        ----------
+        problem : dict
+            Expected keys: 'A', 'B', each mapping to a 2‑D array‑like object.
+            Both matrices must have the same shape.
+
+        Returns
+        -------
+        dict
+            A dictionary with a single key `'G'` whose value is the orthogonal
+            matrix that best aligns A to B.
+        """
+        # Retrieve the matrices
         A = problem.get("A")
         B = problem.get("B")
         if A is None or B is None:
-            return {}
-        # Ensure the inputs are NumPy arrays (view if already ndarray)
-        A = np.asarray(A, dtype=np.double, order="C")
-        B = np.asarray(B, dtype=np.double, order="C")
-        if A.shape != B.shape:
-            return {}
+            return {"G": np.empty((0, 0), float)}
 
-        # Compute M = B * Aᵀ
-        M = B @ A.T
+        # Convert to contiguous NumPy arrays (fast path for already good arrays)
+        A = self._safe_numpy_array(A)
+        B = self._safe_numpy_array(B)
 
-        # Singular value decomposition with economical matrices
+        if A.ndim != 2 or B.ndim != 2 or A.shape != B.shape:
+            # shapes mismatch – return empty solution
+            return {"G": np.empty((0, 0), float)}
+
+        # Compute the cross‑covariance matrix M
+        M = B @ A.T  # (n, n)
+
+        # SVD – use reduced mode for speed and memory efficiency
         U, _, Vt = np.linalg.svd(M, full_matrices=False)
 
-        # Orthogonal solution G = U Vᵀ
+        # Construct the orthogonal matrix G
         G = U @ Vt
 
-        # Convert to plain list-of-lists for the expected output format
-        return {"solution": G.tolist()}
+        return {"G": G}

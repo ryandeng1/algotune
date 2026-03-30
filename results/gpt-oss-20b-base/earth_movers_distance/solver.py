@@ -1,35 +1,46 @@
-from typing import Dict, List
+# solver.py
 import numpy as np
 import ot
 
 class Solver:
     """
-    EMD solver using the accelerated linear programming routine from POT.
+    Efficient Sinkhorn‑like Solver for the Earth Mover's Distance (EMD)
+    problem using the `ot.lp.emd` routine from the POT library.
+
+    The implementation performs minimal copying and type conversions,
+    and turns the resulting NumPy array plan into the list‑of‑lists form
+    requested by the specifications.
     """
-    def solve(self, problem: Dict[str, np.ndarray]) -> Dict[str, List[List[float]]]:
+
+    @staticmethod
+    def _to_float64_contiguous(x: np.ndarray) -> np.ndarray:
+        """Return a contiguous float64 view of the input array."""
+        return np.ascontiguousarray(x, dtype=np.float64)
+
+    def solve(self, problem: dict[str, np.ndarray]) -> dict[str, list[list[float]]]:
         """
+        Compute the optimal transport plan G for the given EMD instance.
+
         Parameters
         ----------
-        problem : dict
-            Dictionary containing:
-                * 'source_weights' : 1‑D array of shape (n, ) – weights of the source.
-                * 'target_weights' : 1‑D array of shape (m, ) – weights of the target.
-                * 'cost_matrix'    : 2‑D array of shape (n, m) – transport cost between every pair.
+        problem : dict[str, np.ndarray]
+            Must contain:
+            - 'source_weights'  : numpy array a of shape (n,)
+            - 'target_weights'  : numpy array b of shape (m,)
+            - 'cost_matrix'     : numpy array M of shape (n, m)
 
         Returns
         -------
-        dict
-            Dictionary with key "transport_plan" whose value is the optimal
-            plan G as a list of lists of floats.
+        dict[str, list[list[float]]]
+            A dictionary with key 'transport_plan' whose value is the optimal
+            transport plan G expressed as a list of lists of floats.
         """
-        # Ensure inputs are 1‑D float64 and contiguous
-        a = np.asarray(problem["source_weights"], dtype=np.float64, order="C")
-        b = np.asarray(problem["target_weights"], dtype=np.float64, order="C")
-        M = np.asarray(problem["cost_matrix"], dtype=np.float64, order="C")
+        a = self._to_float64_contiguous(problem['source_weights'])
+        b = self._to_float64_contiguous(problem['target_weights'])
+        M = self._to_float64_contiguous(problem['cost_matrix'])
 
-        # Compute the optimal transport plan using POT's linear programming solver.
-        # `check_marginals=False` skips a redundant feasibility test which saves time.
+        # ot.lp.emd optionally verifies marginals; skipping this speeds up
         G = ot.lp.emd(a, b, M, check_marginals=False)
 
-        # Convert to native Python list of lists for the required output format.
+        # Convert the dense NumPy plan to the required list‑of‑lists format
         return {"transport_plan": G.tolist()}

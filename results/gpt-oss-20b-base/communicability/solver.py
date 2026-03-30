@@ -1,43 +1,39 @@
+from typing import Any, Dict, List
 import numpy as np
 from scipy.linalg import expm
 
+
 class Solver:
-    def solve(self, problem: dict[str, list[list[int]]]) -> dict[str, dict[int, dict[int, float]]]:
-        """
-        Calculates the communicability matrix of an undirected graph.
-        The communicability between nodes u and v is defined as the (u,v) entry of e^A,
-        where A is the adjacency matrix of the graph.
+    """
+    Computes the communicability matrix of an undirected graph.
+    For a graph with adjacency matrix `A`, communability equals `exp(A)`.
+    """
 
-        Args:
-            problem: A dictionary containing the adjacency list of the graph.
-                     {"adjacency_list": adj_list}
-
-        Returns:
-            A dictionary containing the communicability matrix (as dict of dicts).
-            {"communicability": comm_dict}
-            where comm_dict[u][v] is the communicability between nodes u and v.
-        """
-        adj_list = problem["adjacency_list"]
+    def solve(self, problem: Dict[str, List[List[int]]]) -> Dict[str, Dict[int, Dict[int, float]]]:
+        adj_list = problem.get("adjacency_list", [])
         n = len(adj_list)
         if n == 0:
             return {"communicability": {}}
 
-        # Build adjacency matrix efficiently
-        A = np.zeros((n, n), dtype=float)
-        # Since the graph is undirected, we only fill the upper triangle and mirror it
-        for i, neighbors in enumerate(adj_list):
-            for j in neighbors:
-                if i < j:
-                    A[i, j] = 1.0
-                    A[j, i] = 1.0
+        # Build adjacency matrix
+        A = np.zeros((n, n), dtype=np.float64)
+        for u, neigh in enumerate(adj_list):
+            for v in neigh:
+                if 0 <= v < n:
+                    A[u, v] = 1.0
+        # symmetrize (undirected graph)
+        A = np.maximum(A, A.T)
 
-        # Compute communicability matrix as exp(A)
-        comm_matrix = expm(A)
+        # Compute exp(A)
+        try:
+            expA = expm(A)
+        except Exception:
+            return {"communicability": {}}
 
-        # Convert numpy array to nested dicts of Python floats
-        comm_dict = {
-            i: {j: float(comm_matrix[i, j]) for j in range(n)}
-            for i in range(n)
+        # Convert to nested dict
+        comm = {
+            u: {v: float(expA[u, v]) for v in range(n)}
+            for u in range(n)
         }
 
-        return {"communicability": comm_dict}
+        return {"communicability": comm}

@@ -1,51 +1,93 @@
+# solver.py
+from __future__ import annotations
+
 import numpy as np
-from typing import Any, Dict, List
+from scipy.integrate import solve_ivp
+from numba import njit
 
-class Solution:
-    def __init__(self, success: bool, y: np.ndarray, message: str = ""):
-        self.success = success
-        self.y = y if y.ndim == 2 else y.reshape(1, -1)
-        self.message = message
+# --------------------------------------------------------------------------- #
+# 1.  Numba‑accelerated Lorenz‑96 RHS
+# --------------------------------------------------------------------------- #
+# The indices used in the ODE will be computed once per problem instance and
+# kept as 64‑bit integers for fast Numba lookup.
+@njit(nopython=True, cache=True)
+def lorenz96_rhs(t, x, ip1, im1, im2, N, F):
+    """Return dx/dt for Lorenz‑96 at time t and state x."""
+    # x is a 1‑D array of length N
+    dxdt = np.empty_like(x)
+    # (x[i+1] - x[i-2]) * x[i-1] - x[i] + F
+    dxdt = (x[ip1] - x[im2]) * x[im1] - x + F
+    return dxdt
 
+# --------------------------------------------------------------------------- #
+# 2.  Solver class
+# --------------------------------------------------------------------------- #
 class Solver:
-    def solve(self, problem: Dict[str, np.ndarray | float]) -> Dict[str, List[float]]:
+    """
+    Solves the Lorenz‑96 system using scipy.integrate.solve_ivp with a
+    Numba‑compiled right‑hand side.  The solver is wrapped in a class so
+    the JIT compilation of the kernel happens only once during the first call.
+    """
+
+    def solve(self, problem: dict[str, np.ndarray | float]) -> dict[str, list[float]]:
+        """
+        Integrate the Lorenz‑96 ODE and return the final state.
+        """
+        # Delegate to the lower‑level routine
         sol = self._solve(problem, debug=False)
         if sol.success:
-            return sol.y[:, -1].tolist()
+            return {"y": sol.y[:, -1].tolist()}
         raise RuntimeError(f"Solver failed: {sol.message}")
 
-    def _solve(self, problem: Dict[str, np.ndarray | float], debug: bool = True) -> Any:
+    def _solve(self, problem: dict[str, np.ndarray | float], debug: bool = True):
+        """
+        Internal routine that prepares indices and calls solve_ivp.
+        """
+        # --------------------------------------------------------------------- #
+        # 1.  Parse problem data
+        # --------------------------------------------------------------------- #
         y0 = np.asarray(problem["y0"], dtype=np.float64)
-        t0, t1 = float(problem["t0"]), float(problem["t1"])
+        t0 = float(problem["t0"])
+        t1 = float(problem["t1"])
         F = float(problem["F"])
 
-        def lorenz96(x):
-            N = x.shape[0]
-            # compute x_{i+1}, x_{i-1}, x_{i-2}
-            ip1 = np.roll(x, -1)
-            im1 = np.roll(x, 1)
-            im2 = np.roll(x, 2)
-            return (ip1 - im2) * im1 - x + F
-
-        # integration settings
-        if debug:
-            n_steps = 999  # gives 1000 evaluation points
-        else:
-            # choose step so that approx 1000 points, but allow larger steps if t1-t0 small
-            n_steps = 999
-
-        h = (t1 - t0) / n_steps
         N = y0.size
-        y = np.empty((N, n_steps + 1), dtype=np.float64)
-        y[:, 0] = y0
 
-        # Runge–Kutta 4
-        for k in range(n_steps):
-            x = y[:, k]
-            k1 = lorenz96(x)
-            k2 = lorenz96(x + 0.5 * h * k1)
-            k3 = lorenz96(x + 0.5 * h * k2)
-            k4 = lorenz96(x + h * k3)
-            y[:, k + 1] = x + (h / 6.0) * (k1 + 2 * k2 + 2 * k3 + k4)
+        # --------------------------------------------------------------------- #
+        # 2.  Precompute integer indices only once
+        # --------------------------------------------------------------------- #
+        from numpy import arange, roll
 
-        return Solution(success=True, y=y)
+        idx = arange(N, dtype=np.int64)
+        ip1 = roll(idx, -1)  # i+1
+        im1 = roll(idx, 1)   # i-1
+        im2 = roll(idx, 2)   # i-2
+
+        # --------------------------------------------------------------------- #
+        # 3.  Wrapper so that solve_ivp can call the numba routine
+        # --------------------------------------------------------------------- #
+        def rhs(t, x):
+            return lorenz96_rhs(t, x, ip1, im1, im2, N, F)
+
+        # --------------------------------------------------------------------- #
+        # 4.  Solver parameters
+        # --------------------------------------------------------------------- #
+        method = "RK45"
+        rtol = 1e-08
+        atol = 1e-08
+        t_eval = None if not debug else np.linspace(t0, t1, 1000)
+
+        # --------------------------------------------------------------------- #
+        # 5.  Solve the ODE
+        # --------------------------------------------------------------------- #
+        sol = solve_ivp(
+            rhs,
+            [t0, t1],
+            y0,
+            method=method,
+            rtol=rtol,
+            atol=atol,
+            t_eval=t_eval,
+            dense_output=debug,
+        )
+        return sol

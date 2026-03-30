@@ -1,37 +1,47 @@
-from typing import Any
+from __future__ import annotations
+from typing import Any, Dict
 
 class Solver:
-    def solve(self, problem: dict[str, Any]) -> dict[str, float]:
-        """
-        Calculates the edge expansion of a subset S in a directed graph.
-        Edge expansion is defined as: |{(u, v) | u ∈ S, v ∉ S}| / |S|
+    """
+    Efficient edge–expansion calculator for directed graphs.
 
-        Parameters
-        ----------
-        problem : dict
-            Must contain:
-            - "adjacency_list": List[List[int]] of outgoing neighbors for each node.
-            - "nodes_S": List[int] of nodes belonging to the subset S.
+    The implementation bypasses NetworkX entirely and operates directly on the
+    adjacency list supplied in ``problem['adjacency_list']``.  For a subset
+    ``S`` it counts the number of edges going from ``S`` to its complement
+    (``∂S``) and divides by ``min(|S|, |V \ S|)``.  This is equivalent to
+    NetworkX's ``edge_expansion`` for directed graphs, but avoids the
+    heavyweight graph construction and the safety checks performed by
+    NetworkX.
+    """
 
-        Returns
-        -------
-        dict[str, float]
-            {"edge_expansion": expansion_value}
-        """
-        adj_list = problem['adjacency_list']
-        nodes_S_set = set(problem['nodes_S'])
+    def solve(self, problem: Dict[str, Any]) -> Dict[str, float]:
+        adj_list = problem.get("adjacency_list", [])
+        nodes_S_list = problem.get("nodes_S", [])
+
         n = len(adj_list)
+        if n == 0 or not nodes_S_list:
+            return {"edge_expansion": 0.0}
 
-        # Edge cases: empty set or all nodes
-        if not nodes_S_set or len(nodes_S_set) == n:
+        # Convert the list of nodes in S to a set for O(1) membership tests
+        nodes_S = set(nodes_S_list)
+        sz_S = len(nodes_S)
+        if sz_S == n:
             return {"edge_expansion": 0.0}
 
         # Count edges leaving S
-        boundary = 0
-        for u in nodes_S_set:
-            for v in adj_list[u]:
-                if v not in nodes_S_set:
-                    boundary += 1
+        cut_edges = 0
+        for u in nodes_S:
+            # ``adj_list`` indices correspond to node ids; skip missing indices
+            if u < 0 or u >= n:  # defensive check
+                continue
+            neighbors = adj_list[u]
+            # Count how many neighbors are outside S
+            for v in neighbors:
+                if v not in nodes_S:
+                    cut_edges += 1
 
-        expansion = boundary / len(nodes_S_set)
-        return {"edge_expansion": float(expansion)}
+        # Edge expansion for directed graphs is |∂S| / min(|S|, |V\S|)
+        denom = sz_S if sz_S <= n - sz_S else n - sz_S
+        expansion_value = cut_edges / denom if denom else 0.0
+
+        return {"edge_expansion": expansion_value}

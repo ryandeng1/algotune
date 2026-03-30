@@ -1,38 +1,59 @@
-from ortools.sat.python import cp_model
+# solver.py
 from typing import List
+from ortools.sat.python import cp_model
 
 class Solver:
-    @staticmethod
-    def solve(problem: List[List[int]]) -> List[int]:
-        """
-        Minimum dominating set using OR-Tools CP-SAT.
+    """
+    Optimized CP‑SAT solution for the minimum dominating set problem.
 
-        The constraint for each node i is that at least one of its
-        incident vertices (including itself) is selected.  This way
-        every node either belongs to the set or has a selected neighbour.
+    The implementation focuses on avoiding Python overhead in the tight loops.
+    All graph information is pre‑processed into adjacency lists before the
+    constraints are added to the model, reducing the number of nested
+    Python loops at runtime.
+    """
 
-        The objective is simply to minimise the number of selected vertices.
+    def solve(self, problem: List[List[int]]) -> List[int]:
         """
+        Finds a minimum dominating set for the given graph.
+
+        :param problem: Adjacency matrix (list of lists) with 1 for an edge
+                        and 0 otherwise.
+        :return: List of vertex indices that form a minimum dominating set.
+        """
+        # Number of vertices
         n = len(problem)
-        model = cp_model.CpModel()
-        # Boolean variable for each node: 1 if selected, 0 otherwise
-        x = [model.NewBoolVar(f"x_{i}") for i in range(n)]
 
-        # For each node, at least one of its neighbours (or itself) must be selected.
+        # Pre‑compute the adjacency list for each vertex.
+        # Each entry contains the index of the vertex itself and all
+        # neighbours (so the constraint is that the sum of the
+        # corresponding BoolVars is at least one).
+        neighbors_of = []
         for i, row in enumerate(problem):
-            # Build the list of variables that cover node i
-            cover_vars = [x[j] for j, val in enumerate(row) if val == 1]
-            cover_vars.append(x[i])          # a node covers itself
-            model.AddBoolOr(cover_vars)
+            # Use list comprehension for speed
+            neigh = [i]
+            neigh.extend(j for j, val in enumerate(row) if val)
+            neighbors_of.append(neigh)
 
-        # Objective: minimise sum of selected nodes
-        model.Minimize(sum(x))
+        # Create the CP‑SAT model
+        model = cp_model.CpModel()
+        nodes = [model.NewBoolVar(f'x_{i}') for i in range(n)]
 
+        # Add dominating constraints
+        # Note: sum() on a list of BoolVars is efficient in CP‑SAT.
+        for neigh in neighbors_of:
+            model.Add(sum(nodes[j] for j in neigh) >= 1)
+
+        # Minimise the number of selected vertices
+        model.Minimize(sum(nodes))
+
+        # Create solver and solve
         solver = cp_model.CpSolver()
-        # Increase the time limit for larger instances (adjust if necessary)
-        solver.parameters.max_time_in_seconds = 10.0
+
+        # The default solver parameters are usually fast enough.
+        # For very large graphs you could tune time limits, threads, etc.
         status = solver.Solve(model)
 
+        # Extract solution
         if status == cp_model.OPTIMAL or status == cp_model.FEASIBLE:
-            return [i for i in range(n) if solver.Value(x[i]) == 1]
+            return [i for i, var in enumerate(nodes) if solver.Value(var)]
         return []

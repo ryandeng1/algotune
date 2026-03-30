@@ -1,21 +1,42 @@
+# solver.py
+from typing import Any
 import numpy as np
 from scipy.spatial import ConvexHull
-from typing import Any
+
 
 class Solver:
+    """
+    Computes the convex hull of a set of 2‑D or 3‑D points using
+    :class:`scipy.spatial.ConvexHull`.  The implementation is focused on
+    speed: the input data is converted once to a ``numpy.ndarray`` and
+    the expensive ``.tolist()`` conversions are performed only once.
+    """
+
+    def __init__(self) -> None:
+        # Cache the ConvexHull constructor and attributes to avoid global lookups
+        self._ConvexHull = ConvexHull
+
     def solve(self, problem: dict[str, Any]) -> dict[str, Any]:
         """
-        Compute the convex hull of a set of points using scipy.spatial.ConvexHull.
-        Fast conversion to NumPy array ensures the underlying C routine is used.
+        Compute the convex hull of the given set of points.
+
+        Parameters
+        ----------
+        problem
+            Dictionary with a key ``"points"`` pointing to an iterable of
+            coordinate tuples or a ``numpy.ndarray``.
+
+        Returns
+        -------
+        dict
+            A dictionary containing:
+            * ``"hull_vertices"`` – list of integer indices of the hull vertices
+            * ``"hull_points"``   – list of the corresponding point coordinates
         """
-        # Ensure we have a NumPy array (passed value may be list-like)
-        pts = np.asarray(problem["points"], dtype=float)
-
-        # Compute convex hull
-        hull = ConvexHull(pts)
-
-        # Convert the hull indices and points to Python lists
+        points = np.asarray(problem["points"])
+        hull = self._ConvexHull(points)
+        # ``hull.vertices`` is a 1‑D array of integer indices
         hull_vertices = hull.vertices.tolist()
-        hull_points = pts[hull.vertices].tolist()
-
+        # Slice once and convert to list of coordinates
+        hull_points = points[hull.vertices].tolist()
         return {"hull_vertices": hull_vertices, "hull_points": hull_points}

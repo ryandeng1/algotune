@@ -1,49 +1,94 @@
-import sys
-from collections import defaultdict
+# solver.py
+
+from typing import Any, Dict, List
 
 class Solver:
+    """
+    Implementation of articulation point detection via an iterative Tarjan's algorithm.
+    This version avoids heavy dependencies on networkx and therefore achieves faster
+    runtimes, especially on large sparse graphs.
+    """
 
-    def solve(self, problem: dict) -> dict[str, list[int]]:
-        n = problem['num_nodes']
-        edges = problem['edges']
+    def solve(self, problem: Dict[str, Any]) -> Dict[str, List[int]]:
+        """
+        Parameters
+        ----------
+        problem : dict
+            Must contain:
+                'num_nodes' : int
+                'edges'     : list[tuple[int, int]]
+
+        Returns
+        -------
+        dict
+            A mapping with key 'articulation_points' containing a sorted list
+            of articulation point indices.
+        """
+        n = problem["num_nodes"]
+        edges = problem["edges"]
 
         # Build adjacency list
-        adj = [[] for _ in range(n)]
+        adjacency: List[List[int]] = [[] for _ in range(n)]
         for u, v in edges:
-            adj[u].append(v)
-            adj[v].append(u)
+            adjacency[u].append(v)
+            adjacency[v].append(u)
 
-        disc = [-1] * n
-        low = [0] * n
+        # Tarjan's algorithm variables
+        disc = [-1] * n          # discovery times
+        low = [0] * n            # low-link values
         parent = [-1] * n
         ap = [False] * n
         time = 0
 
-        sys.setrecursionlimit(max(1000000, n * 2))
+        stack = []
 
-        def dfs(u: int):
-            nonlocal time
-            children = 0
-            disc[u] = low[u] = time
+        for start in range(n):
+            if disc[start] != -1:
+                continue  # already visited
+
+            # Start DFS from `start`
+            stack.append((start, 0, iter(adjacency[start])))
+            disc[start] = low[start] = time
             time += 1
-            for v in adj[u]:
-                if disc[v] == -1:            # Tree edge
-                    parent[v] = u
-                    children += 1
-                    dfs(v)
-                    low[u] = min(low[u], low[v])
 
-                    if parent[u] == -1 and children > 1:
-                        ap[u] = True
-                    if parent[u] != -1 and low[v] >= disc[u]:
-                        ap[u] = True
-                elif v != parent[u]:
-                    low[u] = min(low[u], disc[v])
+            while stack:
+                node, child_idx, neighbors = stack[-1]
+                try:
+                    nbr = next(neighbors)
+                except StopIteration:
+                    # Finished exploring all neighbors of `node`
+                    stack.pop()
+                    if parent[node] != -1:
+                        # Update low of parent
+                        if low[node] < low[parent[node]]:
+                            low[parent[node]] = low[node]
+                        # Articulation point check for non-root
+                        if low[node] >= disc[parent[node]]:
+                            ap[parent[node]] = True
+                    continue
 
-        for i in range(n):
-            if disc[i] == -1:
-                dfs(i)
+                if disc[nbr] == -1:
+                    # Tree edge
+                    parent[nbr] = node
+                    disc[nbr] = low[nbr] = time
+                    time += 1
+                    stack.append((nbr, 0, iter(adjacency[nbr])))
+                elif nbr != parent[node]:
+                    # Back edge
+                    if disc[nbr] < low[node]:
+                        low[node] = disc[nbr]
 
-        vertices = [i for i, val in enumerate(ap) if val]
-        vertices.sort()
-        return {'articulation_points': vertices}
+            # After finishing a connected component, check root condition
+            # Root is the first element of the component
+            if parent[start] == -1:
+                child_count = 0
+                for nb in adjacency[start]:
+                    if parent[nb] == start:
+                        child_count += 1
+                if child_count > 1:
+                    ap[start] = True
+
+        # Gather and sort articulation points
+        articulation_points = [i for i, val in enumerate(ap) if val]
+        articulation_points.sort()
+        return {"articulation_points": articulation_points}

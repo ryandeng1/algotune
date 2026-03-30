@@ -1,24 +1,45 @@
+# solver.py
+from typing import Any, Dict, List
+
 import numpy as np
 from scipy.spatial import ConvexHull
 
+
 class Solver:
     """
-    Optimized implementation of convex hull computation.
-    The main optimization lies in minimal data conversion:
-    * `points` is expected to be a NumPy array; if not, it is converted once.
-    * The hull vertices are obtained directly as a flat list.
+    Optimised solver for 2‑/3‑D convex hulls using SciPy's FastQhull implementation.
+    The only optimisation is to minimise data conversions and to initialise
+    the points array with the minimal required dtype.
     """
 
-    def _ensure_numpy(self, points):
-        """Convert input to a 2-D NumPy array if necessary."""
-        if isinstance(points, np.ndarray):
-            return points
-        return np.asarray(points, dtype=np.float64)
+    def _to_numpy(self, points: Any) -> np.ndarray:
+        """
+        Ensure the point array is a contiguous NumPy array with the smallest
+        practical dtype (float64).  Converting once here keeps the main
+        routine free of checks and reduces repeated allocations.
+        """
+        arr = np.asarray(points, dtype=np.float64, order="C")
+        if not arr.flags["C_CONTIGUOUS"]:
+            arr = np.ascontiguousarray(arr)
+        return arr
 
-    def solve(self, problem: dict) -> dict:
-        points = self._ensure_numpy(problem["points"])
+    def solve(self, problem: Dict[str, Any]) -> Dict[str, List]:
+        """
+        Calculate the convex hull vertices and corresponding points.
+
+        Parameters
+        ----------
+        problem : dict
+            ``{"points": array_like}`` where the dataframe is (n, dim) shaped.
+
+        Returns
+        -------
+        dict
+            ``"hull_vertices"`` – indices of vertices (list[int]).
+            ``"hull_points"``   – coordinates of these vertices (list[list[float]]).
+        """
+        points = self._to_numpy(problem["points"])
         hull = ConvexHull(points)
-        # Convert array indices to plain Python ints for serialization friendliness
-        hull_vertices = hull.vertices.tolist()
-        hull_points = points[hull.vertices].tolist()
-        return {"hull_vertices": hull_vertices, "hull_points": hull_points}
+        vertices = hull.vertices.tolist()
+        hull_points = points[vertices].tolist()
+        return {"hull_vertices": vertices, "hull_points": hull_points}

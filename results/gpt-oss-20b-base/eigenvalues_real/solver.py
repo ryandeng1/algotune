@@ -1,17 +1,25 @@
-from typing import Any
-import numpy as np
 from numpy.typing import NDArray
+import numpy as np
 
 class Solver:
-    def solve(self, problem: NDArray) -> list[float]:
-        """
-        Solve the eigenvalues problem for the given symmetric matrix.
-        The solution returned is a list of eigenvalues in descending order.
+    """
+    Solver for symmetric eigenvalue problems.
+    """
 
-        :param problem: A symmetric numpy matrix.
-        :return: List of eigenvalues in descending order.
+    @staticmethod
+    def solve(problem: NDArray) -> list[float]:
         """
-        # np.linalg.eigh returns eigenvalues in ascending order
-        eigenvalues = np.linalg.eigh(problem)[0]
-        # Reverse to descending and convert to list
-        return eigenvalues[::-1].tolist()
+        Return the eigenvalues of a symmetric matrix in descending order.
+
+        Parameters
+        ----------
+        problem : NDArray
+            Symmetric numpy matrix.
+
+        Returns
+        -------
+        list[float]
+            Eigenvalues sorted from largest to smallest.
+        """
+        # eigvalsh returns eigenvalues in ascending order for symmetric/hermitian matrices.
+        return np.linalg.eigvalsh(problem)[::-1].tolist()

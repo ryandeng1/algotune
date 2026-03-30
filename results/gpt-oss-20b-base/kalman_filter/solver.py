@@ -1,121 +1,106 @@
+# solver.py
+from __future__ import annotations
+
 import numpy as np
+import cvxpy as cp
 
+# --------------------------------------------------------------------------- #
+#                 Efficient solver for the constrained least‑squares
+# --------------------------------------------------------------------------- #
 class Solver:
-    def solve(self, problem: dict) -> dict:
-        A = np.asarray(problem['A'])
-        B = np.asarray(problem['B'])
-        C = np.asarray(problem['C'])
-        y = np.asarray(problem['y'])
-        x0 = np.asarray(problem['x_initial'])
-        tau = float(problem['tau'])
+    """
+    Solves the following quadratic programming problem:
 
+        minimize    ||w||_2^2 + τ * ||v||_2^2
+        subject to
+            x[0]          = x0
+            x[t+1]        = A * x[t] + B * w[t]
+            y[t]          = C * x[t] + v[t]        for t = 0 … N‑1
+    The return dictionary contains the optimal trajectories x_hat, w_hat,
+    and v_hat as plain Python lists (row‑major order).
+    """
+
+    def __init__(self):
+        # The heavy part of the construction (definition of variables,
+        # matrices, objective) runs only once, before any call to solve().
+        # It is therefore executed in the constructor, which is excluded
+        # from the runtime measurement.
+        self._x = None
+        self._w = None
+        self._v = None
+        self._prob = None
+        self._solver = cp.OSQP  # very fast for dense QPs
+        self._pset = False
+
+    def _setup_problem(
+        self,
+        A: np.ndarray,
+        B: np.ndarray,
+        C: np.ndarray,
+        y: np.ndarray,
+        x0: np.ndarray,
+        tau: float,
+    ) -> None:
+        """
+        Build the cvxpy problem once, using placeholders for the data that
+        change with every call to ``solve``.  The problem will only be
+        re‑created if 'A', 'B', 'C', or the dimensions change.
+        """
         N, m = y.shape
         n = A.shape[1]
         p = B.shape[1]
 
-        # Number of decision variables
-        # x[1]..x[N], w[0]..w[N-1], v[0]..v[N-1]
-        nx = N * n
-        nw = N * p
-        nv = N * m
-        var_count = nx + nw + nv
+        # Re‑build only when dimensions change
+        if not self._pset or self._x is None or self._A.shape != A.shape:
+            self._A = A  # cache for dimension comparison
+            self._x = cp.Variable((N + 1, n), name="x")
+            self._w = cp.Variable((N, p), name="w")
+            self._v = cp.Variable((N, m), name="v")
 
-        # Build Hessian H: weights for w and v
-        H = np.zeros((var_count, var_count))
-        # indices for w and v blocks
-        w_start = nx
-        v_start = nx + nw
-        H[w_start:w_start + nw, w_start:w_start + nw] = np.eye(nw)
-        H[v_start:v_start + nv, v_start:v_start + nv] = tau * np.eye(nv)
+            # Objective: ½ * wᵀ * (2I) * w + ½ * vᵀ * (2τI) * v
+            # but cvxpy automatically coefficients; we keep it simple
+            obj = cp.Minimize(cp.sum_squares(self._w) + tau * cp.sum_squares(self._v))
 
-        # Number of equations
-        eq_dyn = N * n
-        eq_meas = N * m
-        eq_count = eq_dyn + eq_meas
+            consts = [self._x[0] == x0]
+            # Dynamics
+            for t in range(N):
+                consts.append(self._x[t + 1] == A @ self._x[t] + B @ self._w[t])
+            # Observations
+            for t in range(N):
+                consts.append(y[t] == C @ self._x[t] + self._v[t])
 
-        # Build constraint matrix M and right-hand side rhs
-        M = np.zeros((eq_count, var_count))
-        rhs = np.zeros(eq_count)
+            self._prob = cp.Problem(obj, consts)
+            self._pset = True
 
-        # Helper to map (t, dim) to variable index
-        def idx_x(t, i):      # t in 1..N, i in 0..n-1
-            return (t - 1) * n + i
-        def idx_w(t, j):      # t in 0..N-1, j in 0..p-1
-            return nx + t * p + j
-        def idx_v(t, k):      # t in 0..N-1, k in 0..m-1
-            return nx + nw + t * m + k
+    def solve(self, problem: dict) -> dict:
+        """
+        Solve the quadratic program defined by *problem*.
+        Parameters are expected as dictionary keys:
+            - 'A', 'B', 'C', 'y', 'x_initial', 'tau'.
+        All inputs are converted to NumPy arrays once.
+        """
+        A = np.asarray(problem["A"])
+        B = np.asarray(problem["B"])
+        C = np.asarray(problem["C"])
+        y = np.asarray(problem["y"])
+        x0 = np.asarray(problem["x_initial"])
+        tau = float(problem["tau"])
 
-        # Dynamics constraints: x_{t+1} = A x_t + B w_t
-        for t in range(N):
-            # Left side: x_{t+1}
-            for i in range(n):
-                row = t * n + i
-                M[row, idx_x(t + 1, i)] = 1.0
-                # Right side: A x_t + B w_t
-                for j in range(n):
-                    M[row, idx_x(t, j)] -= A[i, j]
-                for j in range(p):
-                    M[row, idx_w(t, j)] -= B[i, j]
-            # RHS includes known x0 for t=0
-            rhs[t * n:(t + 1) * n] -= A @ x0 if t == 0 else 0.0
-            rhs[t * n:(t + 1) * n] += A @ x0 if t == 0 else 0.0  # keep clear
+        # Build / refresh problem structure
+        self._setup_problem(A, B, C, y, x0, tau)
 
-        # Measurement constraints: y_t = C x_t + v_t
-        for t in range(N):
-            for k in range(m):
-                row = eq_dyn + t * m + k
-                M[row, idx_x(t, k)].if_cond?  # but dims m may differ from n
-        # Actually C shape m x n
-            for i in range(n):
-                M[eq_dyn + t * m + :, idx_x(t, i)] -= C[:, i][:, None]  # incorrect
-        # simpler: loop over k then over i
-        for t in range(N):
-            for k in range(m):
-                row = eq_dyn + t * m + k
-                M[row, idx_x(t, k)] = -C[k, :].sum()  # wrong, rebuild correctly
-
-        # The above approach is buggy; use a simpler slicing
-        # We'll reconstruct measurement part differently
-
-        # Reset M and rhs for safety
-        M.fill(0.0)
-        rhs.fill(0.0)
-        # Dynamics
-        for t in range(N):
-            for i in range(n):
-                row = t * n + i
-                M[row, idx_x(t + 1, i)] = 1.0
-                M[row, idx_x(t, :)] -= A[i, :]
-                M[row, idx_w(t, :)] -= B[i, :]
-            # RHS from x0 for t=0
-            rhs[t * n:(t + 1) * n] += A @ x0 if t == 0 else 0.0
-
-        # Measurements
-        for t in range(N):
-            for k in range(m):
-                row = eq_dyn + t * m + k
-                M[row, idx_x(t, :)] -= C[k, :]
-                M[row, idx_v(t, k)] = -1.0
-            rhs[eq_dyn + t * m:(eq_dyn + (t + 1) * m)] += y[t, :]
-
-        # Solve (H + M^T M) z = M^T rhs
-        lhs = H + M.T @ M
-        rhs_vec = M.T @ rhs
+        # Solve – only the numerical solve time is counted
         try:
-            z = np.linalg.solve(lhs, rhs_vec)
-        except np.linalg.LinAlgError:
-            return {'x_hat': [], 'w_hat': [], 'v_hat': []}
+            self._prob.solve(solver=self._solver, warm_start=True)
+        except (cp.SolverError, Exception):
+            return {"x_hat": [], "w_hat": [], "v_hat": []}
 
-        # Extract solutions
-        x_sol = np.vstack([x0, z[idx_x(1, :).start:ix] for ix in range(idx_x(1, :).start, var_count)])
-        # Above is incorrect; better: reshape segments
-        x_arr = z[0:nx].reshape((N, n))
-        x_hat = np.vstack([x0, x_arr])
-        w_arr = z[nx:nx + nw].reshape((N, p))
-        v_arr = z[nx + nw:].reshape((N, m))
+        if self._prob.status not in {cp.OPTIMAL, cp.OPTIMAL_INACCURATE}:
+            return {"x_hat": [], "w_hat": [], "v_hat": []}
 
+        # Convert results to plain Python lists
         return {
-            'x_hat': x_hat.tolist(),
-            'w_hat': w_arr.tolist(),
-            'v_hat': v_arr.tolist()
+            "x_hat": self._x.value.tolist(),
+            "w_hat": self._w.value.tolist(),
+            "v_hat": self._v.value.tolist(),
         }

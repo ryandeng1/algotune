@@ -1,40 +1,36 @@
+# solver.py
 import numpy as np
+from typing import Any, Dict
 
 class Solver:
-    def solve(self, problem: dict) -> dict:
-        """
-        Efficient implementation of the l1‑pruning algorithm
-        described in https://doi.org/10.1109/CVPR.2018.00890.
-        The solution is obtained in O(n log n) time with fully
-        vectorised NumPy code.
-        """
-        v = np.asarray(problem["v"]).ravel()
+    """
+    Efficient solver for the l1_pruning quadratic program described
+    in https://doi.org/10.1109/CVPR.2018.00890.
+
+    The algorithm runs in O(n log n) due to a single sort.
+    """
+
+    def solve(self, problem: Dict[str, Any]) -> Dict[str, list]:
+        v = np.asarray(problem["v"], dtype=np.float64).ravel()
         k = float(problem["k"])
 
-        # Absolute values sorted in descending order
-        mu = np.sort(np.abs(v))[::-1]
-        if mu.size == 0:
-            return {"solution": []}
-
-        # Cumulative sum of the sorted values
+        # |v| sorted in descending order
+        mu = np.sort(np.abs(v), kind="mergesort")[::-1]
         cumsum = np.cumsum(mu)
 
-        # Candidate thresholds for each prefix of mu
-        # T_j = (cumsum_j - k) / (j+1)
-        indices = np.arange(1, mu.size + 1, dtype=float)
-        thresholds = (cumsum - k) / indices
+        # rhs[j] = (cumsum[j] - z) / (j+1)
+        divisor = np.arange(1, mu.size + 1, dtype=np.float64)
+        rhs = (cumsum - k) / divisor
 
-        # Find the first index where mu_j < T_j
-        # If none satisfies, use the last possible threshold
-        mask = mu < thresholds
+        # Find first index where mu[j] < rhs[j]
+        mask = mu < rhs
         if mask.any():
-            j = mask.argmax()   # first true index
-            theta = thresholds[j]
+            idx = np.argmax(mask)  # first True
+            theta = rhs[idx]
         else:
-            θ = thresholds[-1]
-            theta = θ
+            theta = 0.0
 
-        # Soft‑thresholding with the computed theta
+        # Compute shrinked vector
         w = np.maximum(np.abs(v) - theta, 0.0) * np.sign(v)
 
         return {"solution": w.tolist()}

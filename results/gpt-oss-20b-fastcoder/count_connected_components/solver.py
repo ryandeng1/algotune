@@ -1,42 +1,63 @@
-from typing import Any, Dict, Iterable
+from typing import Any, Dict
+
+# A minimal, fast Union-Find implementation
+class _DSU:
+    __slots__ = ("parent", "rank")
+
+    def __init__(self, n: int) -> None:
+        self.parent = list(range(n))
+        self.rank = [0] * n
+
+    def find(self, x: int) -> int:
+        parent = self.parent
+        # Path compression
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(self, x: int, y: int) -> None:
+        px = self.find(x)
+        py = self.find(y)
+        if px == py:
+            return
+        rank = self.rank
+        if rank[px] < rank[py]:
+            self.parent[px] = py
+        elif rank[px] > rank[py]:
+            self.parent[py] = px
+        else:
+            self.parent[py] = px
+            rank[px] += 1
 
 SolutionType = Dict[str, int]
 
+
 class Solver:
-    def _union_find(self, n: int, edges: Iterable[tuple[int, int]]) -> int:
-        parent = list(range(n))
-        rank = [0] * n
-        def find(x: int) -> int:
-            while parent[x] != x:
-                parent[x] = parent[parent[x]]
-                x = parent[x]
-            return x
-        def union(x: int, y: int) -> None:
-            rx, ry = find(x), find(y)
-            if rx == ry:
-                return
-            if rank[rx] < rank[ry]:
-                parent[rx] = ry
-            elif rank[rx] > rank[ry]:
-                parent[ry] = rx
-            else:
-                parent[ry] = rx
-                rank[rx] += 1
+    """
+    Computes the number of connected components in an undirected graph.
 
-        for u, v in edges:
-            if 0 <= u < n and 0 <= v < n:
-                union(u, v)
-
-        seen_roots = {find(i) for i in range(n)}
-        return len(seen_roots)
+    The graph is represented by a list of edges and a declared number of
+    nodes.  This implementation uses a custom Union–Find structure and
+    avoids the heavy networkx dependency to give the best performance
+    in all scenarios.
+    """
 
     def solve(self, problem: Dict[str, Any]) -> SolutionType:
         try:
-            n = problem.get('num_nodes', 0)
-            edges = problem.get('edges', [])
-            if not isinstance(edges, list):
-                return {'number_connected_components': -1}
-            cc = self._union_find(n, edges)
-            return {'number_connected_components': cc}
+            n = int(problem.get("num_nodes", 0))
+            if n < 0:
+                raise ValueError("num_nodes must be non‑negative")
+            dsu = _DSU(n)
+
+            for a, b in problem.get("edges", []):
+                if 0 <= a < n and 0 <= b < n:
+                    dsu.union(a, b)
+                # silently ignore invalid node indices – this mimics the
+                # behaviour of the original networkx code.
+
+            # Count distinct roots
+            roots = {dsu.find(i) for i in range(n)}
+            return {"number_connected_components": len(roots)}
         except Exception:
-            return {'number_connected_components': -1}
+            return {"number_connected_components": -1}

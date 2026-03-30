@@ -1,79 +1,78 @@
-from typing import Any, Dict, List
+from typing import Any, List
 from ortools.sat.python import cp_model
 
-
+# ---------------------------------------------
+# Highly optimised CP‑SAT solver for JSSP
+# ---------------------------------------------
 class Solver:
-    """
-    CP‑SAT solver for the job shop scheduling problem.
-    Works for small to medium instances (≤ 50 jobs, ≤ 20 machines).
-    """
-    def solve(self, problem: Dict[str, Any]) -> List[List[int]]:
+    def solve(self, problem: dict[str, Any]) -> List[List[int]]:
         """
-        Return the earliest start time for each operation in the optimal schedule.
-
-        Parameters
-        ----------
-        problem : dict
-            Dictionary with keys:
-                - "num_machines" : int
-                - "jobs" : list of list of tuples (machine_index, duration)
-
-        Returns
-        -------
-        list[list[int]] or []
-            Nested list of job start times. Empty list if the model is infeasible.
+        Solve a Job‑Shop Scheduling Problem using OR‑Tools CP‑SAT.
+        The implementation is deliberately lean: it creates only the
+        variables that are absolutely necessary and avoids any
+        extraneous loops or temporary objects.
         """
+        jobs = problem["jobs"]
+        num_machines = problem["num_machines"]
 
-        num_machines, jobs = problem["num_machines"], problem["jobs"]
+        # Maximum possible makespan – an upper bound that is tight enough
+        horizon = sum(p for job in jobs for _, p in job)
 
-        # Build CP‑SAT model
         model = cp_model.CpModel()
-        # Upper bound for horizon: sum of all durations
-        horizon = sum(d for job in jobs for _, d in job)
 
-        # Create tasks and gather machine intervals
-        machine_intervals: Dict[int, List[cp_model.IntervalVar]] = {m: [] for m in range(num_machines)}
-        task_start = {}
+        # Keep intervals per machine for the NoOverlap constraint
+        machine_intervals: List[List[cp_model.IntervalVar]] = [[] for _ in range(num_machines)]
+
+        # For each operation we store its start variable and the duration
+        starts: List[List[cp_model.IntVar]] = []
+
         for j, job in enumerate(jobs):
-            for k, (m, p) in enumerate(job):
-                # Interval variable
-                start = model.NewIntVar(0, horizon, f'start_{j}_{k}')
-                end = model.NewIntVar(0, horizon, f'end_{j}_{k}')
-                interval = model.NewIntervalVar(start, p, end, f'interval_{j}_{k}')
+            job_start_vars: List[cp_model.IntVar] = []
+            prev_start: cp_model.IntVar | None = None
+            prev_dur = 0
 
-                task_start[(j, k)] = start
+            for k, (m, dur) in enumerate(job):
+                # Start variable: 0 .. horizon
+                st = model.NewIntVar(0, horizon, f'start_{j}_{k}')
+                # Build an interval directly from start, length and computed end
+                interval = model.NewIntervalVar(st, dur, st + dur, f'op_{j}_{k}')
+
+                # Separate out the operation’s start for further use
+                job_start_vars.append(st)
+
+                # Add the precedence constraint between consecutive ops
+                if prev_start is not None:
+                    model.Add(st >= prev_start + prev_dur)
+
+                # Register the interval to its machine
                 machine_intervals[m].append(interval)
 
-                # Precedence constraints within the same job
-                if k > 0:
-                    prev_end = task_start[(j, k - 1)].Index() + jobs[j][k - 1][1]
-                    model.Add(start >= prev_end)
+                # Update for next iteration
+                prev_start = st
+                prev_dur = dur
+
+            starts.append(job_start_vars)
 
         # No‑overlap on each machine
-        for m in range(num_machines):
-            model.AddNoOverlap(machine_intervals[m])
+        for intv in machine_intervals:
+            model.AddNoOverlap(intv)
 
-        # Makespan computation
-        makespan = model.NewIntVar(0, horizon, 'makespan')
-        last_ends = [task_start[(j, len(job) - 1)].Index() + job[-1][1]
-                     for j, job in enumerate(jobs)]
-        model.AddMaxEquality(makespan, last_ends)
-
-        # Objective: minimize makespan
+        # Makespan minimisation
+        makespan = model.NewIntVar(0, horizon, "makespan")
+        last_ops = [interval.GetEndVar() for job, intv in zip(jobs, machine_intervals) for interval in intv[-1:]]
+        model.AddMaxEquality(makespan, last_ops)
         model.Minimize(makespan)
 
         # Solve
         solver = cp_model.CpSolver()
-        solver.parameters.max_time_in_seconds = 30.0  # optional time limit
-
         status = solver.Solve(model)
-        if status != cp_model.OPTIMAL and status != cp_model.FEASIBLE:
+
+        if status != cp_model.OPTIMAL:
             return []
 
-        # Extract solution
-        solution: List[List[int]] = []
-        for j, job in enumerate(jobs):
-            starts = [solver.Value(task_start[(j, k)]) for k in range(len(job))]
-            solution.append(starts)
+        # Extract start times
+        solution: List[List[int]] = [
+            [solver.Value(st) for st in job_starts] for job_starts in starts
+        ]
 
         return solution

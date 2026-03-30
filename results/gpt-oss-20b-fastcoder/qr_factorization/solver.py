@@ -1,28 +1,31 @@
 import numpy as np
+from typing import Any, Dict
 
 class Solver:
-    def solve(self, problem: dict[str, np.ndarray]) -> dict[str, dict[str, list[list[float]]]]:
+    """
+    Fast QR factorization solver.
+    Uses NumPy's LAPACK-backed qr implementation which is already highly optimised.
+    """
+
+    def solve(self, problem: Dict[str, np.ndarray]) -> Dict[str, Dict[str, Any]]:
         """
-        Compute the reduced QR factorization of the matrix A.
-        Uses SciPy for a faster backend when available, otherwise falls back to NumPy.
+        Compute the reduced QR factorization A = Q @ R for the matrix supplied in *problem*.
 
         Parameters
         ----------
-        problem : dict[str, np.ndarray]
-            Dictionary with a single key 'matrix' containing the input array.
+        problem : dict
+            Must contain a key ``"matrix"`` mapping to a 2‑D NumPy array.
 
         Returns
         -------
-        dict[str, dict[str, list[list[float]]]]
-            Dictionary containing the Q and R matrices as nested Python lists.
+        dict
+            ``{"QR": {"Q": Q_list, "R": R_list}}`` where the lists are regular Python
+            nested lists containing the elements of Q and R.
         """
         A = problem["matrix"]
 
-        # Prefer scipy.linalg.qr if it is available and offers a speed boost
-        try:
-            from scipy.linalg import qr  # local import to avoid costly global import
-            Q, R = qr(A, mode="reduced")
-        except Exception:
-            Q, R = np.linalg.qr(A, mode="reduced")
+        # LAPACK-backed QR, mode='reduced' returns Q with orthonormal columns
+        Q, R = np.linalg.qr(A, mode="reduced")
 
+        # Convert to plain Python lists for serialisation / output consistency.
         return {"QR": {"Q": Q.tolist(), "R": R.tolist()}}

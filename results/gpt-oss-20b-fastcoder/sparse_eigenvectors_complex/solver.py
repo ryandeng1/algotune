@@ -1,28 +1,49 @@
+# solver.py
+
 import numpy as np
-from scipy import sparse, sparse.linalg
+from scipy.sparse.linalg import eigs
 
 class Solver:
     """
-    Fast eigenvector solver for sparse matrices.
+    Optimised eigenvalue solver.
+    Uses SciPy's sparse eigs with vectorised sorting to minimise Python‑level overhead.
     """
-    def solve(self, problem: dict[str, Any]) -> list[complex]:
-        A = problem['matrix']
-        k = problem['k']
+    def solve(self, problem: dict) -> list[np.ndarray]:
+        """
+        Solve the eigenvalue problem for the given square sparse matrix.
+        Returns the `k` eigenvectors with the largest eigenvalues (by absolute value)
+        sorted from largest to smallest modulus.
+
+        Parameters
+        ----------
+        problem : dict
+            Dictionary with keys:
+                "matrix" : sparse matrix (SciPy CSR/CSC)
+                "k"      : int, number of eigenvalues/vectors to compute
+
+        Returns
+        -------
+        list[ndarray]
+            List of eigenvectors corresponding to the largest |eigenvalue|, in descending order.
+        """
+        A = problem["matrix"]
+        k = int(problem["k"])
+
         N = A.shape[0]
+        # Initial guess – all ones (matches data type of A)
+        v0 = np.ones(N, dtype=A.dtype)
 
-        # Initial guess close to 1 in magnitude to speed up convergence
-        v0 = np.full(N, 1, dtype=A.dtype)
+        # Compute the k dominant eigenpairs
+        # maxiter and ncv are set to sensible defaults to avoid unnecessary work
+        vals, vecs = eigs(A, k=k, v0=v0, maxiter=N * 200,
+                           ncv=max(2 * k + 1, 20))
 
-        # eigs is efficient for large sparse problems.  We give it a tight
-        # convergence budget that is proportional to the requested number of
-        # eigenvalues to avoid unnecessary work.
-        eigvals, eigvecs = sparse.linalg.eigs(
-            A, k=k, v0=v0,
-            maxiter=200 * k,          # a heuristic upper bound
-            ncv=max(2 * k, 20),      # number of Lanczos vectors
-            return_eigenvectors=True
-        )
+        # Sort indices by decreasing absolute value of eigenvalues
+        idx = np.argsort(-np.abs(vals))
 
-        # Sort by magnitude of eigenvalue and return the eigenvectors
-        sorted_idx = np.argsort(-np.abs(eigvals))
-        return [eigvecs[:, i] for i in sorted_idx]
+        # Rearrange eigenvectors according to sorted indices
+        # vecs is shape (N, k); we transpose only once at the end
+        sorted_vecs = vecs[:, idx].T
+
+        # Convert to a Python list of 1‑D numpy arrays
+        return [vec for vec in sorted_vecs]

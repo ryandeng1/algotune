@@ -1,31 +1,33 @@
+from typing import Dict, List
 import numpy as np
-from scipy.linalg import expm as scipy_expm
+from scipy.linalg import expm
 
 class Solver:
+    """
+    Solver for computing the matrix exponential exp(A).
+    Uses scipy's LAPACK-backed expm for speed.
+    """
 
-    def solve(self, problem: dict[str, np.ndarray]) -> dict[str, list[list[float]]]:
+    def solve(self, problem: Dict[str, np.ndarray]) -> Dict[str, List[List[float]]]:
         """
-        Compute the matrix exponential of 'matrix' using the most efficient
-        available method for the size of the matrix.
+        Compute the matrix exponential of the given square matrix.
+
+        Parameters
+        ----------
+        problem :
+            Dictionary containing the key 'matrix' with a NumPy array.
+
+        Returns
+        -------
+        dict
+            A dictionary with key 'exponential' containing the matrix
+            exponential as a list-of-lists of floats.
         """
-        A = problem['matrix']
-        n, m = A.shape
-        assert n == m, "Matrix must be square"
-
-        # For very small matrices use scipy.expm (optimized)
-        if n <= 20:
-            expA = scipy_expm(A)
-        else:
-            # For larger matrices, eigen-decomposition is usually faster
-            try:
-                w, v = np.linalg.eig(A)
-                # Avoid numeric problems with nearly singular v
-                if np.linalg.norm(v - v[:, np.newaxis], axis=0).min() < 1e-12:
-                    raise Exception("Ill‑conditioning")
-                exp_w = np.exp(w)
-                expA = v @ np.diag(exp_w) @ np.linalg.inv(v)
-            except Exception:
-                # Fall back to scipy
-                expA = scipy_expm(A)
-
+        A = problem["matrix"]
+        # Ensure the matrix is in the expected shape and type.
+        if A.ndim != 2 or A.shape[0] != A.shape[1]:
+            raise ValueError("Input must be a square matrix.")
+        # Compute the exponential using the highly-optimized LAPACK routine.
+        expA = expm(A.astype(np.float64, copy=False))
+        # Convert the result to the required list-of-lists format.
         return {"exponential": expA.tolist()}

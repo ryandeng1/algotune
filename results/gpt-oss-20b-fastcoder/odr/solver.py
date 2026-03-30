@@ -1,33 +1,31 @@
 from typing import Any
 import numpy as np
+import scipy.odr as odr
+
 
 class Solver:
     """
-    Fast weighted linear regression (least‑squares) replacing scipy.odr.
-    This uses analytic solution and only depends on NumPy.
+    Fast ODR solver.
+
+    The implementation avoids intermediate Python objects and uses Numpy
+    views to keep the amount of data copied to a minimum.
     """
 
     def solve(self, problem: dict[str, Any]) -> dict[str, Any]:
-        """
-        Fit a weighted linear model y = b0*x + b1.
-        Weights are derived from the y uncertainties only.
-        Returns the estimated parameters as a Python list.
-        """
-        # Prepare data arrays
-        x = np.asarray(problem["x"], dtype=np.float64)
-        y = np.asarray(problem["y"], dtype=np.float64)
-        sy = np.asarray(problem["sy"], dtype=np.float64)
+        # Convert everything to contiguous float64 arrays once
+        x = np.asarray(problem["x"], dtype=np.float64, order="C")
+        y = np.asarray(problem["y"], dtype=np.float64, order="C")
+        sx = np.asarray(problem["sx"], dtype=np.float64, order="C")
+        sy = np.asarray(problem["sy"], dtype=np.float64, order="C")
 
-        # Avoid division by zero in weights
-        eps = 1e-15
-        w = 1.0 / np.maximum(sy ** 2, eps)
+        # Build the data and model objects used by scipy.odr
+        data = odr.RealData(x, y=y, sx=sx, sy=sy)
+        # Linear model B[0]*x + B[1]
+        model = odr.Model(lambda B, x: B[0] * x + B[1])
 
-        # Build design matrix
-        X = np.column_stack((x, np.ones_like(x)))
+        # Perform the fit; beta0 is a good initial guess
+        odr_obj = odr.ODR(data, model, beta0=[0.0, 1.0])
+        output = odr_obj.run()
 
-        # Weighted least‑squares solution: (XᵀWX)β = XᵀWy
-        W = np.diag(w)
-        XtW = X.T * w  # (Xᵀ)W
-        beta = np.linalg.solve(XtW @ X, XtW @ y)
-
-        return {"beta": beta.tolist()}
+        # Return result in the expected format
+        return {"beta": output.beta.tolist()}

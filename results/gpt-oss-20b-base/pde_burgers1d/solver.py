@@ -1,71 +1,70 @@
+from typing import Any
 import numpy as np
-from numba import njit, prange
+from scipy.integrate import solve_ivp
 
 class Solver:
-    @staticmethod
-    def solve(problem: dict[str, np.ndarray | float]) -> dict[str, list[float]]:
-        """
-        Fast explicit ODE integration for the 1‑D viscous Burgers equation.
-        Uses a single upwind discretisation for the inviscid term and a
-        centered second‑order scheme for diffusion.  The integration time
-        step is chosen to produce 100 points in the interval [t0, t1].
-        """
-        y0 = np.asarray(problem["y0"], dtype=np.float64)
-        t0, t1 = problem["t0"], problem["t1"]
-        params = problem["params"]
+    """
+    A fast solver for the 1‑D viscous Burgers equation.
+    The main optimisation is that the RHS is vectorised and the padding
+    is performed only once per integration step using a temporary
+    zero‑padded array.  All constants are pre‑computed.
+    """
 
-        # ------------------------------------------------------------------
-        # Numerical parameters -------------------------------------------------
-        # ------------------------------------------------------------------
-        n_points = y0.size                            # spatial grid size
-        n_steps  = 99                                 # gives 100 points including t0
-        dt = (t1 - t0) / n_steps                      # fixed time step
-        dx = params["dx"]
-        nu = params["nu"]
+    def solve(self, problem: dict[str, np.ndarray | float]) -> dict[str, list[float]]:
+        sol = self._solve(problem, debug=False)
+        if sol.success:
+            return sol.y[:, -1].tolist()
+        raise RuntimeError(f"Solver failed: {sol.message}")
 
-        # ------------------------------------------------------------------
-        # Pre‑allocate output -------------------------------------------------
-        # ------------------------------------------------------------------
-        sol = np.empty((n_steps + 1, n_points), dtype=np.float64)
-        sol[0] = y0
+    def _solve(self, problem: dict[str, np.ndarray | float], debug: bool = True) -> Any:
+        y0: np.ndarray = np.asarray(problem["y0"])
+        t0: float = problem["t0"]
+        t1: float = problem["t1"]
+        params: dict = problem["params"]
 
-        # ------------------------------------------------------------------
-        # Numba kernel --------------------------------------------------------
-        # ------------------------------------------------------------------
-        @njit(parallel=True)
-        def integrate(u, n_steps, dt, dx, nu, sol):
-            for step in prange(n_steps):
-                # Upwind advection
-                lhs = np.zeros_like(u)
-                rhs = np.zeros_like(u)
+        # Pre‑compute constants
+        nu: float = params["nu"]
+        dx: float = params["dx"]
+        inv_dx: float = 1.0 / dx
+        inv_dx2: float = inv_dx * inv_dx
+        n: int = y0.size
 
-                # Forward and backward differences with zero padding
-                u_pad = np.empty(n_points + 2, dtype=np.float64)
-                u_pad[0] = 0.0
-                u_pad[1:-1] = u
-                u_pad[-1] = 0.0
+        # Temporary array for padding
+        u_pad: np.ndarray = np.empty(n + 2, dtype=y0.dtype)
 
-                dfwd = (u_pad[2:] - u_pad[1:-1]) / dx
-                dbwd = (u_pad[1:-1] - u_pad[:-2]) / dx
+        def burgers_eq(t: float, u: np.ndarray) -> np.ndarray:
+            # Pad with zeros on both sides
+            u_pad[0] = u_pad[-1] = 0.0
+            u_pad[1:-1] = u
 
-                lhs = np.where(u >= 0, u * dbwd, u * dfwd)
+            # Central, forward and backward differences
+            center = u_pad[1:-1]
+            diff_forward = (u_pad[2:] - center) * inv_dx
+            diff_backward = (center - u_pad[:-2]) * inv_dx
 
-                # Diffusion (central second derivative)
-                d2 = (u_pad[2:] - 2 * u_pad[1:-1] + u_pad[:-2]) / dx ** 2
+            # Advection term with upwind choice
+            advection = np.where(center >= 0, center * diff_backward, center * diff_forward)
 
-                rhs = -lhs + nu * d2
+            # Diffusion term
+            diffusion = (u_pad[2:] - 2 * center + u_pad[:-2]) * inv_dx2
 
-                # Explicit Euler step
-                u += dt * rhs
-                sol[step + 1] = u
-            return sol
+            return -advection + nu * diffusion
 
-        # ------------------------------------------------------------------
-        # Run integration ----------------------------------------------------
-        # ------------------------------------------------------------------
-        integrate(y0, n_steps, dt, dx, nu, sol)
+        # Solver options
+        rtol = 1e-06
+        atol = 1e-06
+        method = "RK45"
+        # Use t_eval only for debugging to avoid extra evaluations
+        t_eval = np.linspace(t0, t1, 100) if debug else None
 
-        # ------------------------------------------------------------------
-        # Return the last time snapshot -------------------------------------
-        # ------------------------------------------------------------------
-        return {"solution": sol[-1].tolist()}
+        sol = solve_ivp(
+            burgers_eq,
+            [t0, t1],
+            y0,
+            t_eval=t_eval,
+            method=method,
+            rtol=rtol,
+            atol=atol,
+            dense_output=debug,
+        )
+        return sol

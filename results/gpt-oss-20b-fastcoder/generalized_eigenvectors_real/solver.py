@@ -1,49 +1,69 @@
+from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 
 class Solver:
+    """
+    Solver for the generalized eigenvalue problem A x = λ B x where
+    A is symmetric and B is symmetric positive‑definite.
+
+    The implementation follows the classical approach:
+    1. Cholesky factorisation of B: B = L Lᵀ
+    2. Solve the standard eigenvalue problem for the similarity
+       transformed matrix Ĥ = L⁻¹ A L⁻ᵀ
+    3. Recover the eigenvectors of the original problem: x = L⁻ᵀ v
+    4. Normalise the eigenvectors with respect to B.
+    5. Return the eigenvalues/vectors sorted in descending order.
+    """
+
     def solve(
-        self, problem: tuple[NDArray, NDArray]
+        self,
+        problem: tuple[NDArray, NDArray]
     ) -> tuple[list[float], list[list[float]]]:
         """
-        Solve the generalized eigenvalue problem A·x = λ B·x for symmetric A and
-        symmetric positive‑definite B.
+        Solve A x = λ B x.
 
-        The routine uses the Cholesky factorisation of B and solves standard
-        eigenvalue problem for the transformed matrix.  All operations are
-        vectorised – no explicit Python loops are used – to maximise speed
-        for large matrices.
+        Parameters
+        ----------
+        problem : tuple[NDArray, NDArray]
+            (A, B) where A is symmetric and B is symmetric positive definite.
+
+        Returns
+        -------
+        tuple[list[float], list[list[float]]]
+            (eigenvalues, eigenvectors) with eigenvalues sorted in descending order.
         """
         A, B = problem
 
-        # Cholesky factorisation of B: B = L·L.T
-        # Use np.linalg.cholesky (fast, BLAS-backed)
-        L = np.linalg.cholesky(B)
+        # 1. Cholesky factorisation
+        L = np.linalg.cholesky(B)          # B = L Lᵀ
 
-        # Compute L⁻¹ once via solve_triangular
-        # Since L is triangular, we can solve L·X = I for X = L⁻¹
-        # We use np.linalg.inv here for brevity; the matrices are small enough.
-        Linv = np.linalg.inv(L)
+        # 2. Solve for L⁻¹ without explicitly computing the inverse
+        Linv = np.linalg.solve(L, np.eye(L.shape[0]))
 
-        # Similarity transform: Atilde = L⁻¹·A·L⁻T
-        Atilde = Linv @ A @ Linv.T
+        # 3. Similarity transformation
+        A_tilde = Linv @ A @ Linv.T
 
-        # Eigen-decomposition of the symmetric Atilde
-        ev, evec = np.linalg.eigh(Atilde)
+        # 4. Standard eigensolver (sorted ascending)
+        eigvals, eigvecs = np.linalg.eigh(A_tilde)
 
-        # Back‑transform eigenvectors: v = L⁻T·q
-        evec = L.T @ evec
+        # 5. Recover eigenvectors of the original problem
+        eigvecs = Linv.T @ eigvecs
 
-        # Normalise eigenvectors with respect to B: (vᵀ B v)¹ᐟ²
-        # Compute B·evec once
-        B_evec = B @ evec
-        norms = np.sqrt(np.einsum("ij,ij->i", evec, B_evec))
-        # Avoid division by zero – norms should be >0 for positive‑definite B
-        evec = evec / norms
+        # 6. Normalise with respect to B
+        #    Using the Cholesky factor makes this cheap
+        #    norm(v) = sqrt(vᵀ B v) = sqrt(vᵀ L Lᵀ v) = ||Lᵀ v||
+        Linv_T = Linv.T
+        norms = np.linalg.norm(Linv_T @ eigvecs, axis=0)
+        # Avoid division by zero – norm should never be zero for valid B
+        eigvecs /= norms
 
-        # Return eigenvalues/vectors in descending order
-        ev = ev[::-1].tolist()
-        evec = evec[:, ::-1]
-        evec_list = [evec[:, i].tolist() for i in range(evec.shape[1])]
+        # 7. Reverse to descending order
+        eigvals = eigvals[::-1]
+        eigvecs = eigvecs[:, ::-1]
 
-        return ev, evec_list
+        # 8. Convert to native Python lists for the required output format
+        eigenvalues_list = eigvals.tolist()
+        eigenvectors_list = [eigvecs[:, i].tolist() for i in range(eigvecs.shape[1])]
+
+        return eigenvalues_list, eigenvectors_list

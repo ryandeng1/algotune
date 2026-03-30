@@ -1,39 +1,68 @@
+#!/usr/bin/env python3
+"""
+Optimal solver for generalized symmetric eigenvalue problems.
+
+The implementation focuses on minimizing Python overhead and making use of
+NumPy's highly optimized linear algebra kernels. In particular,
+the routine is fully vectorised, avoids explicit matrix inversions where
+possible, and eliminates redundant control‑flow constructs.
+"""
+
+from __future__ import annotations
+
 import numpy as np
-from numpy.typing import NDArray
+from numpy.linalg import solve as solve_np
+from numpy.linalg import cholesky
+from scipy.linalg import solve_triangular
 
 class Solver:
-    def solve(self, problem: tuple[NDArray, NDArray]) -> tuple[list[float], list[list[float]]]:
-        """
-        Solve the generalized eigenvalue problem A·x = λ B·x.
-        Uses a Cholesky-based transformation and efficient Numpy operations.
-        """
+    """Solver for the generalized eigenvalue problem  A·x = λ B·x with
+    symmetric matrices A and positive‑definite symmetric matrix B.
+
+    The algorithm follows the standard transformation to the
+    ordinary eigenvalue problem:
+
+        B = L·Lᵀ   (Cholesky factorisation)
+        Ã = L⁻¹ A L⁻ᵀ
+
+    The ordinary eigenproblem Ã·y = λ y is solved with `numpy.linalg.eigh`.
+    Back‑transformation of eigenvectors together with the proper
+    normalisation gives the requested results.
+    """
+
+    def solve(self, problem: tuple[np.ndarray, np.ndarray]) -> tuple[list[float], list[list[float]]]:
         A, B = problem
 
-        # Cholesky factorisation of B (B = L·Lᵀ)
-        L = np.linalg.cholesky(B)
+        # 1.  Cholesky factorisation of B
+        L = cholesky(B, lower=True)                 # B = L Lᵀ
 
-        # Transform the problem to a standard eigenvalue problem
-        # Ã = L⁻¹ · A · L⁻ᵀ
-        Linv = np.linalg.inv(L)                   #  smaller matrices so cost is acceptable
-        Atilde = Linv @ A @ Linv.T
+        # 2.  Solve the ordinary eigenvalue problem
+        #    Compute Atilde = L⁻¹ A L⁻ᵀ without forming any inverses explicitly
+        LinvA = solve_triangular(L, A, lower=True)   # L⁻¹ A
+        Atilde = solve_triangular(L.T, LinvA, lower=False)  # L⁻¹ A L⁻ᵀ
 
-        # Solve the standard problem
-        eigvals, eigvecs_tilde = np.linalg.eigh(Atilde)
+        evals, evecs = np.linalg.eigh(Atilde)        # ascending order
 
-        # Back‑transform the eigenvectors:
-        #  x = L⁻ᵀ · y   (solve Lᵀ·x = y)
-        eigvecs = np.linalg.solve(L.T, eigvecs_tilde)
+        # 3.  Back‑transform eigenvectors
+        #    y = evecs   (columns), x = Lᵀ y
+        x = solve_triangular(L.T, evecs, lower=False)
 
-        # Normalise eigenvectors so that vᵀ B v = 1
-        # Compute all norms in one matrix product
-        norms = np.sqrt(np.sum(eigvecs * (B @ eigvecs), axis=0))
-        eigvecs = eigvecs / norms
+        # 4.  Normalise eigenvectors:  vᵀ B v = ||L v||²
+        #    Compute L v via forward substitution and then its norm.
+        #    This is more accurate than computing vᵀ B v directly.
+        norms = np.linalg.norm(solve_triangular(L, x, lower=True), axis=0)
+        if np.any(norms == 0):
+            # Avoid division by zero; zero vectors remain unchanged.
+            norms = np.where(norms == 0, 1.0, norms)
+        x /= norms
 
-        # Reverse order to obtain descending eigenvalues
-        eigvals = eigvals[::-1]
-        eigvecs = eigvecs[:, ::-1]
+        # 5.  Sort in descending order of eigenvalues
+        rev = np.arange(len(evals)-1, -1, -1)
+        evals_desc = evals[rev]
+        x_desc = x[:, rev]
 
-        # Convert to the required list format
-        eigvals_list = eigvals.tolist()
-        eigvecs_list = [eigvecs[:, i].tolist() for i in range(eigvecs.shape[1])]
-        return eigvals_list, eigvecs_list
+        # 6.  Convert to plain Python objects
+        eigenvalues = evals_desc.tolist()
+        eigenvectors = [list(col) for col in x_desc.T]
+
+        return eigenvalues, eigenvectors

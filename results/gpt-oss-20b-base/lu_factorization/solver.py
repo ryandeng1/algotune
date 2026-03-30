@@ -1,54 +1,40 @@
+# solver.py
+
 import numpy as np
-from scipy.linalg import lu_factor
+from scipy.linalg import lu
 
 class Solver:
     """
-    Optimised LU-factorisation solver.
-
-    This implementation uses :func:`scipy.linalg.lu_factor` which
-    performs the factorisation in a single pass and avoids the overhead
-    of creating the permutation matrix explicitly.  Post‑processing
-    reconstructs the required ``P``, ``L`` and ``U`` matrices only once
-    before converting them to Python lists for the final output.
+    Fast solver for LU factorisation problems.
     """
 
-    @staticmethod
-    def _build_permutation(piv: np.ndarray) -> np.ndarray:
+    def solve(self, problem: dict[str, np.ndarray]) -> dict[str, dict[str, list[list[float]]]]:
         """
-        Convert pivot array from ``scipy.linalg.lu_factor`` to a permutation matrix.
+        Computes the LU decomposition A = P L U for a given square matrix `A`.
 
         Parameters
         ----------
-        piv : np.ndarray
-            1‑based pivot indices returned by ``lu_factor``.
+        problem : dict[str, np.ndarray]
+            Dictionary containing an entry 'matrix' mapping to a 2‑D NumPy array
+            representing the matrix to factorise.
+
+        Returns
+        -------
+        dict[str, dict[str, list[list[float]]]]
+            Dictionary with a single key ``'LU'`` that contains the
+            following nested dictionaries:
+                * ``'P'`` – permutation matrix
+                * ``'L'`` – lower triangular matrix
+                * ``'U'`` – upper triangular matrix
+
+            All matrices are converted to ordinary Python nested lists for
+            compatibility with the test harness.
         """
-        n = piv.shape[0]
-        # pivot array is 1‑based and contains row swaps
-        perm = np.arange(n)
-        for i in range(n):
-            j = piv[i] - 1
-            if i != j:
-                perm[i], perm[j] = perm[j], perm[i]
-        P = np.eye(n)[perm]
-        return P
+        # Extract the input matrix
+        A = problem["matrix"]
 
-    def solve(self, problem: dict[str, np.ndarray]) -> dict[str, dict[str, list[list[float]]]]:
-        A = problem['matrix']
-        lu, piv = lu_factor(A)
+        # Direct numpy ‑ and scipy backed LU decomposition
+        P, L, U = lu(A)
 
-        # Construct permutation matrix
-        P = self._build_permutation(piv)
-
-        # Extract L and U from the combined matrix
-        n = lu.shape[0]
-        L = np.tril(lu, -1) + np.eye(n)
-        U = np.triu(lu)
-
-        # Convert to lists for the expected output format
-        return {
-            'LU': {
-                'P': P.tolist(),
-                'L': L.tolist(),
-                'U': U.tolist()
-            }
-        }
+        # Convert to plain Python lists for the interface
+        return {"LU": {"P": P.tolist(), "L": L.tolist(), "U": U.tolist()}}

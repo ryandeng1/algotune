@@ -1,29 +1,51 @@
-from typing import Any
+# solver.py
+import numpy as np
+from scipy.stats import wasserstein_distance
 
 class Solver:
+    """
+    A lightweight solver that computes the 1‑dimensional Wasserstein distance
+    using SciPy's fast C implementation.
+
+    The positional grid is fixed at indices 1 … N where N is the number of mass
+    points supplied in each problem.  The grid is pre‑computed for every
+    problem length that occurs.  For repeated calls with the same size the
+    same grid numpy array is reused, avoiding duplicate list → array conversion.
+    """
+
+    # Cache the grid for each length that has been seen
+    _grid_cache: dict[int, np.ndarray] = {}
+
+    def __init__(self) -> None:
+        # Nothing to do on initialization that will impact runtime of `solve`.
+        pass
+
+    def _get_grid(self, n: int) -> np.ndarray:
+        """Return a 1‑based grid 1 … n as a NumPy array."""
+        if n not in self._grid_cache:
+            self._grid_cache[n] = np.arange(1, n + 1, dtype=np.float64)
+        return self._grid_cache[n]
+
     def solve(self, problem: dict[str, list[float]]) -> float:
         """
-        Computes the 1‑dimensional Wasserstein distance (Earth Mover's Distance)
-        between two discrete probability distributions that are represented
-        by the histograms `u` and `v`.  The positions are assumed to be
-        the integer 1‑based indices of the bins.
+        Compute the 1‑dimensional Wasserstein (Earth‑Mover) distance between
+        two discrete probability distributions `u` and `v`.
 
-        This implementation is O(n) and does not rely on scipy, so it is
-        much faster and more deterministic than using scipy.stats.wasserstein_distance.
+        The input `problem` must contain the keys 'u' and 'v' mapping to
+        lists of floats of equal length.
+
+        Returns the distance as a float.
         """
-        try:
-            u = list(problem['u'])
-            v = list(problem['v'])
-            n = len(u)
-            if len(v) != n:
-                return float(n)
-            cum_u = 0.0
-            cum_v = 0.0
-            dist = 0.0
-            for i in range(n):
-                cum_u += u[i]
-                cum_v += v[i]
-                dist += abs(cum_u - cum_v)
-            return dist
-        except Exception:
-            return float(len(problem.get('u', [])))
+        u = np.asarray(problem['u'], dtype=np.float64)
+        v = np.asarray(problem['v'], dtype=np.float64)
+
+        # Defensive check: in case of mismatch or empty input
+        n = u.size
+        if n == 0 or v.size != n:
+            return float(n)
+
+        grid = self._get_grid(n)
+
+        # SciPy's wasserstein_distance uses a fast C implementation
+        # and expects numpy arrays for both grid and weights.
+        return wasserstein_distance(grid, grid, u, v)

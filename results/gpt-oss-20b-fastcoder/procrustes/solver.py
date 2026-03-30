@@ -1,32 +1,38 @@
-from typing import Any, Dict, List
 import numpy as np
 
 class Solver:
-    def solve(self, problem: Dict[str, np.ndarray]) -> Dict[str, List[List[float]]]:
-        """
-        Solve the Orthogonal Procrustes Problem (OPP) via
-        SVD of M = B Aᵀ and returning G = U Vᵀ.
-        """
-        # Extract and validate inputs
-        A = problem.get("A")
-        B = problem.get("B")
-        if A is None or B is None:
-            return {}
+    """Fast orthogonal Procrustes solver using NumPy's SVD."""
 
-        # Ensure arrays and same shape
-        A = np.asarray(A, dtype=np.float64, order="C")
-        B = np.asarray(B, dtype=np.float64, order="C")
+    def solve(self, problem: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
+        """
+        Compute the orthogonal matrix G that best aligns A to B in the sense of
+        minimizing ‖G A − B‖₂, where G is orthogonal.
+
+        Parameters
+        ----------
+        problem : dict
+            Must contain 'A' and 'B', both numpy arrays of identical shape.
+
+        Returns
+        -------
+        dict
+            ``{'solution': G}`` where G is an orthogonal matrix (numpy.ndarray).
+        """
+        # Fast array conversion (no copy if already ndarray)
+        A = np.asarray(problem.get('A'))
+        B = np.asarray(problem.get('B'))
+
         if A.shape != B.shape:
             return {}
 
-        # Compute M = B @ Aᵀ efficiently
-        M = B.dot(A.T)
+        # Compute B Aᵀ
+        M = B @ A.T
 
-        # SVD with reduced matrices for speed
+        # Singular value decomposition (full_matrices=False gives a
+        # minimal‑size |U| and |V| for rectangular matrices)
         U, _, Vt = np.linalg.svd(M, full_matrices=False)
 
-        # Compute G = U @ Vt
+        # Optimal orthogonal matrix
         G = U @ Vt
 
-        # Convert to nested Python list for return
-        return {"solution": G.tolist()}
+        return {"solution": G}

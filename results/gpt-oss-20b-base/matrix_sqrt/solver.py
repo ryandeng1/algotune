@@ -1,24 +1,40 @@
-from typing import Any
+# solver.py
+from __future__ import annotations
+
 import numpy as np
+from scipy.linalg import sqrtm
 
 class Solver:
+    """
+    Optimised matrix square root solver using :func:`scipy.linalg.sqrtm`.
+    """
+
     def solve(self, problem: dict[str, np.ndarray]) -> dict[str, dict[str, list[list[complex]]]]:
         """
-        Solve X @ X = A for the principal matrix square root X.
-        Uses eigen‑decomposition to avoid the overhead of scipy.linalg.sqrtm.
+        Computes the principal matrix square root X of the input matrix A such that
+        X @ X = A.
+
+        The method simply delegates to `sqrtm`; errors are propagated as an empty
+        matrix result to keep the public API unchanged.
+
+        Parameters
+        ----------
+        problem
+            Dictionary containing the key ``"matrix"`` mapped to the matrix A.
+
+        Returns
+        -------
+        dict
+            Dictionary with key ``"sqrtm"`` containing sub‑dictionary ``{"X": …}``
+            where the value is a list of lists of complex numbers representing
+            the square root matrix.
         """
         A = problem["matrix"]
         try:
-            # Eigen‑decomposition
-            w, v = np.linalg.eig(A)
-            # Diagonal matrix of square roots of eigenvalues
-            sqrt_w = np.sqrt(w)
-            # Reconstruct the square root
-            Vinv = np.linalg.inv(v)
-            X = v @ np.diag(sqrt_w) @ Vinv
+            # sqrtm returns a tuple (X, Z). We only need X.
+            X, _ = sqrtm(A, disp=False)
         except Exception:
-            # Return an empty result on failure
             return {"sqrtm": {"X": []}}
         else:
-            # Convert to nested Python lists with complex numbers
+            # Convert numpy array to nested Python lists (complex numbers)
             return {"sqrtm": {"X": X.tolist()}}

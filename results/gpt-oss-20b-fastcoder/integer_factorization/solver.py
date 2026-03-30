@@ -1,84 +1,68 @@
-import random
-import math
+# solver.py
 from typing import Dict
+import math
+import sympy
 
-# ------------------------------------------------------------
-# Miller‑Rabin primality test (deterministic for 64‑bit ints)
-# ------------------------------------------------------------
-def _is_prime(n: int) -> bool:
-    if n < 2:
-        return False
-    small_primes = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37]
-    for p in small_primes:
-        if n % p == 0:
-            return n == p
-    # write n-1 as d*2^s
-    d, s = n - 1, 0
-    while d & 1 == 0:
-        d >>= 1
-        s += 1
-    # deterministically safe bases for n < 2**64
-    for a in [2, 325, 9375, 28178, 450775, 9780504, 1795265022]:
-        if a % n == 0:
-            continue
-        x = pow(a, d, n)
-        if x == 1 or x == n - 1:
-            continue
-        for _ in range(s - 1):
-            x = pow(x, 2, n)
-            if x == n - 1:
-                break
-        else:
-            return False
-    return True
-
-# ------------------------------------------------------------
-# Pollard‑Rho factorisation (recursive, returns *all* prime factors)
-# ------------------------------------------------------------
-def _pollard_rho(n: int) -> int:
-    if n % 2 == 0:
-        return 2
-    # choose random polynomial f(x) = x^2 + c
-    while True:
-        c = random.randrange(1, n)
-        f = lambda x: (pow(x, 2, n) + c) % n
-        x, y, d = 2, 2, 1
-        while d == 1:
-            x = f(x)
-            y = f(f(y))
-            d = math.gcd(abs(x - y), n)
-        if d != n:
-            return d
-
-def _factor(n: int, res: list):
-    if n == 1:
-        return
-    if _is_prime(n):
-        res.append(n)
-        return
-    d = _pollard_rho(n)
-    _factor(d, res)
-    _factor(n // d, res)
-
-# ------------------------------------------------------------
-# Solver
-# ------------------------------------------------------------
 class Solver:
+    """
+    Efficient solver for the factorisation of a composite number that
+    is the product of exactly two prime numbers.
+    """
+
+    def _prime_factor(self, n: int) -> int | None:
+        """
+        Return the first prime factor of n or None if n is prime.
+        Uses a simple deterministic trial division up to sqrt(n).
+        """
+        if n % 2 == 0:
+            return 2
+        limit = math.isqrt(n)
+        # Increment by 2 to skip even numbers
+        step = 2
+        i = 3
+        while i <= limit:
+            if n % i == 0:
+                return i
+            i += step
+        return None
+
     def solve(self, problem: Dict[str, int]) -> Dict[str, int]:
         """
-        Factorises a composite number into exactly two prime factors
-        using a fast Pollard‑Rho algorithm.
+        Find the two prime factors `p` and `q` of the composite integer.
 
-        :param problem: Dictionary containing the composite integer under key 'composite'.
-        :return: Dictionary with keys 'p' and 'q' containing the two prime factors (p < q).
-        :raises ValueError: If the factorisation does not yield exactly two primes.
+        Parameters
+        ----------
+        problem : dict
+            Must contain a single key ``'composite'`` whose value is an int.
+
+        Returns
+        -------
+        dict
+            ``{'p': p, 'q': q}`` where `p < q` and both are prime.
+
+        Raises
+        ------
+        ValueError
+            If the input is not a valid integer,
+            or if the integer does not have exactly two prime factors.
         """
-        n = int(problem['composite'])
-        if n <= 1:
-            raise ValueError(f"Input must be a composite integer > 1, got {n}")
-        factors: list[int] = []
-        _factor(n, factors)
-        if len(factors) != 2:
-            raise ValueError(f'Expected 2 factors, but got {len(factors)}.')
-        p, q = sorted(map(int, factors))
-        return {'p': p, 'q': q}
+        if not isinstance(problem, dict):
+            raise ValueError(f"Expected a dict, got {type(problem)}")
+
+        composite_val = problem.get("composite")
+        if not isinstance(composite_val, int):
+            raise ValueError(f"Composite value must be an int, got {composite_val!r}")
+
+        # Find the first factor
+        f1 = self._prime_factor(composite_val)
+        if f1 is None or f1 == composite_val:
+            raise ValueError("Composite number is prime or 1, not a product of two primes")
+
+        f2 = composite_val // f1
+
+        # Verify both factors are prime
+        if not (sympy.isprime(f1) and sympy.isprime(f2)):
+            raise ValueError("Found factors are not both prime")
+
+        p, q = sorted((int(f1), int(f2)))
+        return {"p": p, "q": q}

@@ -1,53 +1,62 @@
-import numpy as np
-from contextlib import nullcontext
+# solver.py
+from __future__ import annotations
+
 from typing import List
 
-# ------------------------------------------------------------------------------
-# Helper to keep a single thread for BLAS routines (used only if available)
-# ------------------------------------------------------------------------------
+import numpy as np
+from contextlib import nullcontext
 
+# -------------------------------------------------------------
+# Helper to keep NumPy BLAS single‑threaded (no external deps)
+# -------------------------------------------------------------
 try:
-    from numba import threadpool_limits  # type: ignore
-except Exception:
+    from threadpoolctl import threadpool_limits
+except Exception:  # pragma: no cover
     threadpool_limits = None
 
 def _single_thread_blas():
+    """Context manager that limits any NumPy BLAS thread pool to a single thread."""
     if threadpool_limits is None:
         return nullcontext()
     return threadpool_limits(limits=1)
 
-# ------------------------------------------------------------------------------
+# -------------------------------------------------------------
 # Solver implementation
-# ------------------------------------------------------------------------------
-
+# -------------------------------------------------------------
 class Solver:
     """
-    Solves for all real roots of a polynomial given by its coefficients in
-    descending order.
+    Find all real roots of a real‑coefficient polynomial.
+
+    The polynomial is supplied as a list of coefficients in descending order.
+    Roots are returned sorted in decreasing order.
     """
 
     def solve(self, problem: List[float]) -> List[float]:
         """
-        Find all real roots of the polynomial defined by *problem*.
-
         Parameters
         ----------
-        problem : list[float]
-            Polynomial coefficients [aₙ, aₙ₋₁, ..., a₀].
+        problem:
+            List of coefficients `[a_n, a_{n-1}, ..., a_0]` describing
+            the polynomial `a_n*x^n + a_{n-1}*x^{n-1} + ... + a_0`.
 
         Returns
         -------
-        list[float]
-            Sorted list of real roots in descending order.
+        List[float]
+            Real roots sorted in descending order.
         """
-        # Compute roots once in a single‑threaded BLAS environment.
+        # Compute the roots – NumPy takes care of the heavy lifting
         with _single_thread_blas():
-            coeffs = np.asarray(problem, dtype=float)
-            roots = np.roots(coeffs)
+            roots = np.roots(problem)
 
-        # Keep only roots with negligible imaginary part.
-        imag_tol = 1e-7  # tighter tolerance – faster than using np.real_if_close
-        real_roots = np.real(roots[np.abs(np.imag(roots)) <= imag_tol])
+        # Drop roots that are effectively real
+        # `real_if_close` uses 2**-x tolerance internally; 0.001 forces removal
+        roots = np.real_if_close(roots, tol=0.001)
 
-        # Sort in descending order and convert to Python list.
-        return np.sort(real_roots, kind="quicksort")[::-1].tolist()
+        # Take the real part – any tiny imaginary remains are discarded
+        roots = np.real(roots)
+
+        # Sort in decreasing order in a single pass
+        roots.sort()
+        roots = roots[::-1]
+
+        return roots.tolist()

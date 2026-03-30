@@ -1,54 +1,100 @@
-import numpy as np
+from __future__ import annotations
+
 import cvxpy as cp
+import numpy as np
+from typing import Any, Dict
+
 
 class Solver:
     """
-    Fast implementation of robust Kalman filtering with Huber loss.
+    A lightweight implementation of a robust Kalman filtering problem.
+    The formulation is a quadratic program with Huber loss on the measurement residual.
     """
 
-    def solve(self, problem: dict) -> dict:
-        # Matrix & vector extraction (numpy)
-        A = np.asarray(problem["A"], dtype=float)
-        B = np.asarray(problem["B"], dtype=float)
-        C = np.asarray(problem["C"], dtype=float)
-        y = np.asarray(problem["y"], dtype=float)
-        x0 = np.asarray(problem["x_initial"], dtype=float)
+    @staticmethod
+    def _to_np(value: Any) -> np.ndarray:
+        """Safe conversion to a NumPy array."""
+        return np.asarray(value, dtype=float)
+
+    def solve(self, problem: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Solve the robust Kalman filtering problem using the Huber loss function.
+        Parameters
+        ----------
+        problem : dict
+            Dictionary containing:
+                A : array-like, shape (n, n)
+                B : array-like, shape (n, p)
+                C : array-like, shape (m, n)
+                y : array-like, shape (N, m)
+                x_initial : array-like, shape (n,)
+                tau : float
+                M : float
+        Returns
+        -------
+        dict
+            Dictionary containing solution arrays:
+                x_hat : list[list[float]]
+                w_hat : list[list[float]]
+                v_hat : list[list[float]]
+        """
+        # ------------------------------------------------------------------
+        # Extract problem data (avoids Python loops)
+        # ------------------------------------------------------------------
+        A = self._to_np(problem["A"])
+        B = self._to_np(problem["B"])
+        C = self._to_np(problem["C"])
+        y = self._to_np(problem["y"])
+        x0 = self._to_np(problem["x_initial"])
         tau = float(problem["tau"])
         M = float(problem["M"])
 
-        N, m = y.shape
-        n = A.shape[0]           # state dimension
+        N, m = y.shape           # number of time-steps and measurement dimension
+        n = A.shape[1]           # state dimension
         p = B.shape[1]           # process noise dimension
 
-        # Decision variables
-        x = cp.Variable((N + 1, n))
-        w = cp.Variable((N, p))
-        v = cp.Variable((N, m))
+        # ------------------------------------------------------------------
+        # CVXPY variables
+        # ------------------------------------------------------------------
+        x = cp.Variable((N + 1, n), name="x")   # state trajectory
+        w = cp.Variable((N, p), name="w")       # process noise
+        v = cp.Variable((N, m), name="v")       # measurement noise
 
-        # Objective: ‖w‖²₂ + τ Σ Huber(‖v_t‖₂, M)
-        obj = (
-            cp.sum_squares(w) +  # process noise
-            tau * cp.sum(
-                cp.huber(cp.norm(v, axis=1), M)
-            )
-        )
+        # ------------------------------------------------------------------
+        # Objective: quadratic process noise + Huber residual cost
+        # ------------------------------------------------------------------
+        process_noise_term = cp.sum_squares(w)
+        # Vectorised Huber on the 1‑norm of each residual: ||v[t,:]||₂
+        residual_norms = cp.norm(v, axis=1)
+        measurement_noise_term = tau * cp.sum(cp.huber(residual_norms, M))
+        obj = cp.Minimize(process_noise_term + measurement_noise_term)
 
+        # ------------------------------------------------------------------
         # Constraints
+        # ------------------------------------------------------------------
         constraints = [x[0] == x0]
-        constraints.append(x[1:] == A @ x[:-1] + B @ w)          # state update for all t
-        constraints.append(y == C @ x[:-1] + v)                  # measurement equations
+        # System dynamics and measurement equations
+        for t in range(N):
+            constraints.append(x[t + 1] == A @ x[t] + B @ w[t])
+            constraints.append(y[t] == C @ x[t] + v[t])
 
-        # Solve
-        prob = cp.Problem(cp.Minimize(obj), constraints)
-        prob.solve(solver=cp.OSQP, warm_start=True, verbose=False)
-
-        # Check result and return
-        if prob.status in {cp.OPTIMAL, cp.OPTIMAL_INACCURATE} \
-                and x.value is not None:
-            return {
-                "x_hat": x.value.tolist(),
-                "w_hat": w.value.tolist(),
-                "v_hat": v.value.tolist(),
-            }
-        else:
+        # ------------------------------------------------------------------
+        # Solve using the default solver (OSQP / ECOS for QP)
+        # ------------------------------------------------------------------
+        prob = cp.Problem(obj, constraints)
+        try:
+            prob.solve(solver=cp.OSQP, verbose=False)
+        except cp.SolverError:
             return {"x_hat": [], "w_hat": [], "v_hat": []}
+
+        # ------------------------------------------------------------------
+        # Return the solution
+        # ------------------------------------------------------------------
+        if prob.status not in {cp.OPTIMAL, cp.OPTIMAL_INACCURATE} or x.value is None:
+            return {"x_hat": [], "w_hat": [], "v_hat": []}
+
+        return {
+            "x_hat": x.value.tolist(),
+            "w_hat": w.value.tolist(),
+            "v_hat": v.value.tolist(),
+        }

@@ -1,30 +1,29 @@
-import numpy as np
+# solver.py
+"""
+An aggressive CVXPY formulation for the rocket landing problem.
+All computations are vectorised, and the problem is solved with
+OSQP – a fast QP solver – which usually outperforms the default
+solvers for this structure.
+"""
+
+from __future__ import annotations
+from typing import Any
+
 import cvxpy as cp
+import numpy as np
+
 
 class Solver:
-    """
-    Very lightweight wrapper around CVXPY that solves the rocket‑landing
-    minimum‑fuel problem.  The implementation is intentionally minimal
-    to keep the overhead low – all data processing is done with NumPy
-    and the optimisation problem is passed straight to CVXPY with a
-    fast solver (ECOS or OSQP).
 
-    The code below is tuned for speed while still retaining the
-    original semantics of the problem.
-    """
+    def solve(self, problem: dict[str, Any]) -> dict[str, Any]:
+        """Fast CVXPY optimisation for the rocket landing problem."""
 
-    @staticmethod
-    def _num_to_array(obj):
-        """Convert potential list/tuple inputs to a 1‑D NumPy array of type float."""
-        return np.asarray(obj, dtype=float).flatten()
-
-    def solve(self, problem: dict) -> dict:
         # ------------------------------------------------------------------
-        # 1.  Extract problem data (NumPy arrays are used throughout for speed)
+        # 1. Extract problem data as tensors for immediate use
         # ------------------------------------------------------------------
-        p0 = self._num_to_array(problem["p0"]).reshape(1, 3)
-        v0 = self._num_to_array(problem["v0"]).reshape(1, 3)
-        p_target = self._num_to_array(problem["p_target"]).reshape(1, 3)
+        p0 = np.asarray(problem["p0"], dtype=np.float64)
+        v0 = np.asarray(problem["v0"], dtype=np.float64)
+        p_target = np.asarray(problem["p_target"], dtype=np.float64)
 
         g = float(problem["g"])
         m = float(problem["m"])
@@ -34,53 +33,63 @@ class Solver:
         gamma = float(problem["gamma"])
 
         # ------------------------------------------------------------------
-        # 2.  Variable definitions (matrix‑shaped for vectorised constraints)
+        # 2. CVXPY variables
         # ------------------------------------------------------------------
-        V = cp.Variable((K + 1, 3))
-        P = cp.Variable((K + 1, 3))
-        F = cp.Variable((K, 3))
+        V = cp.Variable((K + 1, 3), name="V")  # velocity
+        P = cp.Variable((K + 1, 3), name="P")  # position
+        F = cp.Variable((K, 3), name="F")      # thrust
 
         # ------------------------------------------------------------------
-        # 3.  Constraints
+        # 3. Constraints – fully vectorised, no python loops
         # ------------------------------------------------------------------
         constraints = [
-            V[0] == v0,                     # initial velocity
-            P[0] == p0,                     # initial position
-            V[K] == np.zeros((1, 3)),       # final velocity zero
-            P[K] == p_target,               # target position
-            P[:, 2] >= 0,                   # altitude non‑negative
-            # Euler integration of velocity
+            V[0] == v0,
+            P[0] == p0,
+            V[K] == np.zeros(3, dtype=np.float64),
+            P[K] == p_target,
+            P[:, 2] >= 0,  # keep altitude non‑negative
+            # Dynamics for horizontal velocity
             V[1:, :2] == V[:-1, :2] + h * (F[:, :2] / m),
-            V[1:, 2]  == V[:-1, 2]  + h * (F[:, 2] / m - g),
-            # Trapezoidal integration of position
-            P[1:] == P[:-1] + h / 2.0 * (V[:-1] + V[1:]),
-            # Thrust bound
+            # Dynamics for vertical velocity (including gravity)
+            V[1:, 2] == V[:-1, 2] + h * (F[:, 2] / m - g),
+            # Trapezoidal integration to update positions
+            P[1:] == P[:-1] + h / 2 * (V[:-1] + V[1:]),
+            # Thrust magnitude limits
             cp.norm(F, 2, axis=1) <= F_max,
         ]
 
         # ------------------------------------------------------------------
-        # 4.  Objective – total fuel consumption
+        # 4. Objective – minimise fuel consumption
         # ------------------------------------------------------------------
         fuel_cost = gamma * cp.sum(cp.norm(F, axis=1))
         objective = cp.Minimize(fuel_cost)
 
         # ------------------------------------------------------------------
-        # 5.  Problem definition and solve
+        # 5. Problem definition
         # ------------------------------------------------------------------
         prob = cp.Problem(objective, constraints)
 
-        # Use a fast solver.  
-        # ECOS is reasonably fast for medium sized QPs; OSQP can be chosen
-        # if only box constraints were present.
+        # ------------------------------------------------------------------
+        # 6. Solve – explicit OSQP gives fast QP solving
+        # ------------------------------------------------------------------
         try:
-            prob.solve(solver=cp.ECOS, verbose=False, eps_abs=1e-6, eps_rel=1e-6)
+            prob.solve(
+                solver=cp.OSQP,
+                verbose=False,
+                warm_start=True,
+                max_iter=200000,       # generous but realistic limit
+                eps_abs=1e-8,
+                eps_rel=1e-8,
+                alpha=1.8,             # over-relaxation parameter
+            )
         except Exception:
+            # Any failure – return empty solution
             return {"position": [], "velocity": [], "thrust": [], "fuel_consumption": None}
 
         # ------------------------------------------------------------------
-        # 6.  Return results
+        # 7. Validation & result extraction
         # ------------------------------------------------------------------
-        if prob.status not in {cp.OPTIMAL, cp.OPTIMAL_INACCURATE}:
+        if prob.status not in (cp.OPTIMAL, cp.OPTIMAL_INACCURATE) or P.value is None:
             return {"position": [], "velocity": [], "thrust": [], "fuel_consumption": None}
 
         return {

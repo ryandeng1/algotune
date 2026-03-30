@@ -1,41 +1,43 @@
+# solver.py
 import numpy as np
 import scipy.linalg as la
 from numpy.typing import NDArray
 from typing import Tuple, List, Any
 
 class Solver:
+    """
+    Optimised solver for the generalized eigenvalue problem
+    A · x = λ B · x.
+    """
     def solve(self, problem: Tuple[NDArray, NDArray]) -> Tuple[List[complex], List[List[complex]]]:
-        """
-        Solve a generalized eigenvalue problem A·x = λ B·x.  Returns the
-        eigenvalues sorted in descending order (by real part then imag part)
-        together with the corresponding unit‑norm (reciprocal) eigenvectors.
-        """
         A, B = problem
-        # Scale the matrices only if the norm differs a lot from 1
-        scale = np.linalg.norm(B, ord="fro")
-        if scale != 0 and abs(scale - 1) > 1e-3:
-            A = A / scale
-            B = B / scale
 
-        # The eigh interface solves the solved problem for symmetric/Hermitian matrices.
-        # It returns the eigenvalues in ascending order.
-        vals, vecs = la.eigh(A, B)
+        # Scale B to improve numerical stability
+        scale = np.sqrt(np.linalg.norm(B, ord='fro'))
+        A_scaled = A / scale
+        B_scaled = B / scale
 
-        # Normalize eigenvectors (reciprocal normalization is already performed by eigh)
-        norms = np.linalg.norm(vecs, axis=0, keepdims=True)
-        vecs = vecs / norms
+        # Solve the generalized eigenvalue problem
+        eigenvalues, eigenvectors = la.eig(A_scaled, B_scaled)
 
-        # Reverse order to obtain descending eigenvalues
-        vals = vals[::-1]
-        vecs = vecs[:, ::-1]
+        # Normalise eigenvectors to unit L2 norm in a vectorised way
+        norms = np.linalg.norm(eigenvectors, axis=0, keepdims=True)
+        # Guard against division by zero
+        safe_norms = np.where(norms == 0, 1, norms)
+        eigenvectors = eigenvectors / safe_norms
 
-        # Sort by real part, then imaginary part, both descending
-        order = np.lexsort((-vals.imag, -vals.real))
-        vals = vals[order]
-        vecs = vecs[:, order]
+        # Sort by real part descending, then imaginary part descending
+        idx = np.argsort(
+            -eigenvalues.real, kind='mergesort'
+        ).argsort()  # stable sort by real part asc -> we will reverse
+        # We need a secondary key for imaginary part. Use lexsort with negative imag
+        # Assemble pairs for sorting
+        pairs = list(zip(eigenvalues, np.split(eigenvectors, eigenvectors.shape[1], axis=1)))
+        pairs.sort(key=lambda p: (-p[0].real, -p[0].imag))
+        sorted_eigenvalues, sorted_eigenvectors = zip(*pairs)
 
-        # Convert to plain Python lists
-        eigenvalues: List[complex] = vals.tolist()
-        eigenvectors: List[List[complex]] = [vec.tolist() for vec in vecs.T]
+        # Convert to required Python list format
+        eigenvalues_list: List[complex] = list(sorted_eigenvalues)
+        eigenvectors_list: List[List[complex]] = [list(vec.flatten()) for vec in sorted_eigenvectors]
 
-        return eigenvalues, eigenvectors
+        return eigenvalues_list, eigenvectors_list

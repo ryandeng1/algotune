@@ -1,30 +1,48 @@
-import math
+# solver.py
+
 from typing import Any, Dict
+from mpmath import mp
 
 class Solver:
     """
-    Fast approximation of the number of non‑trivial zeros of the Riemann zeta
-    function with imaginary part <= t using the standard explicit formula.
+    Computes the number of non‑trivial zeros of the Riemann zeta function
+    with imaginary part ≤ t.  The computation is performed with
+    ``mpmath.mp.nzeros`` which is already highly optimised in C.
     """
 
-    @staticmethod
-    def _zero_count_approx(t: float) -> int:
+    # A single caller of ``solve`` will set ``mp.dps`` just once
+    # to a value that gives sufficient precision for most test cases.
+    _initialized = False
+
+    def _ensure_initialized(self) -> None:
         """
-        Return the integer count of zeros in the critical strip up to height t.
-        Uses the Riemann–von Mangoldt explicit formula:
-            N(t) ≈ (t/(2π)) * log(t/(2π)) - t/(2π) + 7/8
-        For t <= 2π the count is zero.
+        Initialise the mpmath context only once to avoid repeated
+        re‑setting of ``mp.dps``.  This method is executed on the first
+        call to ``solve``.
         """
-        if t < 2 * math.pi:
-            return 0
-        t_over_2pi = t / (2 * math.pi)
-        return int(t_over_2pi * math.log(t_over_2pi) - t_over_2pi + 0.875)
+        if not self._initialized:
+            # Regular precision of 15 decimal places is usually enough
+            # for the zero counting routine in typical benchmarks.
+            mp.dps = max(15, mp.dps)
+            self._initialized = True
 
     def solve(self, problem: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Count zeta zeros along the critical strip with imaginary part <= t.
-        The argument `problem` must contain the key `'t'` with a float value.
+        Parameters
+        ----------
+        problem
+            Dictionary with key ``'t'`` which contains the height
+            (imaginary part) up to which zeta zeros should be counted.
+
+        Returns
+        -------
+        dict
+            Dictionary containing the computed count under the key
+            ``'result'``.
         """
-        t = float(problem['t'])
-        count = self._zero_count_approx(t)
-        return {'result': count}
+        self._ensure_initialized()
+
+        t = problem['t']
+        # Use the highly optimised C implementation via mpmath
+        result = mp.nzeros(t)
+        return {'result': result}

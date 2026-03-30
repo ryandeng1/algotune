@@ -1,33 +1,4 @@
-# The provided implementation is already optimal for the
-# constraint that we must use a SAT solver to solve the
-# set‑cover problem.  The time‑critical part is the conversion
-# of the set‑cover instance to SAT.  The conversion is
-# dominated by the following operations:
-#   • Building the universe set
-#   • Adding a clause for each element in the universe
-#   • Building the cardinality constraint with a
-#     sequential counter encoding
-#
-# The code below is a direct, minimal, but still correct
-# re‑implementation that removes a few redundant
-# operations, uses local references for speed, and
-# accepts the problem already as a list of subsets
-# without any additional preprocessing.
-#
-# Swapping the original iterative buildup for a
-# single call to the built‑in `CardEnc.atleast` that
-# exploits the VarPool avoids the overhead of
-# repeatedly constructing large Python lists.
-#
-# The SAT solving part remains unchanged; we still
-# iterate using binary search to find the minimum
-# number of sets.  The solver factory is called
-# with the smallest name that guarantees the
-# same performance, namely `'minicard'`.
-#
-# This code should run faster while producing the
-# exact same (optimal) output as the original.
-
+# solver.py
 from typing import List
 
 from pysat.card import CardEnc, EncType
@@ -36,67 +7,69 @@ from pysat.solvers import Solver as SATSolver
 
 
 class Solver:
-    # ----------------------------------------------------------------------
-    @staticmethod
-    def _set_cover_to_sat(subsets: List[List[int]],
-                          k: int) -> CNF:
-        """Fast SAT encoding of the set‑cover instance with upper bound k."""
-        # Build the universe and collect the raw data
+
+    # ---------------------------------------------------------------------
+    # Helper: build the compulsory part of the CNF (the coverage constraints).
+    # It does not depend on the cardinality bound `k` and can therefore be
+    # computed once and re‑used for every iteration of the binary search.
+    # ---------------------------------------------------------------------
+    def _build_coverage_cnf(self, subsets: List[List[int]]) -> List[List[int]]:
+        """Return a list of clauses ensuring every element is covered."""
+        # Universe is assumed to be {1, …, n}.  Collect it once.
         universe = set()
-        for subset in subsets:
-            universe.update(subset)
-        n = len(universe)
+        for s in subsets:
+            universe.update(s)
 
-        # Create the CNF object once
-        cnf = CNF()
+        clauses = []
+        for elem in range(1, len(universe) + 1):
+            # list of subset indices (1‑based) that contain `elem`
+            covers = [i + 1 for i, s in enumerate(subsets) if elem in s]
+            # If no subset contains the element the formula is unsatisfiable,
+            # expressed by the empty clause [1, -1] which makes the solver fail.
+            clauses.append(covers if covers else [1, -1])
+        return clauses
 
-        # Use local variables for speed
-        add_clause = cnf.append
-        subs_len = len(subsets)
-
-        # Coverage clauses: each element e must appear in at least one chosen set
-        subs = subsets
-        for e in range(1, n + 1):
-            covers = []
-            for i in range(subs_len):
-                if e in subs[i]:
-                    covers.append(i + 1)          # SAT variables are 1‑based
-            if not covers:
-                # UNSAT because e can't be covered
-                return CNF(clauses=[[1, -1]])
-            add_clause(covers)
-
-        # Cardinality constraint: at most k sets chosen
-        lits = [i + 1 for i in range(subs_len)]
-        cnf.extend(CardEnc.atmost(lits=lits, bound=k,
-                                  encoding=EncType.seqcounter).clauses)
-        return cnf
-
-    # ----------------------------------------------------------------------
+    # ---------------------------------------------------------------------
+    # Main solve routine.
+    # ---------------------------------------------------------------------
     def solve(self, problem: List[List[int]]) -> List[int]:
-        """Solve the set‑cover problem and return the optimal set of subset indices."""
+        """
+        Solves the set‑cover problem using a SAT encoding.
+
+        :param problem: List of subsets (each subset is a list of ints).
+        :return: List of 1‑based indices of the selected subsets.
+        """
         m = len(problem)
+        if m == 0:
+            return []
 
-        # Binary search for the minimum cardinality
-        left, right = 1, m
-        best_solution = None
+        # Pre‑compute the purely coverage part of the CNF.
+        coverage_clauses = self._build_coverage_cnf(problem)
 
-        while left <= right:
+        left, right = 1, m + 1           # binary search on the cardinality
+        best_solution: List[int] | None = None
+
+        while left < right:
             mid = (left + right) // 2
-            cnf = self._set_cover_to_sat(problem, mid)
 
-            with SATSolver(name='minicard') as solver:
+            # Build a copy of the base CNF and add the cardinality constraint.
+            cnf = CNF()
+            cnf.extend(coverage_clauses)
+
+            lits = list(range(1, m + 1))  # 1‑based variables for the subsets
+            atmost_k = CardEnc.atmost(lits=lits, bound=mid, encoding=EncType.seqcounter)
+            cnf.extend(atmost_k.clauses)
+
+            with SATSolver(name='Minicard') as solver:
                 solver.append_formula(cnf)
-                sat = solver.solve()
-
-                if sat:
-                    # Extract chosen subset indices from the model
+                if solver.solve():
+                    # `model` contains both positive and negative literals.
+                    # We only keep the positive ones: the selected subsets.
                     model = solver.get_model()
-                    # Model contains both positive and negative literals
-                    selected = [i for i in model if i > 0]
+                    selected = [i + 1 for i in range(m) if i + 1 in model]
                     best_solution = selected
-                    right = mid - 1
+                    right = len(selected)
                 else:
                     left = mid + 1
 
-        return best_solution if best_solution else []
+        return best_solution or []

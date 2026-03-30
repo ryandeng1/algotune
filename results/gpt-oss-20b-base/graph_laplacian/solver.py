@@ -1,51 +1,34 @@
+import numpy as np
 import scipy.sparse
 import scipy.sparse.csgraph
-from typing import Any
 
 class Solver:
-    def solve(self, problem: dict[str, Any]) -> dict[str, dict[str, Any]]:
-        """
-        Computes the graph Laplacian using scipy.sparse.csgraph.laplacian.
+    """
+    Fast solver for computing the graph Laplacian of a CSR graph.
+    """
 
-        Parameters
-        ----------
-        problem : dict
-            Keys required:
-                * ``data``       – list/array of non‑zero values of the input CSR graph
-                * ``indices``    – list/array of column indices
-                * ``indptr``     – list/array of index pointers
-                * ``shape``      – tuple ``(n, n)``
-                * ``normed``     – bool, whether to normalise the Laplacian
+    def solve(self, problem: dict[str, object]) -> dict[str, dict[str, object]]:
+        # --- Fast construction of the CSR matrix ---------------------------------
+        shape = problem["shape"]
+        # Convert input lists to numpy arrays once (fast conversion, no materialisation)
+        data = np.asarray(problem["data"], dtype=np.float64)
+        indices = np.asarray(problem["indices"], dtype=np.int32)
+        indptr = np.asarray(problem["indptr"], dtype=np.int32)
 
-        Returns
-        -------
-        dict
-            ``{ 'laplacian': { 'data': [...], 'indices': [...], 'indptr': [...], 'shape': (n, n) } }``
+        graph_csr = scipy.sparse.csr_matrix((data, indices, indptr), shape=shape)
+        normed = problem["normed"]
 
-            If the input is invalid or an error occurs the value lists are empty.
-        """
-        try:
-            # Build CSR matrix directly from the input components
-            graph_csr = scipy.sparse.csr_matrix(
-                (problem["data"], problem["indices"], problem["indptr"]),
-                shape=problem["shape"],
-            )
-            normed = bool(problem.get("normed", False))
+        # --- Compute Laplacian ----------------------------------------------------
+        # scipy.sparse.csgraph.laplacian expects a sparse matrix and returns CSR
+        L_csr = scipy.sparse.csgraph.laplacian(graph_csr, normed=normed, return_diag=False)
+        # Ensure CSR format and strip zeros from the sparse matrix
+        L_csr.eliminate_zeros()
 
-            # Compute Laplacian and convert to CSR if necessary
-            L = scipy.sparse.csgraph.laplacian(graph_csr, normed=normed)
-            if not isinstance(L, scipy.sparse.csr_matrix):
-                L = L.tocsr()
-            L.eliminate_zeros()
-            return {
-                "laplacian": {
-                    "data": L.data.tolist(),
-                    "indices": L.indices.tolist(),
-                    "indptr": L.indptr.tolist(),
-                    "shape": L.shape,
-                }
-            }
-        except Exception:
-            # On any failure, return an empty component with the correct shape
-            shape = problem.get("shape", (0, 0))
-            return {"laplacian": {"data": [], "indices": [], "indptr": [], "shape": shape}}
+        # --- Prepare output -------------------------------------------------------
+        lap = {
+            "data": L_csr.data.tolist(),
+            "indices": L_csr.indices.tolist(),
+            "indptr": L_csr.indptr.tolist(),
+            "shape": L_csr.shape,
+        }
+        return {"laplacian": lap}

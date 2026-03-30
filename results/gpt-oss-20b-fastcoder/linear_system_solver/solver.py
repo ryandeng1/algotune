@@ -1,29 +1,40 @@
 import numpy as np
-from typing import Any, List
+from numpy.linalg import solve as _solve
 
 class Solver:
     """
-    Optimised linear system solver.
+    High‑performance linear system solver.
 
-    Uses :pyfunc:`numpy.linalg.solve` for square systems, which is highly optimised
-    in the underlying LAPACK libraries.  For non‑square systems it falls back to a
-    least‑squares solution with :pyfunc:`numpy.linalg.lstsq`.  Input conversion
-    is performed with :pyfunc:`numpy.asarray` to avoid unnecessary copies.
+    The class converts the input matrices to NumPy arrays once,
+    uses the highly optimised BLAS/LAPACK routines in `np.linalg.solve`,
+    and returns the solution in the required list format.
     """
-    def solve(self, problem: dict[str, Any]) -> List[float]:
-        A = np.asarray(problem["A"])
-        b = np.asarray(problem["b"])
+    def __init__(self) -> None:
+        # No heavy initialisation; the import above is sufficient.
+        pass
 
-        # Ensure correct dtype – LAPACK works best with float64
-        if A.dtype != np.float64:
-            A = A.astype(np.float64, copy=False)
-        if b.dtype != np.float64:
-            b = b.astype(np.float64, copy=False)
+    def solve(self, problem: dict[str, object]) -> list[float]:
+        """
+        Solve a linear system Ax = b.
 
-        # Square matrix ⇒ direct solve, otherwise least‑squares
-        if A.ndim == 2 and A.shape[0] == A.shape[1]:
-            x = np.linalg.solve(A, b)
-        else:
-            x, *_ = np.linalg.lstsq(A, b, rcond=None)
+        Parameters
+        ----------
+        problem : dict
+            Dictionary with keys 'A' and 'b'. The values can be any
+            array‑like objects that NumPy can convert to array.
 
+        Returns
+        -------
+        list[float]
+            Solution vector `x` converted to a plain Python list.
+        """
+        # Convert to NumPy arrays without copying if possible.
+        # `dtype=np.float64` guarantees the same precision as ndarray default.
+        A = np.asarray(problem['A'], dtype=np.float64)
+        b = np.asarray(problem['b'], dtype=np.float64)
+
+        # Solve using the fast LAPACK routine.
+        x = _solve(A, b)
+
+        # Convert NumPy array to list (Python primitives).
         return x.tolist()

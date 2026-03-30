@@ -1,57 +1,100 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""
+solver.py
+
+Highly optimised 2D convolution implementation for the 'full' mode with
+a 'fill' (zero) boundary. For small arrays the direct algorithm from
+SciPy is fast, but for larger arrays an FFT‑based approach outperforms
+all other methods.  No external packages beyond NumPy are required.
+"""
+
+from __future__ import annotations
+
 import numpy as np
+from scipy import signal
+from typing import Tuple
+
 
 class Solver:
-    def __init__(self):
-        # parameters are kept for API compatibility but are not used
-        self.boundary = 'fill'
-        self.mode = 'full'
+    """
+    Computes the 2‑D convolution of two input arrays using the optimal
+    algorithm for the array size.
 
-    @staticmethod
-    def _next_power_of_two(x: int) -> int:
-        """Return the next power of two greater than or equal to x."""
-        return 1 << (x - 1).bit_length()
+    Parameters
+    ----------
+    threshold : int, optional (default: 64)
+        The number of elements above which the FFT convolution is used.
+        For very small arrays a direct implementation is faster.
+    """
 
-    def solve(self, problem: tuple) -> np.ndarray:
+    def __init__(self, threshold: int = 64) -> None:
+        self.boundary: str = "fill"
+        self.mode: str = "full"
+        self.threshold = threshold
+
+    # ------------------------------------------------------------------ #
+    # Public API
+    # ------------------------------------------------------------------ #
+    def __call__(self, problem: Tuple[np.ndarray, np.ndarray]) -> np.ndarray:
+        """Alias for ``solve``."""
+        return self.solve(problem)
+
+    def solve(self, problem: Tuple[np.ndarray, np.ndarray]) -> np.ndarray:
         """
-        Compute the 2D convolution of arrays a and b using FFT-based
-        "full" mode. This implementation is typically faster than
-        scipy.signal.convolve2d for large inputs.
+        Compute the 2D convolution of arrays a and b using "full" mode
+        and "fill" boundary.
 
         Parameters
         ----------
-        problem : tuple
-            A tuple containing two 2D NumPy arrays (a, b).
-
+        problem: Tuple[np.ndarray, np.ndarray]
+            Tuple containing the two 2‑D input arrays.
         Returns
         -------
-        ndarray
-            The full 2D convolution result.
+        np.ndarray
+            Array containing the convolution result.
         """
         a, b = problem
-        if a is None or b is None:
-            raise ValueError("Input arrays must not be None.")
+        # Quick exit for empty inputs
+        if a.size == 0 or b.size == 0:
+            return np.zeros((a.shape[0] + b.shape[0] - 1,
+                             a.shape[1] + b.shape[1] - 1), dtype=a.dtype)
 
-        # Ensure inputs are float64 for numerical stability
-        a = np.asarray(a, dtype=np.float64, order='C')
-        b = np.asarray(b, dtype=np.float64, order='C')
+        # For very small arrays the direct SciPy implementation is faster
+        if a.size * b.size < self.threshold ** 2:
+            return signal.convolve2d(a, b, mode=self.mode, boundary=self.boundary)
 
-        # Shape of the output for 'full' convolution
+        # -------------------------------
+        # FFT‑based convolution
+        # -------------------------------
         out_shape = (a.shape[0] + b.shape[0] - 1, a.shape[1] + b.shape[1] - 1)
 
-        # Compute FFT sizes (next power of two for speed)
-        fft_shape = (
-            self._next_power_of_two(out_shape[0]),
-            self._next_power_of_two(out_shape[1]),
-        )
+        # Pad to optimal size (next power of two may speed FFTs on some platforms)
+        fft_shape = [self._next_pow2(sz) for sz in out_shape]
 
-        # Zero‑pad inputs to fft_shape
-        A_fft = np.fft.rfft2(a, s=fft_shape)
-        B_fft = np.fft.rfft2(b, s=fft_shape)
+        # Zero‑pad inputs
+        A = np.fft.rfftn(a, fft_shape)
+        B = np.fft.rfftn(b, fft_shape)
 
-        # Element‑wise multiplication in frequency domain
-        C_fft = A_fft * B_fft
+        # Element‑wise product in frequency domain
+        R = A * B
 
-        # Inverse FFT and crop to the full convolution size
-        conv_full = np.fft.irfft2(C_fft, s=fft_shape)[: out_shape[0], : out_shape[1]]
+        # Inverse FFT to spatial domain
+        conv = np.fft.irfftn(R, fft_shape)
 
-        return conv_full
+        # Slice to the exact output size
+        result = conv[: out_shape[0], : out_shape[1]]
+
+        # Numerical errors may produce tiny imaginary parts; discard them
+        if np.iscomplexobj(result):
+            result = np.real(result)
+        return result
+
+    # ------------------------------------------------------------------ #
+    # Utility functions
+    # ------------------------------------------------------------------ #
+    @staticmethod
+    def _next_pow2(x: int) -> int:
+        """Return the next power of two greater than or equal to x."""
+        return 1 << (x - 1).bit_length()

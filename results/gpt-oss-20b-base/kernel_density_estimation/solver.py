@@ -1,60 +1,73 @@
+# solver.py
+
 import numpy as np
-from sklearn.neighbors import KernelDensity
-from numbers import Real
 from typing import Any
 
+from sklearn.neighbors import KernelDensity
+from sklearn.exceptions import NotFittedError
+from numbers import Real
+
 class Solver:
-    def __init__(self):
+    def __init__(self) -> None:
+        # kernels supported by scikit‑learn
         self._kernels = {
-            'gaussian': 'gaussian',
-            'tophat': 'tophat',
-            'epanechnikov': 'epanechnikov',
-            'exponential': 'exponential',
-            'linear': 'linear',
-            'cosine': 'cosine',
+            'gaussian', 'tophat', 'epanechnikov',
+            'exponential', 'linear', 'cosine'
         }
 
     def solve(self, problem: dict[str, Any]) -> dict[str, Any]:
-        """Compute log‑density estimates at query points using sklearn's KernelDensity.
+        """
+        Compute log‑density estimates for query points using a
+        KernelDensity estimator.
 
-        The function strictly validates input and returns results in a dict.  All
-        exceptions are caught and translated into an error message.
+        Parameters
+        ----------
+        problem : dict
+            Must contain keys 'data_points', 'query_points', 'kernel',
+            and 'bandwidth'.
+
+        Returns
+        -------
+        dict
+            ``{'log_density': [...]}`` on success
+            ``{'error': '...'}`` on failure
         """
         try:
-            # Data extraction
-            X = np.asarray(problem['data_points'], dtype=float)
-            X_q = np.asarray(problem['query_points'], dtype=float)
+            # Fast conversion: no copy if already array
+            X = np.asarray(problem['data_points'])
+            X_q = np.asarray(problem['query_points'])
             kernel = problem['kernel']
-            bw = problem['bandwidth']
+            bandwidth = problem['bandwidth']
 
             # Basic shape checks
             if X.ndim != 2 or X_q.ndim != 2:
-                raise ValueError('Data points or query points must be 2‑D arrays.')
+                raise ValueError('Data points or query points are not 2D arrays.')
             if X.shape[0] == 0:
-                raise ValueError('The data set is empty.')
+                raise ValueError('No data points provided.')
             if X_q.shape[0] == 0:
                 return {'log_density': []}
             if X.shape[1] != X_q.shape[1]:
-                raise ValueError('Input dimensions mismatch between data and queries.')
+                raise ValueError('Data points and query points have different dimensions.')
 
-            # Check bandwidth
-            if not isinstance(bw, Real) or bw <= 0:
-                raise ValueError('Bandwidth must be a positive real number.')
-            bw = float(bw)
+            # Validate bandwidth
+            if not isinstance(bandwidth, Real) or bandwidth <= 0:
+                raise ValueError('Bandwidth must be positive.')
+            bandwidth = float(bandwidth)
 
-            # Kernel validation
+            # Validate kernel
             if kernel not in self._kernels:
-                raise ValueError('Unknown kernel requested.')
+                raise ValueError(f'Unknown kernel: {kernel}')
 
-            # Fit density estimator
-            kde = KernelDensity(kernel=kernel, bandwidth=bw)
+            # Fit and score
+            kde = KernelDensity(kernel=kernel, bandwidth=bandwidth)
             kde.fit(X)
+            log_density = kde.score_samples(X_q)
 
-            # Evaluate at query points
-            logp = kde.score_samples(X_q)
-            return {'log_density': logp.tolist()}
+            return {'log_density': log_density.tolist()}
 
-        except KeyError as k:
-            return {'error': f'Missing key: {k}'}
-        except Exception as e:
+        except KeyError as e:
+            return {'error': f'Missing key: {e}'}
+        except (ValueError, TypeError, NotFittedError, np.linalg.LinAlgError) as e:
             return {'error': f'Computation error: {e}'}
+        except Exception as e:
+            return {'error': f'Unexpected error: {e}'}

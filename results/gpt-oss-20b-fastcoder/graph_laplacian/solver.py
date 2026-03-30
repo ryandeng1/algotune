@@ -1,67 +1,51 @@
-from typing import Any
+# solver.py
 import numpy as np
 import scipy.sparse
+from typing import Any, Dict
+
 
 class Solver:
-    def solve(self, problem: dict[str, Any]) -> dict[str, dict[str, Any]]:
-        """
-        Computes the (possibly normalised) graph Laplacian of an undirected
-        weighted graph represented in CSR format.
+    """
+    Compute the graph Laplacian of a sparse CSR graph.
 
-        Parameters
-        ----------
-        problem : dict
-            Dictionary with keys:
-                - 'data'   : list[float]   Non‑zero entries of adjacency matrix A
-                - 'indices': list[int]     Column indices of non‑zeros
-                - 'indptr' : list[int]     Row pointer of CSR
-                - 'shape'  : tuple[int,int] Matrix shape (n, n)
-                - 'normed' : bool          Normalise column‑wise (`normed=True`)
-            The graph is assumed to be undirected, therefore the CSR is symmetric.
+    The input format matches the one used by the original reference
+    implementation – a dictionary with keys ``data``, ``indices``,
+    ``indptr`` and ``shape`` describing a CSR matrix together with
+    a boolean ``normed`` flag.
 
-        Returns
-        -------
-        dict
-            Dictionary with single key ``'laplacian'`` containing CSR
-            components of the Laplacian matrix.
-            On failure an empty CSR structure is returned.
-        """
+    The solver returns a dictionary containing a sub‑dictionary
+    ``"laplacian"`` which stores the CSR components of the result
+    using plain Python lists – this keeps the public API identical
+    to the reference code while still using efficient NumPy
+    arrays for all intermediate calculations.
+    """
+
+    def solve(self, problem: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
         try:
-            # Build CSR adjacency matrix
-            A = scipy.sparse.csr_matrix(
-                (np.asarray(problem["data"], dtype=np.float64),
-                 np.asarray(problem["indices"], dtype=np.int32),
-                 np.asarray(problem["indptr"], dtype=np.int32)),
-                shape=problem["shape"],
+            # build the input graph
+            data = np.asarray(problem["data"], dtype=np.float64, order="C")
+            indices = np.asarray(problem["indices"], dtype=np.int32, order="C")
+            indptr = np.asarray(problem["indptr"], dtype=np.int32, order="C")
+            shape = tuple(problem["shape"])
+            graph_csr = scipy.sparse.csr_matrix((data, indices, indptr), shape=shape)
+
+            # compute the Laplacian
+            L = scipy.sparse.csgraph.laplacian(
+                graph_csr, normed=bool(problem.get("normed", False))
             )
-            normed = problem.get("normed", False)
+            # ensure we work with a CSR matrix
+            if not isinstance(L, scipy.sparse.csr_matrix):
+                L = L.tocsr()
+
+            # remove explicit zeros – csr_matrix already does it,
+            # so this is a no‑op but kept for API compatibility
+            L.eliminate_zeros()
         except Exception:
-            shape = problem.get("shape", (0, 0))
+            # on any error return an empty laplacian with the input shape
+            shape = tuple(problem.get("shape", (0, 0)))
             return {"laplacian": {"data": [], "indices": [], "indptr": [], "shape": shape}}
 
-        # Degree vector (sum of rows, graph is undirected so row==col sum)
-        deg = np.ravel(A.sum(axis=1))
-
-        if normed:
-            # Normalised Laplacian: L = I - D^{-1/2} A D^{-1/2}
-            # For sparse matrices, construct D^{-1/2} as a diagonal matrix
-            with np.errstate(divide="ignore"):
-                inv_sqrt_deg = 1.0 / np.sqrt(deg)
-            inv_sqrt_deg[np.isinf(inv_sqrt_deg)] = 0.0
-            D_inv_sqrt = scipy.sparse.diags(inv_sqrt_deg, format="csr")
-
-            # L = I - D^{-1/2} * A * D^{-1/2}
-            L = scipy.sparse.eye(A.shape[0], format="csr", dtype=np.float64) - D_inv_sqrt @ A @ D_inv_sqrt
-        else:
-            # Unnormalised Laplacian: L = D - A
-            D = scipy.sparse.diags(deg, format="csr")
-            L = D - A
-
-        # Ensure CSR and zero‑out zeros
-        L = L.tocsr()
-        L.eliminate_zeros()
-
-        # Convert to lists for JSON serialisation
+        # convert the result to plain lists for the public API
         return {
             "laplacian": {
                 "data": L.data.tolist(),

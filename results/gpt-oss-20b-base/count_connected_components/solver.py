@@ -2,36 +2,55 @@ from typing import Any, Dict
 
 SolutionType = Dict[str, int]
 
+
 class Solver:
-    def solve(self, problem: Dict[str, Any]) -> SolutionType:
-        # Union‑Find (Disjoint Set Union) without path compression overhead.
-        n = problem.get('num_nodes', 0)
-        parent = list(range(n))
-        rank = [0] * n
+    """
+    Optimised solver that counts the number of connected components in an undirected graph
+    using a simple disjoint‑set (Union–Find) data structure.  
+    This avoids the heavy overhead of :mod:`networkx` and runs in near linear time.
+    """
 
-        def find(x: int) -> int:
-            while parent[x] != x:
-                parent[x] = parent[parent[x]]
-                x = parent[x]
-            return x
+    def _find(self, parent: list[int], x: int) -> int:
+        # Path compression
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
 
-        def union(a: int, b: int) -> None:
-            ra, rb = find(a), find(b)
-            if ra == rb:
-                return
-            if rank[ra] < rank[rb]:
-                parent[ra] = rb
-            else:
-                parent[rb] = ra
-                if rank[ra] == rank[rb]:
-                    rank[ra] += 1
+    def _union(self, parent: list[int], rank: list[int], a: int, b: int) -> bool:
+        ra = self._find(parent, a)
+        rb = self._find(parent, b)
+        if ra == rb:
+            return False
+        # Union by rank
+        if rank[ra] < rank[rb]:
+            parent[ra] = rb
+        elif rank[ra] > rank[rb]:
+            parent[rb] = ra
+        else:
+            parent[rb] = ra
+            rank[ra] += 1
+        return True
 
-        for u, v in problem.get('edges', []):
-            if 0 <= u < n and 0 <= v < n:
-                union(u, v)
+    def solve(self, problem: dict[str, Any]) -> SolutionType:
+        try:
+            n = problem.get("num_nodes", 0)
+            if n <= 0:
+                return {"number_connected_components": 0}
 
-        # Count distinct roots
-        roots = set()
-        for i in range(n):
-            roots.add(find(i))
-        return {'number_connected_components': len(roots)}
+            edges = problem.get("edges", [])
+            # Initialise DSU structures
+            parent = list(range(n))
+            rank = [0] * n
+            comps = n
+
+            for a, b in edges:
+                if a < 0 or a >= n or b < 0 or b >= n:
+                    # Skip invalid edges; keep components count unchanged
+                    continue
+                if self._union(parent, rank, a, b):
+                    comps -= 1
+
+            return {"number_connected_components": comps}
+        except Exception:
+            return {"number_connected_components": -1}

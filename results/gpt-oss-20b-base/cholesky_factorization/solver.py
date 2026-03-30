@@ -1,33 +1,42 @@
-from typing import Any
+# solver.py
+from __future__ import annotations
 import numpy as np
 
 class Solver:
-    """
-    Optimised Cholesky solver using NumPy's highly tuned linalg routines.
+    """Efficient solver for the Cholesky factorization problem.
+
+    The implementation relies on NumPy's highly optimised LAPACK
+    wrapper for the `cholesky` routine.  Because the benchmark
+    only measures the *Python* runtime of the `solve` method, the
+    conversion from NumPy array to plain Python lists is kept
+    minimal to avoid any unnecessary overhead.
     """
 
     def solve(self, problem: dict[str, np.ndarray]) -> dict[str, dict[str, list[list[float]]]]:
         """
-        Compute the Cholesky factorization A = L @ L.T for the input matrix `A`.
+        Compute the Cholesky factorisation A = L Lᵀ.
 
         Parameters
         ----------
-        problem : dict[str, np.ndarray]
-            Dictionary containing the key 'matrix' mapping to a symmetric positive
-            definite NumPy array of shape (n, n).
+        problem :
+            Dictionary with a single entry `'matrix'` containing a
+            positive‑definite, symmetric NumPy array.
 
         Returns
         -------
-        dict[str, dict[str, list[list[float]]]]
-            Dictionary with key 'Cholesky' mapping to another dictionary that has
-            the key 'L' mapping to a plain Python list of lists representation of the
-            lower triangular factor.
+        dict
+            A dictionary of the form:
+            {
+                'Cholesky': {
+                    'L': [[float, ...], ...]
+                }
+            }
         """
-        # Extract the matrix; assume it is already a NumPy array
+        # Retrieve the matrix directly – no copies are made.
         A = problem["matrix"]
 
-        # Directly use the fast CuPy/NumPy implementation of Cholesky
+        # Fast, BLAS/LAPACK backed Cholesky decomposition.
         L = np.linalg.cholesky(A)
 
-        # Convert to a nested list of floats – this is the lightest conversion
+        # Convert to a plain list of lists only once.
         return {"Cholesky": {"L": L.tolist()}}

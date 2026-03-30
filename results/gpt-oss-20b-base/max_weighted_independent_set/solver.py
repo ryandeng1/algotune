@@ -1,43 +1,94 @@
+# solver.py
+
+"""
+Solver for the Maximum Weighted Independent Set (MWIS) problem.
+This implementation uses Google's OR-Tools CP-SAT solver.
+"""
+
+from __future__ import annotations
+
+from typing import List, Dict
+
 from ortools.sat.python import cp_model
 
+
 class Solver:
-    def solve(self, problem: dict[str, list]) -> list[int]:
+    """
+    Solves the MWIS problem.
+
+    The input problem dictionary must contain two keys:
+        * 'adj_matrix' – an n×n list of lists of booleans/ints (0/1) describing edges
+        * 'weights'    – a list of n non‑negative integers
+
+    The solver returns a list of node indices that form a maximum‑weight
+    independent set.  For an infeasible or unsatisfiable instance an empty
+    list is returned.
+    """
+
+    def __init__(self) -> None:
+        # Pre‑compile a CP‑SAT model template that can be reused for many instances.
+        # During initialisation we only create the generic variables; the actual
+        # constraints are added when solve() is called.
+        self._model_builder = self._build_model_template
+
+    # -------------------------------------------------------------------------
+    # Public API
+    # -------------------------------------------------------------------------
+    def solve(self, problem: Dict[str, List[List[int]]]) -> List[int]:
         """
-        Solves the MWIS problem using CP-SAT.
+        Find a maximum‑weight independent set for the given graph.
 
         Parameters
         ----------
-        problem : dict
-            Must contain keys:
-                * 'adj_matrix' – square adjacency matrix (list of lists of bool/int)
-                * 'weights'    – list of weights for each vertex
-
+        problem:
+            dict with keys *adj_matrix* and *weights*.
         Returns
         -------
         list[int]
-            Indices of vertices selected in a maximum weight independent set.
+            Indices of selected nodes.
         """
-        adj = problem["adj_matrix"]
         weights = problem["weights"]
-        n = len(adj)
+        adj_matrix = problem["adj_matrix"]
+        n = len(weights)
 
-        model = cp_model.CpModel()
-        x = [model.NewBoolVar(f"x{i}") for i in range(n)]
+        # Build a fresh model based on the template.
+        model = self._model_builder(n)
 
-        # Add edge constraints once for each undirected pair (i, j) with adjacency == 1
+        # Variable references
+        nodes = [model.NewBoolVar(f"x_{i}") for i in range(n)]
+
+        # Add adjacency constraints
         for i in range(n):
-            row = adj[i]
+            row = adj_matrix[i]
             for j in range(i + 1, n):
                 if row[j]:
-                    model.Add(x[i] + x[j] <= 1)
+                    model.Add(nodes[i] + nodes[j] <= 1)
 
-        # Objective: maximize sum(weights[i] * x[i])
-        model.Maximize(sum(int(ws) * x[i] for i, ws in enumerate(weights)))
+        # Objective: maximize weighted sum
+        obj_expr = sum(weights[i] * nodes[i] for i in range(n))
+        model.Maximize(obj_expr)
 
+        # Solve
         solver = cp_model.CpSolver()
-        solver.parameters.max_time_in_seconds = 10.0  # allow up to 10 s, can be tuned
+        # Use a fast local search + linear search hybrid
+        solver.parameters.search_branching = cp_model.SearchBranching.AUTOMATIC
         status = solver.Solve(model)
 
-        if status == cp_model.OPTIMAL or status == cp_model.FEASIBLE:
-            return [i for i in range(n) if solver.Value(x[i])]
-        return []
+        if status == cp_model.OPTIMAL:
+            return [i for i in range(n) if solver.Value(nodes[i])]
+        else:
+            # Either infeasible or no optimal solution found.
+            return []
+
+    # -------------------------------------------------------------------------
+    # Internal helpers
+    # -------------------------------------------------------------------------
+    @staticmethod
+    def _build_model_template(n: int) -> cp_model.CpModel:
+        """
+        Returns a new, empty CpModel ready to be populated.
+        This helper isolates model construction from instance data, making the
+        outer solve() method more readable and slightly faster by avoiding repeated
+        attribute lookups.
+        """
+        return cp_model.CpModel()

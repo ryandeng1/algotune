@@ -1,71 +1,101 @@
-from functools import lru_cache
+# solver.py
+#
+# The goal of this solver is to give the user a fast yet correct solution to a
+# TSP instance that is represented as an `n x n` distance matrix.  The heavy
+# lifting is done by Google's OR‑Tools CP‑SAT solver.  The main optimisation
+# we can control from our Python side is how the model is built and how the
+# solver is driven.  
+
 from typing import List
+from ortools.sat.python import cp_model
+
 
 class Solver:
     """
-    Implements an optimal TSP solver using the Held‑Karp dynamic programming algorithm.
-    The algorithm is O(n^2 2^n) which is fast enough for n <= 20 and is far faster
-    than a generic CP-SAT formulation for the same problem size.
+    A tiny thin‑wrapper around OR‑Tools CP‑SAT that returns the optimal TSP tour
+    starting and ending at node 0.
+
+    Why this implementation is fast:
+        * All boolean variables are created in a single
+          dictionary‑comprehension – no Python `if` inside loops.
+        * `AddCircuit` is a specialised OR‑Tools construct that ensures a
+          Hamiltonian cycle in O(n²) time – far cheaper than a full subtour
+          elimination approach.
+        * The solver is sent a few tuning hints (`num_search_workers`,
+          `max_time_in_seconds`, `enumerate_all_solutions`) that let it use
+          multiple cores and stop as soon as the optimum is found, which
+          cuts the solve time dramatically for most medium‑sized instances.
+        * The result extraction walks the assignment exactly once – O(n).
     """
+
+    def __init__(self):
+        # Preparation of a solver instance that remains in memory between
+        # calls – this saves the effort of re‑instantiating CP‑SAT for each
+        # TSP instance.
+        self._solver = cp_model.CpSolver()
+        # Give the solver a few hours of time; for small/medium instances it
+        # will usually finish early.
+        self._solver.parameters.max_time_in_seconds = 20.0
+        # Enable parallelism – the degree of parallelism is automatically
+        # selected based on the machine capabilities.
+        self._solver.parameters.num_search_workers = 0
+        # We only need one solution – the optimal one – so we turn off
+        # enumeration of all solutions.  This reduces memory consumption and
+        # speeds up the search.
+        self._solver.parameters.enumerate_all_solutions = False
+        # Turn on the solver's own progress logging if desired.
+        self._solver.parameters.log_search_progress = False
+
     def solve(self, problem: List[List[int]]) -> List[int]:
+        """
+        Solve the TSP problem using CP-SAT solver.
+        :param problem: Distance matrix as a list of lists.
+        :return: A list representing the optimal tour, starting and ending at city 0.
+        """
         n = len(problem)
         if n <= 1:
-            return [0, 0]
+            # Trivial cases – start and end at 0, or empty
+            return [0, 0] if n == 1 else []
 
-        # Pre‑compute a list of neighbours for each node to speed up iteration
-        neighbours = [list(range(n)) for _ in range(n)]
+        # Build the CP‑SAT model
+        model = cp_model.CpModel()
 
-        @lru_cache(maxsize=None)
-        def dp(mask: int, i: int) -> int:
-            """
-            Returns the minimal cost of visiting all cities in `mask` and ending at city `i`.
-            `mask` is a bitmask where bit `k` is 1 iff city `k` has been visited.
-            """
-            if mask == (1 << i):
-                # only city i is visited -> cost is 0 (starting at city i)
-                return 0
-            # Remove city i from mask to form submask of remaining cities
-            submask = mask ^ (1 << i)
-            # Iterate over all possible previous cities j in submask
-            min_cost = float("inf")
-            for j in neighbours[i]:
-                if submask & (1 << j):
-                    cost = dp(submask, j) + problem[j][i]
-                    if cost < min_cost:
-                        min_cost = cost
-            return min_cost
+        # Create a boolean variable for every edge (i, j) where i != j.
+        # [] is a list of (i, j) pairs; constructing it outside the dictionary
+        # comprehension avoids repeated checks at Python level.
+        edges = [(i, j) for i in range(n) for j in range(n) if i != j]
+        x = {e: model.NewBoolVar(f"x[{e[0]},{e[1]}]") for e in edges}
 
-        @lru_cache(maxsize=None)
-        def path_backtrack(mask: int, i: int) -> List[int]:
-            """
-            Reconstructs the optimal path for state (mask, i).
-            """
-            if mask == (1 << i):
-                return [i]
-            submask = mask ^ (1 << i)
-            best_prev = None
-            best_cost = float("inf")
-            for j in neighbours[i]:
-                if submask & (1 << j):
-                    cost = dp(submask, j) + problem[j][i]
-                    if cost < best_cost:
-                        best_cost = cost
-                        best_prev = j
-            return path_backtrack(submask, best_prev) + [i]
+        # A single AddCircuit enforces that each node has exactly one outgoing
+        # and one incoming edge – this automatically gives us a Hamiltonian
+        # cycle that visits every node exactly once.
+        model.AddCircuit([(i, j, x[(i, j)]) for i, j in edges])
 
-        # Full mask includes all cities
-        full_mask = (1 << n) - 1
-        # Compute optimal tour starting at 0, ending at 0
-        best_tour = None
-        best_cost = float("inf")
-        for i in range(1, n):
-            cost = dp(full_mask, i) + problem[i][0]
-            if cost < best_cost:
-                best_cost = cost
-                best_tour = path_backtrack(full_mask, i)
+        # Objective: minimise the sum of distances for the chosen edges
+        model.Minimize(
+            sum(problem[i][j] * x[(i, j)] for i, j in edges)
+        )
 
-        if best_tour is None:
-            return []
+        # Solve the model
+        status = self._solver.Solve(model)
 
-        # Insert start city 0 at beginning and end
-        return [0] + best_tour + [0]
+        # Extract the tour if a solution was found
+        if status in (
+            cp_model.OPTIMAL,
+            cp_model.FEASIBLE,  # CP‑SAT may sometimes only find a feasible one
+        ):
+            tour = [0]
+            cur = 0
+            for _ in range(n - 1):
+                # the out‑edge from the current node must be the one that
+                # was set to 1 by the solver
+                for nxt in range(n):
+                    if cur != nxt and self._solver.Value(x[(cur, nxt)]):
+                        cur = nxt
+                        break
+                tour.append(cur)
+            tour.append(0)
+            return tour
+
+        # No feasible solution – return an empty list
+        return []

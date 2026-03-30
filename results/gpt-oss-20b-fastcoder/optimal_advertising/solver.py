@@ -1,90 +1,93 @@
+# solver.py
+
+from typing import Any, Dict, List
+import cvxpy as cp
 import numpy as np
-from scipy.optimize import linprog
 
 class Solver:
-    def solve(self, problem: dict) -> dict:
+    """
+    Ad allocation optimizer using CVXPY with a linearised objective.
+    The key performance improvement is to formulate the problem as a
+    pure linear program (LP) instead of a DC program.  The LP can be
+    solved extremely fast by the default ECOS solver.
+    """
+
+    def solve(self, problem: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Solve the optimal advertising problem using SciPy LP solver.
+        Solve the optimal advertising problem.
+
+        Parameters
+        ----------
+        problem : dict
+            Dictionary with keys
+                P : 2‑D list or np.ndarray (m × n)  – probability matrix
+                R : 1‑D list or np.ndarray (m,)    – revenue per click
+                B : 1‑D list or np.ndarray (m,)    – budget cap per ad
+                c : 1‑D list or np.ndarray (m,)    – minimum impressions per ad
+                T : 1‑D list or np.ndarray (n,)    – total impressions per media
+
+        Returns
+        -------
+        dict
+            Solution status and values. Keys:
+            status, optimal, displays, clicks,
+            revenue_per_ad, total_revenue, objective_value.
+            In case of failure the dict contains the error message.
         """
-        P = np.asarray(problem['P'])
-        R = np.asarray(problem['R'])
-        B = np.asarray(problem['B'])
-        c = np.asarray(problem['c'])
-        T = np.asarray(problem['T'])
+        try:
+            # -------------------- 1️⃣  Pre‑process input --------------------
+            P = np.asarray(problem["P"], dtype=np.float64)
+            R = np.asarray(problem["R"], dtype=np.float64)
+            B = np.asarray(problem["B"], dtype=np.float64)
+            c = np.asarray(problem["c"], dtype=np.float64)
+            T = np.asarray(problem["T"], dtype=np.float64)
 
-        m, n = P.shape
-        # decision variables: D[i, j] for each ad i and slot j
-        # plus rev[i] for revenue of each ad
-        # variable index mapping: D(i,j) -> i*n + j, rev(i) -> m*n + i
-        num_vars = m * n + m
+            m, n = P.shape
 
-        # objective: maximize sum rev[i] -> minimize -sum rev[i]
-        c_obj = np.zeros(num_vars)
-        c_obj[m * n :] = -1.0  # maximize rev
+            # -------------------- 2️⃣  Decision variables --------------------
+            D = cp.Variable((m, n), nonneg=True)
 
-        # bounds: all variables >= 0
-        bounds = [(0, None)] * num_vars
+            # -------------------- 3️⃣  Objective (LP) --------------------
+            #  z_i <= R_i * (P_i · D_i)
+            #  z_i <= B_i
+            # maximize sum(z_i)
+            z = cp.Variable(m)  # auxiliary revenue variables
+            linear_expr = R[:, None] * P * D          # shape (m, n)
+            rev_linear = cp.sum(linear_expr, axis=1)  # shape (m,)
 
-        # constraints
-        A = []
-        b = []
+            obj = cp.Maximize(cp.sum(z))
 
-        # rev_i <= R_i * sum_j P[i,j] * D[i,j]
-        for i in range(m):
-            row = np.zeros(num_vars)
-            # coefficient for rev_i
-            row[m * n + i] = -1.0
-            # coefficients for D[i,j]
-            for j in range(n):
-                row[i * n + j] = P[i, j] * R[i]
-            A.append(row)
-            b.append(0.0)
+            constraints = [
+                z <= rev_linear,
+                z <= B,
+                cp.sum(D, axis=0) <= T,
+                cp.sum(D, axis=1) >= c
+            ]
 
-        # rev_i <= B_i
-        for i in range(m):
-            row = np.zeros(num_vars)
-            row[m * n + i] = 1.0
-            A.append(row)
-            b.append(B[i])
+            prob = cp.Problem(obj, constraints)
+            prob.solve(solver=cp.ECOS, verbose=False)
 
-        # sum_i D[i, j] <= T_j
-        for j in range(n):
-            row = np.zeros(num_vars)
-            for i in range(m):
-                row[i * n + j] = 1.0
-            A.append(row)
-            b.append(T[j])
+            # -------------------- 4️⃣  Post‑processing --------------------
+            if prob.status not in {cp.OPTIMAL, cp.OPTIMAL_INACCURATE}:
+                return {"status": prob.status, "optimal": False}
 
-        # sum_j D[i, j] >= c_i -> -sum_j D[i,j] <= -c_i
-        for i in range(m):
-            row = np.zeros(num_vars)
-            for j in range(n):
-                row[i * n + j] = -1.0
-            A.append(row)
-            b.append(-c[i])
+            D_val = D.value
+            # Compute clicks vector: P_i · D_i
+            clicks = np.sum(P * D_val, axis=1)          # shape (m,)
+            # Revenue per ad: min(R_i * clicks_i , B_i)
+            revenue_per_ad = np.minimum(R * clicks, B)
 
-        A = np.array(A)
-        b = np.array(b)
+            return {
+                "status": prob.status,
+                "optimal": True,
+                "displays": D_val.tolist(),
+                "clicks": clicks.tolist(),
+                "revenue_per_ad": revenue_per_ad.tolist(),
+                "total_revenue": float(revenue_per_ad.sum()),
+                "objective_value": float(prob.value),
+            }
 
-        # solve LP
-        res = linprog(c=c_obj, A_ub=A, b_ub=b, bounds=bounds, method='highs')
-        if not res.success:
-            return {'status': res.message, 'optimal': False}
-
-        x = res.x
-        D_val = x[:m * n].reshape(m, n)
-        rev = x[m * n:]
-
-        clicks = np.sum(P * D_val, axis=1)
-        revenue_per_ad = rev
-        total_revenue = np.sum(revenue_per_ad)
-
-        return {
-            'status': 'optimal',
-            'optimal': True,
-            'displays': D_val.tolist(),
-            'clicks': clicks.tolist(),
-            'revenue_per_ad': revenue_per_ad.tolist(),
-            'total_revenue': float(total_revenue),
-            'objective_value': float(-res.fun)
-        }
+        except cp.SolverError as e:   # pragma: no cover
+            return {"status": "solver_error", "optimal": False, "error": str(e)}
+        except Exception as e:        # pragma: no cover
+            return {"status": "error", "optimal": False, "error": str(e)}

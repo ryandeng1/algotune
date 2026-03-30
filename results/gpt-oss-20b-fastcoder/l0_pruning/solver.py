@@ -1,28 +1,51 @@
+# solver.py
 from typing import Any, Dict, List
 import numpy as np
 
+
 class Solver:
-    def solve(self, problem: Dict[str, Any]) -> Dict[str, List]:
+    """
+    Solves the L0‑pruning problem in linear time using NumPy’s fast argpartition.
+    """
+
+    @staticmethod
+    def _prune(v: np.ndarray, k: int) -> np.ndarray:
         """
-        Solve the l0 pruning problem: keep only the k elements of v with
-        the largest absolute values, setting all others to zero.
+        Keep only the k entries of v with the largest absolute values
+        (preserving their original signs), all other entries are set to zero.
         """
-        v = np.asarray(problem['v'])
-        k = int(problem['k'])
+        n = v.size
+        if k <= 0:
+            return np.zeros_like(v)
+        if k >= n:
+            return v.copy()
 
-        # Work with a 1-D view of the data
-        v_flat = v.ravel()
+        # Quick selection of the k largest absolute values.
+        # argpartition returns indices that would sort the array; we only need the first k.
+        # Using a negative sign gives us the k positions with largest |v|.
+        idx = np.argpartition(-np.abs(v), k - 1)[:k]
+        ret = np.zeros_like(v)
+        ret[idx] = v[idx]
+        return ret
 
-        # Find indices of the k largest-magnitude elements in linear time
-        if k > 0:
-            # argpartition returns indices that would partition the array
-            idx_top = np.argpartition(-np.abs(v_flat), k - 1)[:k]
-        else:
-            idx_top = np.array([], dtype=int)
+    def solve(self, problem: Dict[str, Any]) -> Dict[str, List[float]]:
+        """
+        Solve the L0‑pruning task described in the paper.
 
-        # Reconstruct the full solution array
-        solution_arr = np.zeros_like(v_flat)
-        solution_arr[idx_top] = v_flat[idx_top]
+        Parameters
+        ----------
+        problem:
+            * 'v': array‑like with the weights.
+            * 'k': integer, number of elements to keep.
 
-        # Return as a Python list
-        return {'solution': solution_arr.tolist()}
+        Returns
+        -------
+        dict
+            {'solution': [float, ...]} where the list contains the pruned vector.
+        """
+        v = np.asarray(problem.get("v")).ravel()
+        k = int(problem.get("k", 0))
+
+        pruned = self._prune(v, k)
+
+        return {"solution": pruned.tolist()}

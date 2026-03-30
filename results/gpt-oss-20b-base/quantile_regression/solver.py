@@ -1,43 +1,44 @@
-from typing import Any
+# solver.py
 import numpy as np
 from sklearn.linear_model import QuantileRegressor
 
 class Solver:
-    def solve(self, problem: dict[str, Any]) -> dict[str, Any]:
+    """Fast quantile‑regression solver using scikit‑learn's high‑performance
+    linear‑programming backend (Highs)."""
+
+    def solve(self, problem: dict) -> dict:
         """
-        Fit a quantile regression model using scikit‑learn's
-        QuantileRegressor (solver high‑s based linear programming),
-        then return model parameters and predictions.
+        Fit quantile regression and return parameters and predictions.
 
         Parameters
         ----------
         problem : dict
-            Must contain
-            - 'X'   : matrix of predictors
-            - 'y'   : target vector
-            - 'quantile' : target quantile (0 < q < 1)
-            - 'fit_intercept' : bool, whether to fit intercept
-
+            Must contain:
+            - 'X' : 2‑D sequence of features
+            - 'y' : target sequence
+            - 'quantile' : target quantile (0‑1)
+            - 'fit_intercept' : bool
         Returns
         -------
         dict
-            {'coef' : list, 'intercept' : list, 'predictions' : list}
+            {'coef': list, 'intercept': [float], 'predictions': list}
         """
-        X = np.asarray(problem['X'], dtype=np.float64)
-        y = np.asarray(problem['y'], dtype=np.float64)
+        # Ensure contiguous float arrays (fast Path)
+        X = np.asarray(problem["X"], dtype=np.float64, order="C")
+        y = np.asarray(problem["y"], dtype=np.float64, order="C")
 
-        # Fit model
         model = QuantileRegressor(
-            quantile=problem['quantile'],
-            alpha=0.0,
-            fit_intercept=problem['fit_intercept'],
-            solver='highs'
+            quantile=problem["quantile"],
+            alpha=0.0,                  # no regularisation
+            fit_intercept=problem["fit_intercept"],
+            solver="highs",             # fast LP solver
         )
+        # Fit in place (keeps interim memory small)
         model.fit(X, y)
 
-        # Convert outputs to list for consistency
+        # Convert to Python natives once, no intermediate copies
         return {
-            'coef': model.coef_.tolist(),
-            'intercept': [model.intercept_],
-            'predictions': model.predict(X).tolist()
+            "coef": model.coef_.tolist(),
+            "intercept": [float(model.intercept_)],
+            "predictions": model.predict(X).tolist(),
         }

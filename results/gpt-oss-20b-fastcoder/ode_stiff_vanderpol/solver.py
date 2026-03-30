@@ -1,58 +1,59 @@
-from typing import Any
+# solver.py
+from __future__ import annotations
+from typing import Any, Dict
 import numpy as np
 from scipy.integrate import solve_ivp
 
 class Solver:
     """
-    Optimised solver for the Van der Pol oscillation problem.  The implementation
-    avoids allocation overheads and unnecessary features that are not required
-    for the benchmark, resulting in a much faster run‑time.
+    Numerical solver for the Van der Pol oscillator
+
+    The implementation is deliberately minimal: it simply forwards to
+    :func:`scipy.integrate.solve_ivp`.  The only optimization is that
+    argument construction is as cheap as possible and that the expensive
+    `t_eval` array is only created when debugging is enabled.
     """
 
-    def solve(self, problem: dict[str, np.ndarray | float]) -> dict[str, list[float]]:
+    def solve(self, problem: Dict[str, np.ndarray | float]) -> Dict[str, list[float]]:
         """
-        Solve the ODE with the given parameters and return the final state as a list.
+        Solve the ODE and return the final state as a plain python list.
         """
         sol = self._solve(problem, debug=False)
         if sol.success:
-            # Convert final state from array to list
-            return sol.y[:, -1].tolist()
+            # Return the final value of each variable as a list of floats
+            return dict(zip(["x", "v"], sol.y[:, -1].tolist()))
         raise RuntimeError(f"Solver failed: {sol.message}")
 
-    def _solve(self, problem: dict[str, np.ndarray | float], debug: bool = True) -> Any:
+    def _solve(self, problem: Dict[str, np.ndarray | float], debug: bool = True) -> Any:
         """
-        Core solver that is called only once per problem instance.
-        The `debug` flag switches dense output and evaluation points on/off
-        to minimise execution time during scoring.
+        Core integration routine.
         """
-        # Extract problem data; use local variables to avoid repetitive dict lookups
-        y0 = np.asarray(problem["y0"], dtype=float)
+        # Fast construction of numpy arrays
+        y0 = np.asarray(problem["y0"], dtype=np.float64)
         t0 = float(problem["t0"])
         t1 = float(problem["t1"])
         mu = float(problem["mu"])
 
-        # Use a compact inline function that returns a 2‑element numpy array.
-        # The local variables avoid attribute lookup inside the loop.
-        def vdp(t: float, y: np.ndarray) -> np.ndarray:
-            x, v = y  # tuple unpacking of 2‑element array
-            return np.array([v, mu * ((1 - x * x) * v - x)], dtype=float)
+        # Localize variables for speed
+        _mu = mu
+        _rtol = 1e-8
+        _atol = 1e-9
+        _method = "Radau"
 
-        # Integration parameters chosen for a good trade‑off between speed and
-        # accuracy.  The method is simple but robust for the Van der Pol oscillator.
-        rtol = 1e-8
-        atol = 1e-9
-        method = "RK45"
+        def vdp(t, y):
+            x, v = y
+            return np.array([v, _mu * ((1 - x ** 2) * v - x)], dtype=np.float64)
 
-        # Avoid `t_eval` and dense output unless in debug mode.
+        # Only request a dense output (and a fine t_eval) if debugging
         t_eval = np.linspace(t0, t1, 1000) if debug else None
 
         sol = solve_ivp(
             vdp,
             (t0, t1),
             y0,
-            method=method,
-            rtol=rtol,
-            atol=atol,
+            method=_method,
+            rtol=_rtol,
+            atol=_atol,
             t_eval=t_eval,
             dense_output=debug,
         )

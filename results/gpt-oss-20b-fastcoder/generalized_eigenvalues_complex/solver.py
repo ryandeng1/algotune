@@ -1,30 +1,46 @@
+from typing import Any, List
 import numpy as np
 import scipy.linalg as la
 from numpy.typing import NDArray
 
 class Solver:
-    def solve(self, problem: tuple[NDArray, NDArray]) -> list[complex]:
+    """
+    Solver for the generalized eigenvalue problem A x = λ B x.
+    """
+
+    def solve(self, problem: tuple[NDArray, NDArray]) -> List[complex]:
         """
-        Solve the generalized eigenvalue problem A·x = λ B·x and return eigenvalues
-        sorted descending by real part and then by imaginary part.
+        Solve the generalized eigenvalue problem for the given matrices A and B.
+
+        The problem is defined as: A · x = λ B · x.
+        For better numerical stability, B is scaled so that its Frobenius norm
+        becomes one before solving the problem.  The resulting eigenvalues are
+        sorted in descending order, first by real part then by imaginary part.
+
+        Parameters
+        ----------
+        problem : tuple[NDArray, NDArray]
+            A tuple of two real n×n matrices (A, B).
+
+        Returns
+        -------
+        List[complex]
+            List of eigenvalues sorted by real part descending, then
+            imaginary part descending.
         """
         A, B = problem
-        # Scale matrices to avoid overflow/underflow
-        scale_B = np.linalg.norm(B, ord='fro') ** 0.5
+
+        # Compute the Frobenius norm of B once
+        scale_B = np.sqrt(np.linalg.norm(B, 'fro'))
+        if scale_B == 0:  # avoid division by zero for a zero matrix
+            return []
+
+        # Scale both matrices (in a lightweight fashion)
         B_scaled = B / scale_B
         A_scaled = A / scale_B
 
-        # Compute eigenvalues using LAPACK routine
-        w, _ = la.eig(A_scaled, B_scaled)
+        # Solve the generalized eigenvalue problem
+        eigenvalues, _ = la.eig(A_scaled, B_scaled)
 
         # Sort by real part descending, then by imaginary part descending
-        w.sort()
-        # numpy sorts ascending; reverse for descending
-        w = w[::-1]
-        # Ensure correct ordering for equal real parts
-        # We can use stable Python sorting for small arrays
-        sorted_vals = sorted(
-            w,
-            key=lambda z: (-z.real, -z.imag)
-        )
-        return list(sorted_vals)
+        return sorted(eigenvalues, key=lambda x: (-x.real, -x.imag))

@@ -1,38 +1,45 @@
-from typing import Any
+# solver.py
+from __future__ import annotations
+from typing import Any, Dict, List, Set
 
 class Solver:
-    def solve(self, problem: dict[str, Any]) -> dict[str, float]:
+    """
+    Calculates the directed edge expansion of a subset of nodes in a graph.
+    Edge expansion is defined as the number of directed edges leaving the
+    subset divided by the size of the subset.
+    """
+
+    def solve(self, problem: Dict[str, Any]) -> Dict[str, float]:
         """
-        Computes the edge expansion of the supplied subset `S` in the directed graph.
+        Parameters
+        ----------
+        problem : dict
+            Must contain:
+                - "adjacency_list": list[list[int]] adjacency list of a directed graph
+                - "nodes_S": list[int] subset of node indices
 
-        Edge expansion is defined as:
-            |δ(S)| / |S|
-
-        where δ(S) is the set of directed edges with source in `S` and target not in `S`.
-
-        If `S` is empty or contains all nodes, the expansion is defined to be 0.0.
+        Returns
+        -------
+        dict
+            {"edge_expansion": float}
         """
-
-        adj_list = problem['adjacency_list']
-        nodes_S_list = problem['nodes_S']
+        adj_list: List[List[int]] = problem.get("adjacency_list", [])
+        nodes_S: Set[int] = set(problem.get("nodes_S", []))
 
         n = len(adj_list)
-        if n == 0:
-            return {'edge_expansion': 0.0}
+        if n == 0 or not nodes_S or len(nodes_S) == n:
+            return {"edge_expansion": 0.0}
 
-        # Convert to set for O(1) membership tests
-        nodes_S = set(nodes_S_list)
-
-        # Edge cases
-        if not nodes_S or len(nodes_S) == n:
-            return {'edge_expansion': 0.0}
-
-        # Count outgoing edges from S to outside
-        edge_count = 0
+        # Count outgoing edges from S to its complement
+        boundary_edges = 0
+        comp = set(range(n)) - nodes_S
         for u in nodes_S:
-            for v in adj_list[u]:
-                if v not in nodes_S:
-                    edge_count += 1
+            # iterate only if u is a valid index
+            if 0 <= u < n:
+                for v in adj_list[u]:
+                    if v in comp:
+                        boundary_edges += 1
 
-        expansion_val = edge_count / len(nodes_S)
-        return {'edge_expansion': float(expansion_val)}
+        # Edge expansion: |∂S| / |S|
+        expansion = boundary_edges / len(nodes_S)
+        return {"edge_expansion": float(expansion)}

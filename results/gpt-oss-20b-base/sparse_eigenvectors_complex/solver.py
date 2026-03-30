@@ -1,28 +1,60 @@
+# solver.py
+from __future__ import annotations
+
+from typing import Any
+
 import numpy as np
 from scipy import sparse
 
 class Solver:
-    def solve(self, problem: dict) -> list:
+    """Fast sparse eigenvalue solver."""
+
+    def solve(self, problem: dict[str, Any]) -> list[complex]:
         """
-        Return the eigenvectors corresponding to the `k` eigenvalues with
-        largest absolute value, sorted in decreasing order.
+        Compute the `k` eigenvectors of the largest-magnitude eigenvalues of a square
+        sparse matrix `A` given in COO, CSR, CSC or any scipy sparse format.
 
-        The matrix `A` is expected to be a square SciPy sparse matrix.
+        Parameters
+        ----------
+        problem : dict
+            Must contain:
+            - ``matrix``: A scipy sparse matrix.
+            - ``k``: Number of dominant eigenvectors to return (int).
+
+        Returns
+        -------
+        list[complex]
+            Eigenvectors sorted by decreasing |λ|.  Each entry is a 1‑D :class:`numpy.ndarray`
+            of dtype matching `A.dtype`.  The list length is ``min(k, N)`` where N is the
+            dimension of the matrix.
         """
-        A = problem["matrix"]
-        k = problem["k"]
-        n = A.shape[0]
+        A: sparse.spmatrix = problem["matrix"]
+        k: int = problem["k"]
+        N: int = A.shape[0]
 
-        # Use an initial guess that improves convergence speed
-        v0 = np.ones(n, dtype=A.dtype)
+        # Sanity check: ensure we don't request more eigenpairs than allowed
+        if k <= 0:
+            raise ValueError("k must be positive")
+        if k >= N:
+            # The solver can only return at most N-1 eigenvalues, so
+            # reduce the request to the max admissible value.
+            k = N - 1
 
-        # ncv is the number of Lanczos vectors: keep it modest for speed
-        ncv = max(2 * k + 1, 20)
+        # Provide a useful initial guess
+        v0 = np.full(N, 1, dtype=A.dtype)
 
-        # Perform the eigenvalue solve
-        vals, vecs = sparse.linalg.eigs(A, k=k, v0=v0, maxiter=n * 200,
-                                        ncv=ncv, which="LM")
+        # Run the ARPACK routine via scipy sparse.linalg
+        eigenvalues, eigenvectors = sparse.linalg.eigs(
+            A,
+            k=k,
+            v0=v0,
+            maxiter=N * 200,
+            ncv=max(2 * k + 1, 20),
+        )
 
-        # Sort by magnitude of eigenvalue (descending)
-        idx = np.argsort(-np.abs(vals))
-        return [vecs[:, i] for i in idx]
+        # Sort by decreasing eigenvalue magnitude
+        idx = np.argsort(-np.abs(eigenvalues))
+        eigenvectors = eigenvectors[:, idx]
+
+        # Return a list of 1‑D arrays (vectors)
+        return [eigenvectors[:, i] for i in range(eigenvectors.shape[1])]

@@ -1,28 +1,42 @@
 import numpy as np
+from typing import List
 from numpy.typing import NDArray
 
 class Solver:
-    def solve(self, problem: NDArray) -> list[list[complex]]:
+
+    def solve(self, problem: NDArray) -> List[List[complex]]:
         """
-        Solve the eigenvector problem for the given non-symmetric matrix.
-        Compute eigenvalues and eigenvectors using np.linalg.eig.
-        Sort the eigenpairs in descending order by the real part (and then imaginary part) of the eigenvalues.
-        Return the eigenvectors (each normalized to unit norm) as a list of lists of complex numbers.
+        Solve the eigenvector problem for a non‑symmetric square matrix.
+
+        Parameters
+        ----------
+        problem : NDArray
+            Real or complex square matrix of shape (n, n).
+
+        Returns
+        -------
+        List[List[complex]]
+            Normalised eigenvectors, sorted by eigenvalue real part (desc),
+            then by imaginary part (desc).  Each inner list is a column
+            eigenvector.
         """
-        # Compute eigenvalues and eigenvectors
+        # Compute eigenvalues and right eigenvectors
         vals, vecs = np.linalg.eig(problem)
 
-        # Order indices by descending real part, then imaginary part
-        idx = np.lexsort((-vals.real, -vals.imag))
+        # Sorting by real part (desc) then imaginary part (desc)
+        # lexsort expects keys in ascending order, so negate to get descending
+        key2 = -vals.imag
+        key1 = -vals.real
+        idx = np.lexsort((key2, key1))
 
-        # Reorder vectors
+        # Reorder eigenvectors (columns)
         vecs = vecs[:, idx]
 
-        # Normalize each eigenvector to unit norm
-        norms = np.linalg.norm(vecs, axis=0, keepdims=True)
-        # Avoid division by zero; zero-norm vectors stay zero
-        safe_norms = np.where(norms == 0, 1, norms)
-        vecs = vecs / safe_norms
+        # Normalise columns
+        norms = np.linalg.norm(vecs, axis=0)
+        # Avoid division by zero (numerical zero eigenvectors)
+        norms[norms == 0] = 1.0
+        vecs = vecs / norms
 
-        # Convert to list of lists
-        return [vec.tolist() for vec in vecs.T]
+        # Convert to list of lists of Python complex numbers
+        return [vecs[:, i].tolist() for i in range(vecs.shape[1])]

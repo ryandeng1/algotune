@@ -1,30 +1,37 @@
+from __future__ import annotations
+from typing import Any, List, Dict
 import numpy as np
 
 class Solver:
     """
-    Fast matrix multiplication solver.
+    Solver for fast matrix multiplication.
+    The implementation leverages NumPy's highly optimised BLAS backend,
+    which is the fastest available for large dense matrices in pure Python.
     """
-    def solve(self, problem: dict[str, list[list[float]]]) -> list[list[float]]:
+
+    def solve(self, problem: Dict[str, List[List[float]]]) -> List[List[float]]:
         """
-        Compute the product C = A · B for two given matrices.
+        Multiply matrices A and B from the problem dict and return the result
+        as a Python list of lists.
 
         Parameters
         ----------
         problem : dict
-            Dictionary with keys 'A' and 'B', each mapping to a nested list of floats.
+            Must contain keys 'A' and 'B' with values being 2‑D lists of floats
+            representing the input matrices.
 
         Returns
         -------
         list[list[float]]
-            The product matrix as a nested list.
+            The product matrix C = A @ B.
         """
-        # Convert to NumPy arrays once (the fastest way to build a contiguous matrix)
+        # Convert inputs to NumPy arrays with the best possible dtype.
+        # Using float64 ensures compatibility with BLAS.
         A = np.array(problem['A'], dtype=np.float64, copy=False)
         B = np.array(problem['B'], dtype=np.float64, copy=False)
 
-        # NumPy's matmul (or dot) is heavily optimized; using the `@` operator is
-        # slightly faster as it dispatches to the best implementation.
-        C = A @ B
+        # Perform matrix multiplication; np.dot uses BLAS when available.
+        C = np.dot(A, B)
 
-        # Convert back to plain Python nested lists for the required output format.
+        # Return as a plain Python list of lists for the required API.
         return C.tolist()

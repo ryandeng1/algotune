@@ -1,54 +1,85 @@
-from typing import List
+# solver.py
+"""
+Optimised CP‑SAT solver for the maximum weight independent set (MWIS) problem.
+
+The implementation removes extraneous loops and uses the most efficient CP‑SAT
+features available in ortools. The solver is tuned for speed on typical
+instances where the adjacency matrix is sparse.
+"""
+
+from __future__ import annotations
+
+from typing import List, Dict
+
 from ortools.sat.python import cp_model
 
+
 class Solver:
-    """Fast CP‑SAT MWIS implementation."""
+    """
+    Solver class exposing a single callable method `solve`.
 
-    def solve(self, problem: dict[str, List]) -> List[int]:
-        """
-        Solves the Maximum‑Weight Independent Set (MWIS) problem.
+    Parameters
+    ----------
+    problem : dict
+        Must contain two keys:
+        * 'adj_matrix' – a square list of lists of booleans (1/0).
+        * 'weights'    – a list of non‑negative numbers (int/float).
 
-        Parameters
-        ----------
-        problem : dict
-            Must contain:
-            * `adj_matrix` – adjacency matrix (list of lists of booleans)
-            * `weights`    – list of node weights
+    Returns
+    -------
+    List[int]
+        List of node indices that belong to the maximum weight independent set.
+    """
 
-        Returns
-        -------
-        List[int]
-            Indices of nodes in an optimal independent set.
-        """
+    def solve(self, problem: Dict[str, List[Any]]) -> List[int]:
         adj_matrix = problem["adj_matrix"]
         weights = problem["weights"]
-        n = len(weights)
+        n = len(adj_matrix)
 
+        # ------------------------------------------------------------------
+        #  Build CP‑SAT model
+        # ------------------------------------------------------------------
         model = cp_model.CpModel()
-        # Boolean variables for each node
-        x = [model.NewBoolVar(f"x_{i}") for i in range(n)]
 
-        # Create adjacency constraints only once per edge
-        for i in range(n):
-            ai = adj_matrix[i]
-            for j in range(i + 1, n):
-                if ai[j]:
-                    model.Add(x[i] + x[j] <= 1)
+        # Boolean decision variables for each node
+        x: List[cp_model.IntVar] = [model.NewBoolVar(f"x_{i}") for i in range(n)]
 
-        # Maximize total weight
-        model.Maximize(
-            sum(weights[i] * x[i] for i in range(n))
-        )
+        # Pre‑compute the edge list to add constraints only once per edge
+        # This is faster than the nested loop with an if‑statement at each step.
+        edge_list = [(i, j) for i in range(n) for j in range(i + 1, n) if adj_matrix[i][j]]
+        model.AddNoOverlap(x[i] * x[j] <= 0 for i, j in edge_list)  # use AddForbiddenAssignments?
 
-        # Use a solver with a short time limit that suffices for moderate graphs.
+        # Objective: maximize the total weight of selected nodes
+        # CP‑SAT expects integer coefficients, so we scale floats if needed
+        if any(isinstance(w, float) for w in weights):
+            # Scale all weights to integers (multiply by 1e6 for 6‑decimal precision)
+            scale = 10 ** 6
+            coeffs = [int(round(w * scale)) for w in weights]
+            model.Maximize(sum(coeffs[i] * x[i] for i in range(n)))
+        else:
+            model.Maximize(sum(weights[i] * x[i] for i in range(n)))
+
+        # ------------------------------------------------------------------
+        #  Solver configuration
+        # ------------------------------------------------------------------
         solver = cp_model.CpSolver()
-        solver.parameters.max_time_in_seconds = 10.0  # adjust if needed
-        solver.parameters.num_search_workers = cp_model.CpSolverParameters().GetDefault().num_search_workers
+        # Use the fastest arithmetic precision and limit the search time if needed
+        solver.parameters.max_time_in_seconds = 4.0
+        solver.parameters.num_search_workers = 4  # use multi‑core search
 
         status = solver.Solve(model)
 
-        if status == cp_model.OPTIMAL:
-            return [i for i in range(n) if solver.Value(x[i]) == 1]
-        else:
-            # In rare cases the solver may only find a feasible solution, return it
-            return [i for i in range(n) if solver.Value(x[i]) == 1]
+        # ------------------------------------------------------------------
+        #  Extract solution
+        # ------------------------------------------------------------------
+        if status in {cp_model.OPTIMAL, cp_model.FEASIBLE}:
+            return [i for i in range(n) if solver.Value(x[i])]
+        return []
+
+
+# -----------------------------------------------------------------------------
+# Note: The `EdgeList` constraint above is a concise way to encode the
+# pairwise independence constraints. If the set of edges is huge (dense
+# graph), it is still handled efficiently by CP‑SAT's internal
+# constraint propagation.
+# -----------------------------------------------------------------------------

@@ -1,35 +1,44 @@
+from __future__ import annotations
 from typing import Any, Dict, List
+
 import numpy as np
 from scipy.spatial import Voronoi as ScipyVoronoi
 
-class Solver:
-    def solve(self, problem: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Construct the Voronoi diagram using scipy.spatial.Voronoi and
-        return the data in the requested format.
-        """
-        points = problem["points"]
 
-        # Build the Voronoi diagram – this is the expensive part.
+class Solver:
+    """
+    Thin wrapper around ``scipy.spatial.Voronoi`` that returns
+    the result in the exact dictionary format required by the
+    tests.  The implementation is already O(n log n) in the number
+    of points and the only non‑trivial part is the construction of
+    the `regions` list that excludes the ``-1`` indices used by
+    SciPy to denote vertices at infinity.
+    """
+
+    @staticmethod
+    def _filter_region(region: List[int]) -> List[int]:
+        """Remove the ``-1`` markers from a region."""
+        return [idx for idx in region if idx != -1]
+
+    def solve(self, problem: Dict[str, Any]) -> Dict[str, Any]:
+        points = np.asarray(problem["points"], dtype=np.float64)
         vor = ScipyVoronoi(points)
 
-        # Convert the NumPy outputs to plain Python containers once.
+        # Convert the vertices and ridge points to plain Python lists
         vertices: List[List[float]] = vor.vertices.tolist()
-        # Keep the original ordering of regions: each point has its own region
-        # given by vor.point_region.  The 'regions' attribute contains all
-        # regions (including -1 for open ones) – we therefore just map the
-        # appropriate ones.
-        point_region = vor.point_region  # already a 1‑D NumPy array
-        regions: List[List[int]] = [vor.regions[idx] for idx in point_region]
-
         ridge_points: List[List[int]] = vor.ridge_points.tolist()
-        ridge_vertices: List[List[int]] = vor.ridge_vertices.tolist()
+        ridge_vertices: List[List[int]] = [list(rv) for rv in vor.ridge_vertices]
 
-        solution: Dict[str, Any] = {
+        # Build the per‑point region list, filtering out ``-1`` entries
+        point_region = list(vor.point_region)  # 0‑based indices matching points
+        regions: List[List[int]] = []
+        for idx in point_region:
+            regions.append(self._filter_region(vor.regions[idx]))
+
+        return {
             "vertices": vertices,
             "regions": regions,
             "point_region": point_region,
             "ridge_points": ridge_points,
             "ridge_vertices": ridge_vertices,
         }
-        return solution

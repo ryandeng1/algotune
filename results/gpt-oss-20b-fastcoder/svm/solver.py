@@ -1,53 +1,75 @@
+# solver.py
+"""
+Optimised SVM solver that uses CVXPY with the OSQP solver for maximum speed.
+"""
+
+from typing import Any, Dict
+
+import cvxpy as cp
 import numpy as np
-from sklearn.svm import LinearSVC
+
 
 class Solver:
-    def solve(self, problem: dict) -> dict:
+    # We pre‑compile the OSQP solver options only once.
+    _osqp_opts = {"scale": "normal", "verbose": False, "max_iter": 2000, "eps_abs": 1e-6, "eps_rel": 1e-6}
+
+    def solve(self, problem: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Solve a hard‑margin / soft‑margin linear SVM using scikit‑learn's LinearSVC.
+        Solve an L2‑regularised SVM via CVXPY.
 
         Parameters
         ----------
         problem : dict
-            Must contain
-            * 'X' : array‑like, shape (n_samples, n_features)
-            * 'y' : array‑like, shape (n_samples,)
-            * 'C' : float, regularisation parameter
+            Dictionary containing keys
+                - 'X': array‑like n×p training matrix
+                - 'y': array‑like n‑label vector (±1)
+                - 'C': float regularisation coefficient
 
         Returns
         -------
         dict
-            * 'beta0'      : intercept (float)
-            * 'beta'       : weight vector (list[float])
-            * 'optimal_value' : objective value (float)
-            * 'missclass_error' : classification error on training set (float)
+            Dictionary containing
+                - 'beta0'        : scalar bias term
+                - 'beta'         : list of p weight coefficients
+                - 'optimal_value': value of the objective function
+                - 'missclass_error': fraction of mis‑classified training samples
         """
-        X = np.asarray(problem["X"])
-        y = np.asarray(problem["y"])
-        C = problem.get("C", 1.0)
+        # Convert input to numpy arrays once
+        X = np.asarray(problem["X"], dtype=np.float64)
+        y = np.asarray(problem["y"], dtype=np.float64).reshape(-1, 1)
+        C = float(problem["C"])
 
-        # LinearSVC minimises (1/2)||w||^2 + C * Σ max(0, 1- y_i w^T x_i)
-        # This is equivalent to the standard SVM formulation.
-        clf = LinearSVC(C=C, loss="hinge", dual=False, fit_intercept=True, max_iter=10000, random_state=0)
+        n, p = X.shape
+
+        # CVXPY variables
+        beta = cp.Variable((p, 1))
+        beta0 = cp.Variable()
+        xi = cp.Variable((n, 1))
+
+        # Objective and constraints
+        objective = cp.Minimize(0.5 * cp.sum_squares(beta) + C * cp.sum(xi))
+        constraints = [xi >= 0,
+                       cp.multiply(y, X @ beta + beta0) >= 1 - xi]
+
+        # Solve using OSQP for speed
+        prob = cp.Problem(objective, constraints)
         try:
-            clf.fit(X, y)
+            optimal_value = prob.solve(solver=cp.OSQP, **self._osqp_opts)
         except Exception:
+            # Any solving issue -> return None
             return None
 
-        beta = clf.coef_.flatten()
-        beta0 = clf.intercept_[0]
-        # compute objective value: 0.5 * ||beta||^2 + C * sum xi
-        # with Dual slope: xi = max(0, 1 - y_i*(Xbeta + beta0))
-        preds = X @ beta + beta0
-        margins = y * preds
-        xi = np.maximum(0, 1 - margins)
-        optimal_value = 0.5 * np.sum(beta ** 2) + C * np.sum(xi)
+        # Check feasibility
+        if beta.value is None or beta0.value is None:
+            return None
 
-        missclass_error = np.mean(preds * y < 0)
+        # Predictions and miss‑classification rate
+        predictions = X @ beta.value + beta0.value
+        missclass = np.mean(predictions * y < 0)
 
         return {
-            "beta0": float(beta0),
-            "beta": beta.tolist(),
+            "beta0": float(beta0.value),
+            "beta": beta.value.ravel().tolist(),
             "optimal_value": float(optimal_value),
-            "missclass_error": float(missclass_error),
+            "missclass_error": float(missclass),
         }

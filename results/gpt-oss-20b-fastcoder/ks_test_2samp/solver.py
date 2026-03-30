@@ -1,52 +1,50 @@
+# solver.py
+
 from typing import Any, Dict
 import numpy as np
-import math
+import scipy.stats as stats
+
+__all__ = ["Solver"]
+
 
 class Solver:
-    def _ks_2samp(self, a: np.ndarray, b: np.ndarray):
-        na = a.size
-        nb = b.size
-        if na == 0 or nb == 0:
-            return 1.0, 0.0
+    """
+    A tiny wrapper that performs a two‑sample Kolmogorov–Smirnov test.
 
-        # Sort the samples
-        a = np.sort(a)
-        b = np.sort(b)
+    The implementation is deliberately minimal: we simply delegate to
+    :func:`scipy.stats.ks_2samp`.  The surrounding plumbing (importing,
+    typing, and result packaging) is kept as lightweight as possible
+    to minimise function‑call overhead.
+    """
 
-        i = j = 0
-        max_diff = 0.0
-
-        # Two‑pointer scan to compute the empirical CDF difference
-        while i < na or j < nb:
-            if j == nb or (i < na and a[i] <= b[j]):
-                i += 1
-                cdf_a = i / na
-                cdf_b = j / nb
-            else:
-                j += 1
-                cdf_a = i / na
-                cdf_b = j / nb
-            diff = abs(cdf_a - cdf_b)
-            if diff > max_diff:
-                max_diff = diff
-
-        # Asymptotic p‑value approximation (valid for large samples)
-        n_eff = na * nb / (na + nb)
-        lambda_val = max_diff * math.sqrt(n_eff * 2.0)
-        if lambda_val < 0.01:
-            pvalue = 1.0
-        else:
-            # Complementary error function approximation:
-            pvalue = 2.0 * sum(
-                (-1) ** (k - 1) * math.exp(-2.0 * (k * lambda_val) ** 2) for k in range(1, 100)
-            )
-            pvalue = max(0.0, min(1.0, pvalue))
-
-        return max_diff, pvalue
+    # A small cache map can be used to reduce attribute lookups.
+    _ks_2samp = staticmethod(stats.ks_2samp)
 
     def solve(self, problem: Dict[str, Any]) -> Dict[str, Any]:
-        """Perform two-sample KS test using a fast NumPy implementation."""
-        sample1 = np.asarray(problem["sample1"])
-        sample2 = np.asarray(problem["sample2"])
-        statistic, pvalue = self._ks_2samp(sample1, sample2)
-        return {"statistic": statistic, "pvalue": pvalue}
+        """
+        Perform a two‑sample Kolmogorov–Smirnov test.
+
+        Parameters
+        ----------
+        problem : dict
+            Must contain the keys 'sample1' and 'sample2'.  The values are
+            iterable sequences (typically ``numpy.ndarray`` or lists) that
+            will be converted to ``numpy.ndarray`` by :func:`scipy.stats`.
+            For very large inputs the conversion overhead typically dwarfs
+            the KS test overhead.
+
+        Returns
+        -------
+        dict
+            ``{'statistic': float, 'pvalue': float}``
+        """
+        # Pull the two samples once; skip dict key lookups on each call.
+        sample1 = problem["sample1"]
+        sample2 = problem["sample2"]
+
+        # Directly call the function; result is a namedtuple
+        # with fields 'statistic' and 'pvalue'.
+        res = self._ks_2samp(sample1, sample2, method="auto")
+
+        # Package the output as plain Python floats
+        return {"statistic": float(res.statistic), "pvalue": float(res.pvalue)}

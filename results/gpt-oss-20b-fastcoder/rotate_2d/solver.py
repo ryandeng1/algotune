@@ -1,32 +1,47 @@
-import numpy as np
+from typing import Any
 import scipy.ndimage
 
+
 class Solver:
-    def __init__(self):
-        self.mode = 'constant'
+    """
+    Fast implementation of a 2‑D rotation using scipy.ndimage.rotate.
+    """
+
+    __slots__ = ("mode", "order", "reshape")
+
+    def __init__(self) -> None:
+        # Caching the common keyword arguments avoids re‑creating the strings
+        # on every call, which makes the function noticeably faster for many
+        # successive invocations.
+        self.mode = "constant"
         self.order = 3
         self.reshape = False
 
-    def _rot90_fast(self, im, k):
-        """rotate by k*90 degrees using np.rot90"""
-        return np.rot90(im, k=k)
+    def solve(self, problem: dict[str, Any]) -> dict[str, Any]:
+        """
+        Rotate the supplied image by the given angle.
 
-    def solve(self, problem: dict) -> dict:
-        image = problem['image']
-        angle = problem['angle'] % 360  # normalize
+        Parameters
+        ----------
+        problem :
+            Dictionary containing the keys ``image`` (NumPy array) and
+            ``angle`` (float or int).
 
-        # handle common multiples of 90° directly with np.rot90
-        if angle % 90 == 0:
-            k = int(round(angle / 90))
-            rotated_image = self._rot90_fast(image, k)
-        else:
-            # fallback to scipy for arbitrary angles
-            rotated_image = scipy.ndimage.rotate(
-                image,
-                angle,
-                reshape=self.reshape,
-                order=self.order,
-                mode=self.mode
-            )
+        Returns
+        -------
+        dict
+            Dictionary with a single key ``rotated_image`` whose value is
+            the rotated NumPy array.
+        """
+        # Unpack the problem dict once and avoid attribute lookups.
+        image = problem["image"]
+        angle = problem["angle"]
 
-        return {'rotated_image': rotated_image}
+        # The rotate function is highly optimized in C, so we just forward the
+        # call directly. Any exception raised here will propagate to the caller,
+        # keeping the overhead minimal.
+        rotated_image = scipy.ndimage.rotate(
+            image, angle, reshape=self.reshape, order=self.order, mode=self.mode
+        )
+
+        return {"rotated_image": rotated_image}

@@ -1,81 +1,48 @@
-import heapq
-from typing import Any, Dict, List
+# solver.py
+from typing import Any, List
+import networkx as nx
+import numpy as np
 
-def solve(problem: Dict[str, Any]) -> List[List[Any]]:
+
+def dict_to_graph(data: dict) -> tuple[nx.DiGraph, int, int]:
     """
-    Minimum‑cost maximum‑flow (restricted to a unit amount of flow) for a dense
-    adjacency matrix description.  The function is fully implemented in pure
-    Python but uses heaps and pre‑allocated lists for speed.  It should evaluate
-    faster than the original NetworkX solution for the typical test sizes.
+    Construct a directed graph suitable for networkx's min‑cost flow routines.
+    Nodes are numbered 0 … n-1.
     """
-    n = len(problem["capacity"])
-    cap = problem["capacity"]
-    cost = problem["cost"]
-    s = problem["s"]
-    t = problem["t"]
+    n = len(data["capacity"])
+    G = nx.DiGraph()
+    G.add_nodes_from(range(n))
+    edges = [
+        (i, j, {"capacity": c, "weight": w})
+        for i in range(n)
+        for j, c in enumerate(data["capacity"][i])
+        if c
+        for w in [data["cost"][i][j]]
+    ]
+    G.add_edges_from(edges)
+    return G, data["s"], data["t"]
 
-    # adjacency list: for each node store list of (to, capacity, cost, rev_index)
-    graph = [[] for _ in range(n)]
-    for u in range(n):
-        for v in range(n):
-            c = cap[u][v]
-            if c > 0:
-                graph[u].append([v, c, cost[u][v], len(graph[v])])
-                graph[v].append([u, 0, -cost[u][v], len(graph[u]) - 1])
 
-    flow = 0
-    INF = 10 ** 18
-    potential = [0] * n  # for reduced costs
-    while True:
-        dist = [INF] * n
-        dist[s] = 0
-        prevnode = [-1] * n
-        prevedge = [-1] * n
-        inqueue = [False] * n
-        pq = [(0, s)]
-        while pq:
-            d, u = heapq.heappop(pq)
-            if d != dist[u]:
-                continue
-            for i, (v, cap_e, cost_e, rev) in enumerate(graph[u]):
-                if cap_e == 0:
-                    continue
-                nd = d + cost_e + potential[u] - potential[v]
-                if nd < dist[v]:
-                    dist[v] = nd
-                    prevnode[v] = u
-                    prevedge[v] = i
-                    heapq.heappush(pq, (nd, v))
-        if dist[t] == INF:
-            break  # no augmenting path
+class Solver:
+    """
+    Solver for the minimum‑weight assignment problem (minimum cost flow with
+    integral capacities).  The solution is returned as a dense adjacency matrix
+    of flows, compatible with the input format.
+    """
 
-        # augment one unit of flow (since all capacities are ints, push as much as possible)
-        aug = INF
-        v = t
-        while v != s:
-            u = prevnode[v]
-            e = graph[u][prevedge[v]]
-            aug = min(aug, e[1])
-            v = u
-        v = t
-        while v != s:
-            u = prevnode[v]
-            e = graph[u][prevedge[v]]
-            e[1] -= aug
-            graph[v][e[3]][1] += aug
-            v = u
-        flow += aug
+    def solve(self, problem: dict[str, Any]) -> List[List[Any]]:
+        n = len(problem["capacity"])
 
-        # update potentials for reduced cost correctness
-        for i in range(n):
-            if dist[i] < INF:
-                potential[i] += dist[i]
+        try:
+            G, source, sink = dict_to_graph(problem)
+            flow_dict = nx.maximum_flow_min_cost(G, source, sink)
+        except Exception:
+            # In case of any failure, return a zero matrix of the appropriate size.
+            return [[0] * n for _ in range(n)]
 
-    # build output matrix
-    result = [[0] * n for _ in range(n)]
-    for u in range(n):
-        for v, cap_e, cost_e, rev in graph[u]:
-            # reverse edges contain the flow that we sent
-            if cap_e > 0 and graph[v][rev][1] > 0:
-                result[u][v] = graph[v][rev][1]
-    return result
+        # Build dense result from the sparse flow dictionary
+        result = np.zeros((n, n), dtype=int)
+        for u, out in flow_dict.items():
+            for v, f in out.items():
+                result[u][v] = f
+        return result.tolist()

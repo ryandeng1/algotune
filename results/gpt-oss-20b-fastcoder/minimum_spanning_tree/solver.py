@@ -1,54 +1,70 @@
-from typing import Any
-import numpy as np
+#!/usr/bin/env python3
+# solver.py
+from __future__ import annotations
+
+from typing import Any, Dict, List, Tuple
+import heapq
+
+# --------------------------------------------------------------------------- #
+#  Fast Minimum Spanning Tree (Prim's algorithm) implementation.
+#  No external dependencies except the standard library.
+# --------------------------------------------------------------------------- #
+
 
 class Solver:
-    def solve(self, problem: dict[str, Any]) -> dict[str, list[list[float]]]:
-        """
-        Compute the Minimum Spanning Tree (MST) of an undirected weighted graph
-        using a vectorized Kruskal algorithm (union‑find).  This implementation
-        avoids the heavy NetworkX machinery and therefore runs much faster.
-        """
-        num_nodes = problem['num_nodes']
-        edges = np.array(problem['edges'], dtype=np.float64)
+    """Solver that computes a Minimum Spanning Tree (MST) for an undirected
+    weighted graph. The graph is defined in the input problem dictionary:
+      - problem['num_nodes']: int, number of nodes (0 .. n-1)
+      - problem['edges']   : List[Tuple[int, int, float]],
+        each tuple (u, v, weight) represents an undirected edge.
+    The output dictionary contains a single key 'mst_edges', mapping to a
+    list of edges, each represented as [u, v, weight] with u <= v.
+    The list is sorted lexicographically by (u, v).
+    """
 
-        # separate columns: u, v, w
-        u = edges[:, 0].astype(np.int32)
-        v = edges[:, 1].astype(np.int32)
-        w = edges[:, 2]
+    # --------------------------------------------------------------------- #
+    #  Public API
+    # --------------------------------------------------------------------- #
+    def solve(self, problem: Dict[str, Any]) -> Dict[str, List[List[float]]]:
+        """Compute the MST and return it in the expected format."""
+        num_nodes: int = problem["num_nodes"]
+        edges: List[Tuple[int, int, float]] = problem["edges"]
 
-        # sort edges by weight
-        idx = np.argsort(w)
-        u = u[idx]
-        v = v[idx]
-        w = w[idx]
+        # Build adjacency list: node -> list of (neighbor, weight)
+        adj: List[List[Tuple[int, float]]] = [[] for _ in range(num_nodes)]
+        for u, v, w in edges:
+            adj[u].append((v, w))
+            adj[v].append((u, w))
 
-        parent = np.arange(num_nodes, dtype=np.int32)
-        rank = np.zeros(num_nodes, dtype=np.int32)
+        # Prim's algorithm – adjacency heap approach
+        visited = [False] * num_nodes
+        min_heap: List[Tuple[float, int, int]] = []  # (weight, u, v)
+        mst: List[Tuple[int, int, float]] = []
 
-        def find(x: np.int32) -> np.int32:
-            # path compression
-            while parent[x] != x:
-                parent[x] = parent[parent[x]]
-                x = parent[x]
-            return x
+        # Start from node 0 (any node works because the graph is connected)
+        visited[0] = True
+        for v, w in adj[0]:
+            heapq.heappush(min_heap, (w, 0, v))
 
-        mst = []
-        for ui, vi, wi in zip(u, v, w):
-            pu = find(ui)
-            pv = find(vi)
-            if pu != pv:
-                # union by rank
-                if rank[pu] < rank[pv]:
-                    parent[pu] = pv
-                elif rank[pu] > rank[pv]:
-                    parent[pv] = pu
-                else:
-                    parent[pv] = pu
-                    rank[pu] += 1
-                # normalize order (u <= v)
-                if ui > vi:
-                    ui, vi = vi, ui
-                mst.append([ui, vi, float(wi)])
+        count = 1  # number of nodes already in MST
+        while min_heap and count < num_nodes:
+            w, u, v = heapq.heappop(min_heap)
+            if visited[v]:
+                continue  # skip already-in‑MST nodes
+            # Add this edge to MST
+            if u > v:
+                u, v = v, u
+            mst.append((u, v, w))
+            visited[v] = True
+            count += 1
+            # Push all edges from the newly visited node
+            for nb, nb_w in adj[v]:
+                if not visited[nb]:
+                    heapq.heappush(min_heap, (nb_w, v, nb))
 
-        mst.sort(key=lambda x: (x[0], x[1]))
-        return {'mst_edges': mst}
+        # Sort the MST edges lexicographically by (u, v)
+        mst.sort(key=lambda e: (e[0], e[1]))
+
+        # Convert to list of lists for the required return type
+        mst_edges = [[u, v, w] for u, v, w in mst]
+        return {"mst_edges": mst_edges}

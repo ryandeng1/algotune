@@ -1,34 +1,71 @@
-import numpy as np
+# solver.py
+from __future__ import annotations
+from typing import Any, Dict, List
 import faiss
-from typing import Any
+import numpy as np
+
+# A tiny helper to avoid re‑allocating FP constants
+_FLOAT32_ZERO = np.float32(0.0)
+
 
 class Solver:
     """
-    Vector Quantisation using Faiss k‑means.
+    Fast vector quantization using Faiss k‑means.
     """
 
-    def solve(self, problem: dict[str, Any]) -> dict[str, Any]:
-        # Extract and cast efficiently
-        vectors = np.asarray(problem["vectors"], dtype=np.float32)
-        k = int(problem["k"])
-        dim = vectors.shape[1]
+    def __init__(self) -> None:
+        # No persistent state needed – everything is created in solve().
+        pass
 
-        # K‑means: fewer iterations give a good trade‑off in most tests.
-        kmeans = faiss.Kmeans(dim, k, niter=20, verbose=False, seed=0)
+    def solve(self, problem: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Run k‑means clustering on the supplied vectors and return a compact result.
+
+        Parameters
+        ----------
+        problem : dict
+            Must contain:
+            - 'vectors': list[list[float]] – 2‑D matrix of input points
+            - 'k': int – desired number of centroids
+
+        Returns
+        -------
+        dict
+            {
+                "centroids": List[List[float]]
+                "assignments": List[int]
+                "quantization_error": float
+            }
+        """
+        # Fast Numpy conversion – avoid temporary Python objects
+        vectors: np.ndarray = np.array(problem["vectors"], dtype=np.float32, copy=False)
+        k: int = int(problem["k"])
+
+        # Faiss k‑means (fewer iterations is usually enough for small problems)
+        dim = vectors.shape[1]
+        kmeans = faiss.Kmeans(
+            dim,
+            k,
+            niter=20,          # fewer iterations → much faster
+            verbose=False,
+            seed=0,            # deterministic
+        )
         kmeans.train(vectors)
 
-        # Direct distance/assignment via Faiss flat index
-        centroids = kmeans.centroids
+        centroids: np.ndarray = kmeans.centroids  # shape (k, dim)
+
+        # Nearest‑centroid search – only one neighbor needed
         index = faiss.IndexFlatL2(dim)
-        index.add(centroids)
-        distances, assignments = index.search(vectors, 1)
+        index.add(centroids)                       # add centroids once
 
-        # Mean squared error (already squared distance)
-        mse = float(np.mean(distances))
+        distances, assignments = index.search(vectors, 1)  # assignments shape (n,1)
 
-        # Convert to pure Python objects for the expected API
+        # Mean squared error (distances already L2–squared)
+        mse = np.mean(distances, dtype=np.float64) if distances.size else _FLOAT32_ZERO
+
+        # Convert to Python lists – minimal overhead
         return {
             "centroids": centroids.tolist(),
             "assignments": assignments.flatten().tolist(),
-            "quantization_error": mse,
+            "quantization_error": float(mse),
         }

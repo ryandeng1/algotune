@@ -1,34 +1,53 @@
+# solver.py
+
+from typing import Any, Dict, List
 import numpy as np
 from scipy.linalg import qz
 
+
 class Solver:
-    def solve(self, problem: dict[str, list[list[float]]]) -> dict[str, dict[str, list[list[float | complex]]]]:
+    """
+    Solver for the QZ factorization problem.
+
+    The implementation is deliberately minimal and relies on SciPy's
+    highly optimized routine.  Mostly the focus is on avoiding any
+    unnecessary data copies and on keeping the code simple and
+    maintainable.
+    """
+
+    def solve(
+        self,
+        problem: Dict[str, List[List[float]]]
+    ) -> Dict[str, Dict[str, List[Any]]]:
         """
-        Compute the real QZ (generalized Schur) factorization of the matrix pair (A, B).
-        The result is returned in the same dictionary format as the input,
-        with all matrices converted to nested Python lists.
+        Compute the real generalized Schur decomposition (QZ),
+        i.e. find matrices Q, Z, AA, BB such that
+
+            A = Q @ AA @ Z.T
+            B = Q @ BB @ Z.T
 
         Parameters
         ----------
         problem : dict
-            A dictionary with keys 'A' and 'B', each mapping to a list of lists
-            containing the matrix entries.
+            Must contain two keys:
+                'A' : [[float]] – first matrix
+                'B' : [[float]] – second matrix
 
         Returns
         -------
         dict
-            A dictionary of the form
-            {"QZ": {"AA": [...], "BB": [...], "Q": [...], "Z": [...]}}
+            Mapping {'QZ': {'AA': ..., 'BB': ..., 'Q': ..., 'Z': ...}}
+            where every entry is converted to the native Python list
+            representation expected by the evaluation harness.
         """
-        # Convert to NumPy arrays once.  Using dtype=float implicitly
-        # keeps the data type consistent for qz and avoids unnecessary copies.
-        A = np.array(problem["A"], dtype=float)
-        B = np.array(problem["B"], dtype=float)
+        # 1. Create NumPy arrays without copying data if possible
+        A = np.asarray(problem["A"], dtype=np.float64, order="C")
+        B = np.asarray(problem["B"], dtype=np.float64, order="C")
 
-        # Perform the real QZ factorization.
+        # 2. Perform the QZ factorization in real mode
         AA, BB, Q, Z = qz(A, B, output="real")
 
-        # Convert results back to nested lists for the required output format.
+        # 3. Convert the result to plain Python lists for serialisation
         return {
             "QZ": {
                 "AA": AA.tolist(),

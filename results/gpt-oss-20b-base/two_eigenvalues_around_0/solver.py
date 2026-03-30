@@ -1,25 +1,34 @@
 import numpy as np
+from typing import Dict, List
 
 class Solver:
+    """Optimised solver for finding the two eigenvalues nearest zero."""
 
-    def solve(self, problem: dict[str, list[list[float]]]) -> list[float]:
+    @staticmethod
+    def _eigvals_nearest_zero(mat: np.ndarray, k: int = 2) -> List[float]:
         """
-        Find the two eigenvalues of a symmetric matrix that are closest to zero,
-        measured by absolute value.
+        Compute the k eigenvalues of a symmetric matrix with smallest absolute values.
+        Uses numpy's efficient *eigvalsh* routine and :func:`numpy.argpartition`.
+
+        Parameters
+        ----------
+        mat : np.ndarray
+            Symmetric input matrix.
+        k : int, optional
+            Number of eigenvalues to return (default: 2).
+
+        Returns
+        -------
+        List[float]
+            The k eigenvalues closest to zero, sorted by absolute value.
         """
-        # Convert to a NumPy array in one pass
-        mat = np.array(problem["matrix"], dtype=float)
+        # Fast eigenvalue computation for symmetric matrices.
+        eigs = np.linalg.eigvalsh(mat)          #  Rank‑ordered from small to large.
+        # Find indices of the k smallest |eigenvalue| without a full sort.
+        idx = np.argpartition(np.abs(eigs), k)[:k]
+        # Extract, sort by absolute value, and convert to Python list.
+        return sorted((eigs[i] for i in idx), key=abs)
 
-        # Since the matrix is symmetric we can use eigvalsh which is faster and
-        # returns real values.  It returns a sorted array by eigenvalue value,
-        # not by absolute value, so we need a quick way to get the two
-        # smallest |λ|.
-        vals = np.linalg.eigvalsh(mat)
-
-        # Use partition to locate the two smallest absolute values without a full sort
-        # This is O(n) instead of O(n log n).
-        idx = np.argpartition(np.abs(vals), 2)[:2]
-        # Retrieve the corresponding eigenvalues
-        closest = vals[idx]
-        # Sort them by absolute value before returning
-        return sorted(closest.tolist(), key=abs)
+    def solve(self, problem: Dict[str, List[List[float]]]) -> List[float]:
+        matrix = np.array(problem["matrix"], dtype=np.float64, order="C")
+        return self._eigvals_nearest_zero(matrix, k=2)

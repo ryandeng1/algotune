@@ -1,23 +1,38 @@
-from typing import Any
-import numpy as np
 from numpy.typing import NDArray
+import numpy as np
 
 class Solver:
+    """
+    The Solver class implements an efficient eigenvalue solver for real square
+    matrices.  It uses :func:`numpy.linalg.eigvals` to avoid computing the full
+    eigendecomposition and sorts the eigenvalues with a single call to
+    :func:`numpy.lexsort`.
+    """
 
-    def solve(self, problem: NDArray) -> list[complex]:
+    @staticmethod
+    def solve(problem: NDArray) -> list[complex]:
         """
-        Solve the eigenvalue problem for the given square matrix.
-        The solution returned is a list of eigenvalues sorted in descending order.
-        The sorting order is defined as follows: first by the real part (descending),
-        then by the imaginary part (descending).
+        Compute all eigenvalues of *problem* and return them sorted in descending
+        order using the key
 
-        :param problem: A numpy array representing the real square matrix.
-        :return: List of eigenvalues (complex numbers) sorted in descending order.
+            1. real part (descending)
+            2. imaginary part (descending)
+
+        Parameters
+        ----------
+        problem : NDArray
+            Real square matrix whose eigenvalues are to be computed.
+
+        Returns
+        -------
+        list[complex]
+            Sorted list of eigenvalues.
         """
-        # Compute eigenvalues only – faster than eig which also returns eigenvectors
-        eigvals = np.linalg.eigvals(problem)
-        # Sort: descending real part first, then descending imaginary part
-        # Use lexsort with negative values for descending order
-        inds = np.lexsort((-eigvals.imag, -eigvals.real))
-        sorted_vals = eigvals[inds]
-        return sorted_vals.tolist()
+        # Fast single‑call eigvals; avoids matrix triangularisation if not needed
+        vals = np.linalg.eigvals(problem)
+
+        # Use lexsort on the negated components so that it yields a descending
+        # order without a custom Python key function.
+        order = np.lexsort((-vals.imag, -vals.real))
+        sorted_vals = vals[order].tolist()
+        return sorted_vals

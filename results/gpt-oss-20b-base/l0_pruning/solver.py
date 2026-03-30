@@ -1,26 +1,36 @@
-import numpy as np
 from typing import Any
+import numpy as np
 
 class Solver:
+    """
+    Solver for the l0‐pruning problem.
+    The algorithm keeps the k largest absolute values of the input vector `v`
+    and zeroes everything else.  Using `np.argpartition` gives an
+    average linear time solution (O(n)).
+    """
+
     def solve(self, problem: dict[str, Any]) -> dict[str, list]:
-        """
-        Retain the k largest magnitude entries of the vector v and zero out the rest.
-        """
-        v = np.asarray(problem['v'])
-        k = int(problem['k'])
+        v = np.asarray(problem.get('v'))
+        k = problem.get('k')
 
-        # Flatten to 1‑D array
-        v = v.ravel()
+        # Flatten v (handled by np.asarray) and keep the shape
+        shape = v.shape
+        v_flat = v.ravel()
 
-        # Find the indices of the k largest magnitude values
-        if k >= v.size:
+        # Find indices of the k largest absolute values.
+        # We want the largest, so we partition with the negative values.
+        abs_v = np.abs(v_flat)
+        if k >= abs_v.size:
             # All elements are kept
-            pruned = v.copy()
+            pruned_flat = v_flat.copy()
         else:
-            # Partition once to get the k largest magnitudes
-            idx = np.argpartition(np.abs(v), -k)[-k:]
-            mask = np.zeros(v.shape, dtype=bool)
-            mask[idx] = True
-            pruned = np.where(mask, v, 0.0)
+            # Use argpartition for linear time selection
+            partition_idx = np.argpartition(-abs_v, k - 1)[:k]
+            # Initialize zeros
+            pruned_flat = np.zeros_like(v_flat)
+            # Place the chosen values
+            pruned_flat[partition_idx] = v_flat[partition_idx]
 
-        return {"solution": pruned.tolist()}
+        # Reshape back to the original shape and convert to list
+        pruned = pruned_flat.reshape(shape).tolist()
+        return {"solution": pruned}

@@ -1,42 +1,73 @@
-from typing import Any
+# solver.py
+from __future__ import annotations
+
 import numpy as np
-from scipy.sparse import csr_matrix
+from scipy import sparse
 from scipy.sparse.linalg import eigsh
+from typing import Any, List
+
+__all__ = ["Solver"]
+
 
 class Solver:
-    def solve(self, problem: dict[str, Any]) -> list[float]:
-        """
-        Return the k smallest eigenvalues of the symmetric matrix provided in
-        problem["matrix"].  The matrix can be either a sparse matrix or a
-        NumPy array that can be converted to CSR.
-        """
-        mat = problem["matrix"]
-        if not isinstance(mat, csr_matrix):
-            mat = mat.asformat("csr") if hasattr(mat, "asformat") else csr_matrix(mat)
-        k = int(problem["k"])
-        n = mat.shape[0]
+    """
+    Optimised solver for the low‐lying eigenvalues of a sparse symmetric matrix.
+    The implementation deliberately keeps the API identical to the reference
+    code while avoiding unnecessary dense conversions and simplifying the
+    control flow for maximum speed.
+    """
 
-        # if the requested number of eigenvalues is too large, fall back to dense
+    @staticmethod
+    def _dense_eigvals(mat: np.ndarray, k: int) -> List[float]:
+        """
+        Compute the first *k* eigenvalues of a dense matrix.
+        """
+        # `np.linalg.eigvalsh` is highly optimised in LAPACK.
+        vals = np.linalg.eigvalsh(mat)
+        return vals[:k].astype(float).tolist()
+
+    def solve(self, problem: dict[str, Any]) -> List[float]:
+        """
+        Return the smallest *k* eigenvalues of a symmetric matrix embedded
+        in `problem['matrix']`, which must support `.asformat('csr')`.
+
+        Parameters
+        ----------
+        problem : dict
+            ``{'matrix': sparse_matrix, 'k': int}``
+
+        Returns
+        -------
+        List[float]
+            Sorted list of the first *k* real eigenvalues.
+        """
+        # Extract CSR matrix directly; this is the format used by eigsh.
+        mat_csr: sparse.spmatrix = problem["matrix"].asformat("csr")
+        k: int = int(problem["k"])
+        n = mat_csr.shape[0]
+
+        # Edge‑case 1: too many eigenvalues or too small a matrix.
         if k >= n or n < 2 * k + 1:
-            vals = np.linalg.eigvalsh(mat.toarray())
-            return [float(v) for v in vals[:k]]
+            return self._dense_eigvals(mat_csr.toarray(), k)
 
-        # compute the k smallest eigenvalues with sparse eigsh
+        # Parameters tuned for typical sparse problems:
+        ncv = min(n - 1, max(2 * k + 1, 20))
+        maxiter = n * 200
+
+        # Core eigsh call.
         try:
+            # Use the Lanczos method (default) with shift‑invert not requested.
             vals = eigsh(
-                mat,
+                mat_csr,
                 k=k,
-                which="SM",
+                which="SM",          # smallest magnitude
                 return_eigenvectors=False,
-                maxiter=200 * n,
-                ncv=min(n - 1, max(2 * k + 1, 20)),
-            )[0]
+                maxiter=maxiter,
+                ncv=ncv,
+            )
         except Exception:
-            # fallback to dense if something goes wrong
-            vals = np.linalg.eigvalsh(mat.toarray())[:k]
-        else:
-            pass
-        finally:
-            pass
+            # Fallback to dense if eigsh fails (e.g. non‑positive def. matrix).
+            return self._dense_eigvals(mat_csr.toarray(), k)
 
-        return [float(v) for v in np.sort(np.real(vals))]
+        # Ensure the returned values are sorted and cast to float.
+        return np.sort(np.real(vals)).astype(float).tolist()

@@ -1,37 +1,50 @@
-from typing import Any
+# solver.py
 import numpy as np
-from scipy.integrate import solve_ivp
+from numba import njit
 
 class Solver:
-    def solve(self, problem: dict[str, np.ndarray | float]) -> dict[str, list[float]]:
-        sol = self._solve(problem, debug=False)
-        if sol.success:
-            return sol.y[:, -1].tolist()
-        raise RuntimeError(f'Solver failed: {sol.message}')
+    @staticmethod
+    @njit
+    def _laplacian(u, dx):
+        """
+        Compute the second spatial derivative with Dirichlet zero boundary
+        conditions using a padded array.
+        """
+        n = u.shape[0]
+        lap = np.empty_like(u)
+        # inner points
+        lap[1:-1] = (u[2:] - 2.0 * u[1:-1] + u[:-2]) / dx**2
+        # boundaries (Dirichlet=0)
+        lap[0] = (u[1] - 2.0 * u[0] + 0) / dx**2
+        lap[-1] = (0 - 2.0 * u[-1] + u[-2]) / dx**2
+        return lap
 
-    def _solve(self, problem: dict[str, np.ndarray | float], debug: bool = True) -> Any:
-        y0 = np.array(problem['y0'], dtype=np.float64)
+    @staticmethod
+    @njit
+    def _derivative(u, params):
+        """Compute du/dt for the heat equation."""
+        return params['alpha'] * Solver._laplacian(u, params['dx'])
+
+    def _rk4_step(self, u, h, params):
+        """Single step of the classical 4th‑order Runge–Kutta method."""
+        k1 = self._derivative(u, params)
+        k2 = self._derivative(u + 0.5 * h * k1, params)
+        k3 = self._derivative(u + 0.5 * h * k2, params)
+        k4 = self._derivative(u + h * k3, params)
+        return u + (h / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
+
+    def solve(self, problem: dict[str, np.ndarray | float]) -> dict[str, list[float]]:
+        """Fast deterministic integrator using a fixed 4th‑order RK scheme."""
+        y0 = np.asarray(problem['y0'], dtype=np.float64)
         t0, t1 = problem['t0'], problem['t1']
         params = problem['params']
-        alpha, dx = params['alpha'], params['dx']
 
-        # Heat equation derivative using centred difference with homogeneous Dirichlet BC
-        def heat_equation(_: float, u: np.ndarray) -> np.ndarray:
-            # u[0] and u[-1] are boundary nodes set to zero implicitly
-            u_left = np.concatenate([np.zeros(1), u[:-1]])
-            u_right = np.concatenate([u[1:], np.zeros(1)])
-            lap = (u_right - 2 * u + u_left) / dx ** 2
-            return alpha * lap
+        # Choose number of steps
+        n_steps = 1000  # fixed, matches original t_eval length
+        h = (t1 - t0) / n_steps
+        u = y0.copy()
 
-        # Integrate with SciPy only once; no dense output needed for speed
-        sol = solve_ivp(
-            heat_equation,
-            [t0, t1],
-            y0,
-            method='RK45',
-            rtol=1e-6,
-            atol=1e-6,
-            t_eval=None if not debug else np.linspace(t0, t1, 1000),
-            dense_output=False,
-        )
-        return sol
+        for _ in range(n_steps):
+            u = self._rk4_step(u, h, params)
+
+        return u.tolist()

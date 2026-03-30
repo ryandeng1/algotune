@@ -1,46 +1,42 @@
 import numpy as np
-from scipy.linalg import svd
-from scipy.sparse.linalg import svds
-from typing import Any
 
 class Solver:
-    def solve(self, problem: dict[str, Any]) -> dict[str, list]:
-        A = problem["matrix"]
-        n_components = problem["n_components"]
-        matrix_type = problem["matrix_type"]
+    """Fast SVD solver that uses NumPy's optimized LAPACK implementation.
 
-        # decide number of power iterations
-        n_iter = 10 if matrix_type == "ill_conditioned" else 5
+    The original implementation used sklearn's `randomized_svd`, which is
+    convenient but incurs overhead for small to medium sized dense matrices.
+    NumPy's `linalg.svd` performs a truncated SVD via LAPACK and is usually
+    faster for the problem sizes encountered in this benchmark.  We keep the
+    same public interface and return the left singular vectors `U`, the
+    singular values `S`, and the right singular vectors `V` (not transposed).
+    """
 
-        # if number of components is larger than or equal to the rank, use full SVD
-        m, n = A.shape
-        min_dim = min(m, n)
-        if n_components >= min_dim:
-            U, s, Vt = svd(A, full_matrices=False)
-            U = U[:, :n_components]
-            s = s[:n_components]
-            Vt = Vt[:n_components, :]
-        else:
-            # use sparse SVD with power iterations
-            # svds does not expose n_iter, so we implement a simple power iteration wrapper
-            def power_iteration(A, k, n_iter, rng):
-                # initial random matrix
-                X = rng.standard_normal((A.shape[1], k))
-                for _ in range(n_iter):
-                    X = A @ (A.T @ X)
-                    X, _ = np.linalg.qr(X)
-                return X
+    def solve(self, problem: dict[str, any]) -> dict[str, list]:
+        """Compute a truncated SVD of the matrix `A`.
 
-            rng = np.random.default_rng(42)
-            # orthonormal bases for power iterations
-            X = power_iteration(A, n_components, n_iter, rng)
-            B = A @ X
-            U_hat, s, Vt = svds(A, k=n_components, return_singular_vectors=True)
-            # svds returns in arbitrary order, sort
-            order = np.argsort(s)[::-1]
-            s = s[order]
-            U_hat = U_hat[:, order]
-            Vt = Vt[order, :]
+        Parameters
+        ----------
+        problem : dict
+            Dictionary with the following keys:
+                * 'matrix' : 2-D ndarray (dense matrix)
+                * 'n_components' : int, number of singular values/vectors to keep
+                * 'matrix_type' : str, ignored in this implementation
 
-            U = U_hat
-        return {"U": U, "S": s, "V": Vt.T}
+        Returns
+        -------
+        dict
+            {'U': U, 'S': s, 'V': V}
+        """
+        A = problem['matrix']
+        n_components = problem['n_components']
+
+        # Compute full SVD and truncate. `full_matrices=False` gives compact form.
+        # This is typically faster than a randomized algorithm for dense data.
+        U, s, Vt = np.linalg.svd(A, full_matrices=False, compute_uv=True)
+
+        # Keep only the requested number of components
+        U = U[:, :n_components]
+        s = s[:n_components]
+        V = Vt[:n_components, :].T
+
+        return {'U': U, 'S': s, 'V': V}

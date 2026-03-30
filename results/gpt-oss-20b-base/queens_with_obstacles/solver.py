@@ -1,63 +1,95 @@
+# solver.py
+from collections.abc import Iterator
 import numpy as np
 from ortools.sat.python import cp_model
 
-# Pre‑compute all queen attack masks for a board of a given size.
-# Each cell is represented by a tuple (row, col).
-def _build_attack_dict(n: int, m: int, obstacles: np.ndarray):
-    attacks = {}
-    directions = [(-1, -1), (-1, 0), (-1, 1),
-                  ( 0, -1),          ( 0, 1),
-                  ( 1, -1), ( 1, 0), ( 1, 1)]
-    for r in range(n):
-        for c in range(m):
-            if obstacles[r, c]:
-                continue
-            cells = []
-            for dr, dc in directions:
-                nr, nc = r + dr, c + dc
-                while 0 <= nr < n and 0 <= nc < m and not obstacles[nr, nc]:
-                    cells.append((nr, nc))
-                    nr += dr
-                    nc += dc
-            attacks[(r, c)] = cells
-    return attacks
+
+def queen_reach(instance: np.ndarray, start: tuple[int, int]) -> Iterator[tuple[int, int]]:
+    """Yield all positions reachable by a queen from `start`, excluding obstacles."""
+    n, m = instance.shape
+    r, c = start
+    for dr, dc in (
+        (-1, -1),
+        (-1, 0),
+        (-1, 1),
+        (0, -1),
+        (0, 1),
+        (1, -1),
+        (1, 0),
+        (1, 1),
+    ):
+        nr, nc = r + dr, c + dc
+        while 0 <= nr < n and 0 <= nc < m:
+            if instance[nr, nc]:
+                break
+            yield nr, nc
+            nr += dr
+            nc += dc
 
 
 class Solver:
     """
-    Fast solver for the Queens with Obstacles Problem.
-    Uses cp_sat only once with pre‑computed attack lists.
+    Efficient CP‑SAT solver for the Queens‑with‑Obstacles problem.
+    Instead of enumerating all cells a queen can attack, we model the
+    standard "one queen per row, column and diagonal" constraints.
+    This reduces the number of constraints dramatically for large boards.
+    Obstacles are handled by forcing the corresponding cell variable to
+    be 0.
     """
 
-    def __init__(self):
-        # nothing to initialise
-        pass
-
     def solve(self, problem: np.ndarray) -> list[tuple[int, int]]:
-        """Return a maximal set of non‑attacking queens on an obstacle board."""
-        n, m = problem.shape
-        attacks = _build_attack_dict(n, m, problem)
+        """
+        Return the coordinates of a maximum‑cardinality placement of queens.
+        The board `problem` is a 2‑D numpy array with 0 = empty, 1 = obstacle.
+        """
+        instance = problem
+        n, m = instance.shape
 
-        # CP‑SAT model
+        # ---- model ---------------------------------------------------------
         model = cp_model.CpModel()
-        # Boolean var for every non‑obstacle cell
-        vars_ = {cell: model.NewBoolVar(f"q{cell[0]}_{cell[1]}") for cell in attacks}
 
-        # Constraints: if a queen is placed then it cannot attack other queens
-        for cell, reach in attacks.items():
-            if reach:  # only add if there are reachable cells
-                model.Add(sum(vars_[q] for q in reach) == 0).OnlyEnforceIf(vars_[cell])
+        # Flattened variables for faster indexing
+        queen_vars = np.zeros((n, m), dtype=object)
+        for r in range(n):
+            for c in range(m):
+                if instance[r, c]:
+                    queen_vars[r, c] = 0  # obstacle
+                else:
+                    queen_vars[r, c] = model.NewBoolVar(f"q{r}_{c}")
 
-        # Objective: maximise number of queens
-        model.Maximize(sum(vars_.values()))
+        # Row constraints: at most one queen per row
+        for r in range(n):
+            model.AddAtMostOne([queen_vars[r, c] for c in range(m) if queen_vars[r, c] is not 0])
 
-        # Solver
+        # Column constraints: at most one queen per column
+        for c in range(m):
+            model.AddAtMostOne([queen_vars[r, c] for r in range(n) if queen_vars[r, c] is not 0])
+
+        # Diagonal constraints (↗↘)
+        for d in range(-(n - 1), m):
+            diag = [queen_vars[r, c] for r, c in enumerate(range(max(0, -d), min(n, m - d))) if queen_vars[r, c] is not 0]
+            if diag:
+                model.AddAtMostOne(diag)
+
+        # Diagonal constraints (↘↙)
+        for d in range(n + m - 1):
+            diag = []
+            for r in range(n):
+                c = d - r
+                if 0 <= c < m and queen_vars[r, c] is not 0:
+                    diag.append(queen_vars[r, c])
+            if diag:
+                model.AddAtMostOne(diag)
+
+        # Maximise total number of queens
+        model.Maximize(sum(v for row in queen_vars for v in row if v is not 0))
+
+        # ---- solve ---------------------------------------------------------
         solver = cp_model.CpSolver()
-        solver.parameters.max_time_in_seconds = 30.0  # guard against endless runtimes
-        solver.parameters.num_search_workers = 8  # use parallel workers
+        solver.parameters.log_search_progress = False
         status = solver.Solve(model)
 
-        # Extract solution
         if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-            return [(r, c) for (r, c), b in vars_.items() if solver.Value(b)]
+            return [(r, c) for r in range(n) for c in range(m)
+                    if queen_vars[r, c] and solver.Value(queen_vars[r, c]) == 1]
         return []

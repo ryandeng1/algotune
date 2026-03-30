@@ -1,86 +1,81 @@
-from typing import Any
+# solver.py
+from __future__ import annotations
+from typing import Any, Dict, List
+
+import cvxpy as cp
 import numpy as np
-from ortools.sat.python import cp_model
 
 
 class Solver:
-    def solve(self, problem: dict[str, Any]) -> dict[str, Any]:
+    """Fast Capacitated Facility Location solver (uses CVXPY + HIGHS)."""
+
+    def solve(self, problem: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Solve the Capacitated Facility Location Problem using OR-Tools CP‑SAT.
+        Parameters
+        ----------
+        problem : dict
+            Dictionary containing:
+                * fixed_costs   : 1‑D array of facility opening costs
+                * capacities   : 1‑D array of facility capacities
+                * demands      : 1‑D array of customer demands
+                * transportation_costs : 2‑D array of transport costs
+                                      (facilities × customers)
 
-        Args:
-            problem: Dictionary with keys:
-                * fixed_costs: list/array of length n_facilities
-                * capacities: list/array of length n_facilities
-                * demands: list/array of length n_customers
-                * transportation_costs: 2‑D list/array (n_facilities × n_customers)
-
-        Returns:
-            Dictionary with:
-                - objective_value: optimal objective value
-                - facility_status: list of bools for open facilities
-                - assignments: matrix x_{ij} assignments (floats 0 or 1)
+        Returns
+        -------
+        dict
+            * objective_value : optimum value
+            * facility_status : list of booleans for each facility
+            * assignments     : list of lists (N_fac × N_cust) of 0/1 assignments
         """
-        fixed_costs = np.asarray(problem["fixed_costs"], dtype=int)
-        capacities = np.asarray(problem["capacities"], dtype=int)
-        demands = np.asarray(problem["demands"], dtype=int)
-        trans_costs = np.asarray(problem["transportation_costs"], dtype=int)
 
-        n_facilities, n_customers = fixed_costs.size, demands.size
+        # Constants
+        fixed_costs = np.array(problem["fixed_costs"], dtype=np.float64)
+        capacities = np.array(problem["capacities"], dtype=np.float64)
+        demands = np.array(problem["demands"], dtype=np.float64)
+        transport = np.array(problem["transportation_costs"], dtype=np.float64)
 
-        model = cp_model.CpModel()
+        n_fac, n_cust = fixed_costs.shape[0], demands.shape[0]
 
-        # Binary variables for opening facilities
-        y = [model.NewBoolVar(f"y_{i}") for i in range(n_facilities)]
-
-        # Binary variables for assignments
-        x = [
-            [model.NewBoolVar(f"x_{i}_{j}") for j in range(n_customers)]
-            for i in range(n_facilities)
-        ]
-
-        # Each customer must be served by exactly one facility
-        for j in range(n_customers):
-            model.AddExactlyOne(x[i][j] for i in range(n_facilities))
-
-        # Capacity constraints
-        for i in range(n_facilities):
-            model.Add(
-                sum(demands[j] * x[i][j] for j in range(n_customers))
-                <= capacities[i] * y[i]
-            )
-            # Linking x and y
-            for j in range(n_customers):
-                model.Add(x[i][j] <= y[i])
+        # Decision variables
+        y = cp.Variable(n_fac, boolean=True)
+        x = cp.Variable((n_fac, n_cust), boolean=True)
 
         # Objective
-        obj = sum(fixed_costs[i] * y[i] for i in range(n_facilities))
-        obj += sum(
-            trans_costs[i][j] * x[i][j]
-            for i in range(n_facilities)
-            for j in range(n_customers)
-        )
-        model.Minimize(obj)
+        obj = cp.Minimize(fixed_costs @ y + cp.sum(cp.multiply(transport, x)))
 
-        solver = cp_model.CpSolver()
-        solver.parameters.max_time_in_seconds = 60.0
-        solver.parameters.num_search_workers = 8
-        solver.parameters.random_seed = 42
+        # Constraints – vectorised for speed
+        constraints = [
+            cp.sum(x, axis=0) == 1,                # each customer served exactly once
+            demands @ x.T <= capacities[:, None] * y,  # capacity limits
+            x <= cp.reshape(y, (-1, 1)),          # customers can only be served from open facilities
+        ]
 
-        status = solver.Solve(model)
-
-        if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+        prob = cp.Problem(obj, constraints)
+        try:
+            prob.solve(solver=cp.HIGHS, verbose=False)
+        except Exception:
+            # Infeasible / abort – return defaults
             return {
                 "objective_value": float("inf"),
-                "facility_status": [False] * n_facilities,
-                "assignments": [[0.0] * n_customers for _ in range(n_facilities)],
+                "facility_status": [False] * n_fac,
+                "assignments": [[0.0] * n_cust for _ in range(n_fac)],
             }
 
-        y_vals = [solver.Value(v) for v in y]
-        x_vals = [[solver.Value(v) for v in row] for row in x]
+        # Handle solver status
+        if prob.status not in [cp.OPTIMAL, cp.OPTIMAL_INACCURATE]:
+            return {
+                "objective_value": float("inf"),
+                "facility_status": [False] * n_fac,
+                "assignments": [[0.0] * n_cust for _ in range(n_fac)],
+            }
+
+        # Rounding and output conversion
+        y_vals = np.rint(np.clip(y.value, 0, 1)).astype(int)
+        x_vals = np.rint(np.clip(x.value, 0, 1)).astype(int)
 
         return {
-            "objective_value": solver.ObjectiveValue(),
-            "facility_status": [bool(v) for v in y_vals],
-            "assignments": x_vals,
+            "objective_value": float(prob.value),
+            "facility_status": y_vals.astype(bool).tolist(),
+            "assignments": x_vals.tolist(),
         }

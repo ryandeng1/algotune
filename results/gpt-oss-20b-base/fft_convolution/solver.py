@@ -1,49 +1,107 @@
-from typing import Any
+# solver.py
 import numpy as np
+from scipy import signal
+from numba import njit, jit, prange
 
+# ----------------------------------------------------------------------
+# Helper to perform convolution via FFT in a fast, explicit Numba implementation.
+# ----------------------------------------------------------------------
+@njit
+def _convolve_fft(x: np.ndarray, y: np.ndarray, mode: str = 'full') -> np.ndarray:
+    """
+    Convolve two real 1-D signals using an FFT based algorithm.
+    Works for 'full', 'valid', and 'same' modes.
+
+    Parameters
+    ----------
+    x, y : np.ndarray
+        Real 1-D input signals.
+    mode : str
+        The convolution mode. Must be one of 'full', 'same', 'valid'.
+
+    Returns
+    -------
+    np.ndarray
+        The convolution result.
+    """
+    # Determine the length for zero-padded FFTs
+    n_x = x.shape[0]
+    n_y = y.shape[0]
+    n_full = n_x + n_y - 1
+
+    # Choose the next power of two for efficient FFT
+    n_fft = 1 << (n_full - 1).bit_length()
+
+    # Zero-pad inputs
+    X = np.empty(n_fft, dtype=np.complex128)
+    Y = np.empty(n_fft, dtype=np.complex128)
+    X.fill(0.0)
+    Y.fill(0.0)
+    X[:n_x] = x
+    Y[:n_y] = y
+
+    # Forward FFTs
+    X_fft = np.fft.rfft(X, n_fft)
+    Y_fft = np.fft.rfft(Y, n_fft)
+
+    # Pointwise multiplication
+    conv_fft = X_fft * Y_fft
+
+    # Inverse FFT
+    conv = np.fft.irfft(conv_fft, n_fft)
+
+    # Truncate to the requested mode
+    if mode == 'full':
+        return conv[:n_full]
+    elif mode == 'same':
+        start = (n_y - 1) // 2
+        end = start + n_x
+        return conv[start:end]
+    elif mode == 'valid':
+        return conv[n_y - 1 : n_x]
+    else:
+        raise ValueError(f"Unsupported mode: {mode}")
+
+
+# ----------------------------------------------------------------------
+# Main solver class
+# ----------------------------------------------------------------------
 class Solver:
     """
-    Fast convolution solver using NumPy FFT that is generally faster than
-    scipy.signal.fftconvolve for 1‑D real valued signals and small to medium
-    input sizes. It works in the 'full', 'valid' and 'same' modes.
+    Solver for 1-D convolution problems using an efficient FFT approach.
     """
 
     @staticmethod
-    def _prepare_padded(x: np.ndarray, y: np.ndarray) -> np.ndarray:
+    def solve(problem: dict) -> dict[str, list]:
         """
-        Return the padded length which is the next power of two of (len(x)+len(y)-1).
+        Compute the convolution of two signals using a fast FFT implementation.
+
+        Parameters
+        ----------
+        problem : dict
+            Dictionary containing:
+                - 'signal_x': Iterable of real numbers.
+                - 'signal_y': Iterable of real numbers.
+                - Optional 'mode': One of 'full', 'same', or 'valid'.
+
+        Returns
+        -------
+        dict
+            Dictionary with a single key 'convolution' mapping to the
+            convolution result as a Python list.
         """
-        n = len(x) + len(y) - 1
-        return 1 << (n - 1).bit_length()
+        # Convert inputs to 1-D float array
+        x = np.asarray(problem['signal_x'], dtype=np.float64).ravel()
+        y = np.asarray(problem['signal_y'], dtype=np.float64).ravel()
 
-    def solve(self, problem: dict[str, Any]) -> dict[str, list]:
-        """
-        Convolve two signals using a real‑valued FFT.
-        """
-        x = np.asarray(problem["signal_x"], dtype=np.float64)
-        y = np.asarray(problem["signal_y"], dtype=np.float64)
-        mode = problem.get("mode", "full")
+        # Default mode is 'full' (same as scipy.signal.fftconvolve)
+        mode = problem.get('mode', 'full')
 
-        # Full convolution length
-        n = len(x) + len(y) - 1
-        size = self._prepare_padded(x, y)
-
-        # FFT of padded signals
-        X = np.fft.rfft(x, size)
-        Y = np.fft.rfft(y, size)
-
-        # Element‑wise multiplication and inverse FFT
-        conv = np.fft.irfft(X * Y, size)[:n]
-
-        # Reduce to requested output mode
-        if mode == "full":
-            out = conv
-        elif mode == "same":
-            start = (len(y) - 1) // 2
-            out = conv[start : start + len(x)]
-        elif mode == "valid":
-            out = conv[len(y) - 1 :]
-        else:
+        # Validate mode
+        if mode not in ('full', 'same', 'valid'):
             raise ValueError(f"Unsupported mode: {mode}")
 
-        return {"convolution": out.tolist()}
+        # Fast FFT-based convolution (numba compiled)
+        conv = _convolve_fft(x, y, mode)
+
+        return {"convolution": conv.tolist()}

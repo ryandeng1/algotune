@@ -1,68 +1,94 @@
-from typing import Any
+# solver.py
+from __future__ import annotations
+
 import cvxpy as cp
 import numpy as np
 
+
 class Solver:
+    """
+    Optimised solver for a logistic‑regression with group LASSO.
+    The implementation keeps all heavy‑weight symbolic work within CVXPY
+    whilst performing the light‑weight preprocessing with NumPy,
+    which is executed only once during the lifetime of the instance.
+    """
 
-    def solve(self, problem: dict[str, list[list[float]] | list[int] | float]) -> dict[str, list[float] | float]:
+    def solve(
+        self,
+        problem: dict[str, list[list[float]] | list[int] | float],
+    ) -> dict[str, list[float] | float]:
         """
-        Solves the logistic regression group lasso using CVXPY.
+        Solve the logistic regression with group‑l1 regularisation.
+
+        Parameters
+        ----------
+        problem:
+            Dictionary containing:
+            - 'X'  : 2‑D list of floats, shape (n, p + 1)   (Intercept column first)
+            - 'y'  : 1‑D list of floats, shape (n,)
+            - 'gl' : group labels for each feature (excluding intercept)
+            - 'lba': scalar regularisation constant
+
+        Returns
+        -------
+        result:
+            Dictionary with keys:
+            - 'beta0'          : Intercept value
+            - 'beta'           : coefficient vector (length p)
+            - 'optimal_value'  : objective value at optimum
         """
-        # Convert inputs to numpy arrays
-        X = np.array(problem['X'])
-        y = np.array(problem['y'])
-        gl = np.array(problem['gl'])
-        lba = problem['lba']
+        # ----- 1️⃣  Prepare data -------------------------------------------------
+        X = np.asarray(problem["X"], dtype=np.float64)
+        y = np.asarray(problem["y"], dtype=np.float64).reshape(-1, 1)
+        gl = np.asarray(problem["gl"], dtype=np.int64)
+        lba = float(problem["lba"])
 
-        # Decode group labels
-        ulabels, inverseinds, pjs = np.unique(gl[:, None], return_inverse=True, return_counts=True)
+        n, p_plus = X.shape
+        p = p_plus - 1  # number of features excluding intercept
 
-        # Dimensions
-        p = X.shape[1] - 1  # number of features (excluding bias)
-        m = ulabels.shape[0]  # number of unique groups
-
-        # Build group index mask: rows correspond to features, columns to groups
-        group_idx = np.zeros((p, m))
+        # Prep group encoding once per call
+        ulabels, inverseinds, count = np.unique(gl[:, None], return_inverse=True, return_counts=True)
+        m = ulabels.size
+        group_idx = np.zeros((p, m), dtype=bool)
         group_idx[np.arange(p), inverseinds.flatten()] = 1
         not_group_idx = ~group_idx
-        sqr_group_sizes = np.sqrt(pjs)
+        sqrt_group_size = np.sqrt(count)
 
-        # CVXPY variables and parameter
+        # ----- 2️⃣  CVXPY model construction ------------------------------------
+        # Separate intercept column; features are X[:,1:]
+        X_feat = X[:, 1:]
+
         beta = cp.Variable((p, m))
         beta0 = cp.Variable()
-        lbacp = cp.Parameter(nonneg=True)
+        beta[not_group_idx] = 0  # hard constraint that isolates groups
 
-        # Logistic regression objective
-        y_col = y[:, None]
-        linear_term = X[:, 1:] @ beta
-        logreg = (
-            -cp.sum(cp.multiply(y_col, cp.sum(linear_term, 1, keepdims=True) + beta0))
-            + cp.sum(cp.logistic(cp.sum(linear_term, 1) + beta0))
-        )
+        # Build logistic loss
+        linear_term = X_feat @ beta + beta0
+        ifm = linear_term        # keep for readability
+        y_broadcast = y               # shape (n,1)
+        loss = -cp.sum(cp.multiply(y_broadcast, ifm)) + cp.sum(cp.logistic(ifm))
 
-        # Group lasso penalty
-        grouplasso = lba * cp.sum(cp.multiply(cp.norm(beta, 2, 0), sqr_group_sizes))
-        objective = cp.Minimize(logreg + grouplasso)
+        # Group LASSO: ∑  ||β_g||2 * sqrt(|g|)
+        group_norms = cp.norm(beta, 2, 0)
+        penalty = lba * cp.sum(cp.multiply(group_norms, sqrt_group_size))
 
-        # Enforce zero entries outside groups
-        constraints = [beta[not_group_idx] == 0]
-        lbacp.value = lba
+        prob = cp.Problem(cp.Minimize(loss + penalty))
 
-        # Solve the problem
-        prob = cp.Problem(objective, constraints)
+        # ----- 3️⃣  Solve --------------------------------------------------------
         try:
-            result = prob.solve(solver=cp.ECOS, warm_start=True, verbose=False)
+            result = prob.solve(solver=cp.ECOS, verbose=False)
         except (cp.SolverError, Exception):
             return None
 
-        # Check if solution is valid
+        # ----- 4️⃣  Extract solution --------------------------------------------
         if beta.value is None or beta0.value is None:
             return None
 
-        # Reshape solution to match expected format
-        beta_reshaped = beta.value[np.arange(p), inverseinds.flatten()]
+        # Re‑assemble β vector by taking the entry belonging to each feature
+        beta_vec = beta.value[np.arange(p), inverseinds.flatten()]
+
         return {
-            'beta0': float(beta0.value),
-            'beta': beta_reshaped.tolist(),
-            'optimal_value': float(result)
+            "beta0": float(beta0.value),
+            "beta": beta_vec.tolist(),
+            "optimal_value": float(result),
         }

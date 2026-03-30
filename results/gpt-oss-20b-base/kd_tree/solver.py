@@ -1,35 +1,55 @@
-import numpy as np
+# solver.py
 import faiss
-from typing import Any
+import numpy as np
+from typing import Any, Dict, List
+
 
 class Solver:
-    def solve(self, problem: dict[str, Any]) -> dict[str, Any]:
-        # Convert input points and queries to contiguous float32 arrays once
+    """
+    Fast nearest‑neighbour solver using Faiss.
+    """
+
+    def solve(self, problem: Dict[str, Any]) -> Dict[str, Any]:
+        # ------------------------------------------------------------------
+        # Convert input lists to contiguous float32 arrays (Faiss only accepts 32‑bit floats)
+        # ------------------------------------------------------------------
         points = np.asarray(problem["points"], dtype=np.float32)
         queries = np.asarray(problem["queries"], dtype=np.float32)
-        k = min(problem["k"], len(points))
-        dim = points.shape[1]
 
-        # Build a flat L2 index (no precomputation needed)
-        index = faiss.IndexFlatL2(dim)
-        # Assign IDs so we can retrieve original indices
-        index = faiss.IndexIDMap(index)
-        index.add_with_ids(points, np.arange(len(points), dtype=np.int64))
+        n_points, dim = points.shape
+        k = min(int(problem["k"]), n_points)
 
-        # Main k-NN search
+        # ------------------------------------------------------------------
+        # Build the Faiss index once per call
+        # ------------------------------------------------------------------
+        index: faiss.Index = faiss.IndexFlatL2(dim)          # L2 distance
+        index = faiss.IndexIDMap(index)                       # keep IDs consistent
+        index.add_with_ids(points, np.arange(n_points, dtype=np.int64))
+
+        # ------------------------------------------------------------------
+        # Main batch search
+        # ------------------------------------------------------------------
         dists, idxs = index.search(queries, k)
-        solution = {
+
+        # ------------------------------------------------------------------
+        # Pack the answer
+        # ------------------------------------------------------------------
+        solution: Dict[str, List[List[int]]] = {
             "indices": idxs.tolist(),
-            "distances": dists.tolist()
+            "distances": dists.tolist(),
         }
 
-        # Optional boundary query handling
+        # ------------------------------------------------------------------
+        # Optional boundary queries – only when needed
+        # ------------------------------------------------------------------
         if problem.get("distribution") == "hypercube_shell":
-            # Prepare boundary queries efficiently: 2*dim vectors
+            # Build the two extreme points per dimension
+            #  [0,0,...,0], [1,1,...,1] with a single coordinate set to 1.0 or 0.0
             bqs = np.empty((2 * dim, dim), dtype=np.float32)
             for d in range(dim):
-                bqs[2 * d,     d] = 0.0
+                bqs[2 * d, d] = 0.0
                 bqs[2 * d + 1, d] = 1.0
+
             bdists, bidxs = index.search(bqs, k)
             solution["boundary_distances"] = bdists.tolist()
             solution["boundary_indices"] = bidxs.tolist()

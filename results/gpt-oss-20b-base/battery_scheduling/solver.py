@@ -1,117 +1,137 @@
+#!/usr/bin/env python3
+"""
+Fast CVXPY solver for a circular battery scheduling problem.
+Author: ChatGPT
+"""
+
+from __future__ import annotations
+
 import numpy as np
-from scipy.optimize import linprog
+import cvxpy as cp
+from typing import Dict, Any
+
 
 class Solver:
     """
-    A fast linear‑programming implementation of the battery scheduling problem.
-    The problem is formulated as a standard LP and solved with SciPy's
-    simplex/OSQP solver, which is orders of magnitude faster than CVXPY for
-    the small problems encountered here.
+    A lightweight wrapper around a CVXPY optimisation model
+    that solves a small fixed‐runtime battery optimisation
+    problem.  All function arguments are purely numeric
+    and the optimisation objective is a linear cost of the
+    net battery power.  The model is expressed with
+    vectorised linear constraints instead of Python loops,
+    which yields a noticeable speedup compared with the
+    reference implementation.
     """
 
-    def solve(self, problem: dict) -> dict:
+    @staticmethod
+    def _make_circular_matrix(shape: int) -> np.ndarray:
+        """
+        Build a circulant shift matrix of size (shape, shape)
+        such that (shift @ v)[t] = v[(t + 1) % shape].
+        """
+        shift = np.zeros((shape, shape), dtype=np.float64)
+        for i in range(shape):
+            shift[i, (i + 1) % shape] = 1.0
+        return shift
+
+    def solve(self, problem: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Solve the linear battery optimisation problem.
+
+        Parameters
+        ----------
+        problem : dict
+            Dictionary containing the following keys:
+                - 'T'          : number of time steps
+                - 'p'          : electricity price vector (T,)
+                - 'u'          : load vector (T,)
+                - 'batteries'  : list with a single entry containing:
+                      'Q'          : max SOC
+                      'C'          : max charge power
+                      'D'          : max discharge power
+                      'efficiency' : round‑trip efficiency (unitless)
+
+        Returns
+        -------
+        dict
+            Dictionary containing solution status, optimality flag
+            and all requested outputs.
+        """
+        # --- Data & Types ----------------------------------------------------
         T = int(problem["T"])
-        p = np.asarray(problem["p"], dtype=float)          # price vector
-        u = np.asarray(problem["u"], dtype=float)          # baseline demand
-        battery = problem["batteries"][0]
-        Q = float(battery["Q"])                           # storage capacity
-        C = float(battery["C"])                           # charge limit
-        D = float(battery["D"])                           # discharge limit
-        eff = float(battery["efficiency"])                # round‑trip efficiency
+        p = np.asarray(problem["p"], dtype=np.float64)
+        u = np.asarray(problem["u"], dtype=np.float64)
 
-        # Decision variables: q_t (state of charge), c_in_t, c_out_t
-        # Order: [q0..qT-1, c_in0..c_inT-1, c_out0..c_outT-1]
-        n_vars = 3 * T
+        bat = problem["batteries"][0]
+        Q = float(bat["Q"])
+        C = float(bat["C"])
+        D = float(bat["D"])
+        eff = float(bat["efficiency"])
 
-        # Objective: minimize total cost = p @ (u + c_in - c_out)
-        # Since u is constant, we only need the coefficient of (c_in - c_out)
-        coef = np.zeros(n_vars)
-        coef[T:2*T] =  p           # coefficient for c_in
-        coef[2*T:3*T] = -p         # coefficient for c_out
+        # --- CVXPY Variables -----------------------------------------------
+        q = cp.Variable(T)              # state of charge
+        c_in = cp.Variable(T)           # charging power
+        c_out = cp.Variable(T)          # discharging power
+        c = c_in - c_out                # net battery power
 
-        # Constraints
-        A_eq = []     # equality constraints
-        b_eq = []
+        # --- Constraints -----------------------------------------------
+        constraints = [
+            q >= 0,
+            q <= Q,
+            c_in >= 0,
+            c_in <= C,
+            c_out >= 0,
+            c_out <= D,
+            u + c >= 0,               # power balance
+        ]
 
-        # State‑of‑charge dynamics
-        # q_{t+1} = q_t + eff * c_in_t - c_out_t / eff
-        for t in range(T - 1):
-            row = np.zeros(n_vars)
-            row[t] = -1.0                               # -q_t
-            row[t+1] = 1.0                              # +q_{t+1}
-            row[T + t] = -eff                           # -eff * c_in_t
-            row[2*T + t] = 1.0 / eff                    # + (1/eff) * c_out_t
-            A_eq.append(row)
-            b_eq.append(0.0)
+        # Circular dynamics: q_{t+1} - q_t = eff * c_in_t - 1/eff * c_out_t
+        shift = self._make_circular_matrix(T)
+        lhs = shift @ q - q
+        rhs = eff * c_in - (1.0 / eff) * c_out
+        constraints.append(lhs == rhs)
 
-        # Circular condition for 0 == T-1 + Δq_last
-        row = np.zeros(n_vars)
-        row[0] = 1.0                                    # q_0
-        row[T - 1] = -1.0                               # -q_{T-1}
-        row[T + T - 1] = -eff                           # -eff * c_in_{T-1}
-        row[2*T + T - 1] = 1.0 / eff                    # + (1/eff) * c_out_{T-1}
-        A_eq.append(row)
-        b_eq.append(0.0)
+        # --- Objective -----------------------------------------------
+        objective = cp.Minimize(p @ c)
 
-        # Ensure non‑negative net demand: u + (c_in - c_out) >= 0
-        # This is equivalent to: c_out - c_in <= u
-        A_ub = []
-        b_ub = []
+        # --- Solve -----------------------------------------------
+        prob = cp.Problem(objective, constraints)
 
-        for t in range(T):
-            row = np.zeros(n_vars)
-            row[T + t] = -1.0          # -c_in_t
-            row[2*T + t] = 1.0         # +c_out_t
-            A_ub.append(row)
-            b_ub.append(u[t])
+        # Use a fast, dense LP solver.  OSQP is the default for CVXPY
+        # and handles the linear structure efficiently.
+        result = prob.solve(solver=cp.OSQP, eps_abs=1e-8, eps_rel=1e-8, max_iter=10000)
 
-        # Variable bounds
-        bounds = [(0, Q)] * T + [(0, C)] * T + [(0, D)] * T
+        if prob.status not in {cp.OPTIMAL, cp.OPTIMAL_INACCURATE}:
+            return {"status": prob.status, "optimal": False}
 
-        # Solve LP
-        res = linprog(
-            c=coef,
-            A_ub=A_ub,
-            b_ub=b_ub,
-            A_eq=A_eq,
-            b_eq=b_eq,
-            bounds=bounds,
-            method="highs",
-            options={"presolve": True},
-        )
+        # Extract solution
+        q_val = q.value.reshape(-1).tolist()
+        c_in_val = c_in.value.reshape(-1).tolist()
+        c_out_val = c_out.value.reshape(-1).tolist()
+        c_net_val = np.asarray(c_in_val, np.float64) - np.asarray(c_out_val, np.float64)
+        c_net_val = c_net_val.tolist()
 
-        if not res.success:
-            return {
-                "status": res.message,
-                "optimal": False,
-                "error": res.message,
-            }
-
-        # Extract solutions
-        q = res.x[:T]
-        c_in = res.x[T : 2 * T]
-        c_out = res.x[2 * T : 3 * T]
-        c_net = c_in - c_out
-
-        cost_without_battery = float(p @ u)
-        cost_with_battery = float(p @ (u + c_net))
-        savings = cost_without_battery - cost_with_battery
+        # Cost calculations
+        cost_without = float(p @ u)
+        cost_with = float(p @ (u + c_net_val))
+        savings = cost_without - cost_with
+        savings_pct = 100.0 * savings / cost_without if cost_without else 0.0
 
         return {
-            "status": "optimal",
+            "status": prob.status,
             "optimal": True,
             "battery_results": [
                 {
-                    "q": q.tolist(),
-                    "c": c_net.tolist(),
-                    "c_in": c_in.tolist(),
-                    "c_out": c_out.tolist(),
-                    "cost": float(cost_with_battery),
+                    "q": q_val,
+                    "c": c_net_val,
+                    "c_in": c_in_val,
+                    "c_out": c_out_val,
+                    "cost": cost_with,
                 }
             ],
-            "total_charging": c_net.tolist(),
-            "cost_without_battery": cost_without_battery,
-            "cost_with_battery": cost_with_battery,
+            "total_charging": c_net_val,
+            "cost_without_battery": cost_without,
+            "cost_with_battery": cost_with,
             "savings": savings,
-            "savings_percent": float(100 * savings / cost_without_battery),
+            "savings_percent": savings_pct,
         }

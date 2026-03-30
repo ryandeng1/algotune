@@ -1,38 +1,57 @@
-from typing import Any, List
+# solver.py
+from __future__ import annotations
+
 import numpy as np
 from scipy import sparse
 from scipy.sparse.linalg import eigsh
 
 class Solver:
-    def solve(self, problem: dict[str, Any]) -> List[float]:
+    """
+    Fast solver for the smallest k eigenvalues of a real symmetric matrix
+    that is provided as a scipy sparse matrix.
+    """
+    _DEFAULT_MAX_ITER_MULTIPLIER = 200
+    _MIN_NCV = 20
+
+    def solve(self, problem: dict[str, Any]) -> list[float]:
         """
-        Return the k smallest eigenvalues of a real symmetric matrix.
-        The matrix is expected in a sparse format (any subclass of `sparse.spmatrix`).
+        Return the smallest *k* eigenvalues of the matrix associated with
+        ``problem``.
+
+        Parameters
+        ----------
+        problem
+            Dictionary containing at least two keys:
+                ``matrix``: a scipy sparse matrix (any format)
+                ``k``      : integer number of eigenvalues to retrieve
+
+        Returns
+        -------
+        list[float]
+            Sorted list of the k smallest eigenvalues (real part only).
         """
-        mat: sparse.spmatrix = problem['matrix'].asformat('csr')
-        k: int = int(problem['k'])
+        mat: sparse.spmatrix = problem["matrix"].asformat("csr")
+        k = int(problem["k"])
         n = mat.shape[0]
 
-        # If k is large enough to make the dense computation cheaper, or the matrix is very small,
-        # fall back to a dense eigendecomposition.
+        # Special cases where the dense eigvals are cheaper or necessary
         if k >= n or n < 2 * k + 1:
-            vals = np.linalg.eigvalsh(mat.toarray(), subset_by_index=(0, k - 1))
-            return [float(v) for v in vals]
+            vals = np.linalg.eigvalsh(mat.toarray())
+            return [float(v) for v in vals[:k]]
 
-        # Compute the k smallest magnitude eigenvalues using the sparse routine.
-        try:
-            vals = eigsh(
-                mat,
-                k=k,
-                which='SM',
-                return_eigenvectors=False,
-                maxiter=n * 200,
-                ncv=min(n - 1, max(2 * k + 1, 20)),
-            )
-        except Exception:
-            # Fallback to dense if the sparse routine fails
-            vals = np.linalg.eigvalsh(mat.toarray(), subset_by_index=(0, k - 1))
+        # Prefer sparse eigsh.  For very small matrices it is better to
+        # fall back to the dense algorithm.
+        max_iter = n * self._DEFAULT_MAX_ITER_MULTIPLIER
+        ncv = min(n - 1, max(2 * k + 1, self._MIN_NCV))
 
-        # Ensure real values and sort (eigsh already returns sorted, but we keep safety)
-        vals = np.sort(np.real(vals))
-        return [float(v) for v in vals[:k]]
+        vals = eigsh(
+            mat,
+            k=k,
+            which="SM",
+            return_eigenvectors=False,
+            maxiter=max_iter,
+            ncv=ncv,
+            # nordering is not needed; eigsh returns sorted eigenvalues
+        )
+        # eigsh guarantees real eigenvalues for symmetric input.
+        return [float(v) for v in vals]

@@ -1,44 +1,54 @@
+# solver.py
+
+from typing import Dict, List, Union
 import numpy as np
 from scipy.linalg import qz
 
+
 class Solver:
-    def solve(self, problem: dict[str, list[list[float]]]) -> dict[str, dict[str, list[list[float | complex]]]]:
+    """
+    Solver for the QZ factorization problem.
+
+    The implementation uses `scipy.linalg.qz` with ``output='real'`` for
+    optimal performance, avoiding unnecessary Python list conversions until
+    the very last step.  The input matrices are converted to NumPy arrays
+    with the default float type – the fastest for SciPy's native code.
+    """
+
+    def solve(
+        self,
+        problem: Dict[str, List[List[float]]]
+    ) -> Dict[str, Dict[str, List[List[Union[float, complex]]]]]:
         """
-        Compute the real QZ factorization of a matrix pair (A, B).
+        Compute the generalized Schur (QZ) factorization of a matrix pair (A, B).
 
         Parameters
         ----------
         problem : dict
-            Must contain keys 'A' and 'B', each mapped to a list of lists of floats
-            representing the matrices.
+            Dictionary with keys ``'A'`` and ``'B'`` mapping to 2‑D lists
+            of floats that will be converted to NumPy arrays.
 
         Returns
         -------
         dict
-            A dictionary with a single key 'QZ'.  The value is another dictionary with
-            the keys 'AA', 'BB', 'Q', and 'Z', each containing the corresponding
-            matrix converted to a list-of-lists representation.
-
-        Notes
-        -----
-        - The function relies on :func:`scipy.linalg.qz`, which is highly
-          optimized and written in C.  No additional Python loops or
-          expensive operations are performed.
-        - All intermediate arrays remain NumPy ``ndarray`` objects until the very
-          last moment, where ``tolist`` is called once per output matrix.
+            Dictionary with a single key ``'QZ'`` containing the matrices
+            ``'AA'`` (generalized Schur form of A), ``'BB'`` (upper triangular
+            form of B), ``'Q'`` and ``'Z'`` (unitary matrices).  Values are
+            returned as plain Python lists for interoperability.
         """
-        A = np.asarray(problem['A'], dtype=np.float64, order='C')
-        B = np.asarray(problem['B'], dtype=np.float64, order='C')
+        # Convert input to NumPy arrays once; SciPy works directly on these.
+        A = np.array(problem["A"], dtype=np.float64, copy=False)
+        B = np.array(problem["B"], dtype=np.float64, copy=False)
 
-        # Perform the real QZ factorization
-        AA, BB, Q, Z = qz(A, B, output='real')
+        # Perform the QZ factorization.
+        AA, BB, Q, Z = qz(A, B, output="real")
 
-        # Packaging the result
+        # Only convert to Python lists when building the result.
         return {
-            'QZ': {
-                'AA': AA.tolist(),
-                'BB': BB.tolist(),
-                'Q': Q.tolist(),
-                'Z': Z.tolist()
+            "QZ": {
+                "AA": AA.tolist(),
+                "BB": BB.tolist(),
+                "Q": Q.tolist(),
+                "Z": Z.tolist(),
             }
         }

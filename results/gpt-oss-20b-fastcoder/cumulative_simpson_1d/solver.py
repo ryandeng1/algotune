@@ -1,34 +1,58 @@
+# solver.py
 import numpy as np
 from numpy.typing import NDArray
 
 class Solver:
     """
-    Optimised solver for the cumulative Simpson integral.
+    Optimized solver that computes the cumulative integral of a 1‑D array
+    using Simpson's rule with a fully vectorised implementation.
     """
 
-    def solve(self, problem: dict) -> NDArray:
-        y: NDArray[np.float64] = problem["y"].astype(np.float64, copy=False)
-        dx = float(problem["dx"])
+    @staticmethod
+    def _cumulative_simpson(y: NDArray, dx: float) -> NDArray:
+        """
+        Compute the cumulative Simpson integral of y with spacing dx.
 
+        Parameters
+        ----------
+        y : numpy.ndarray
+            1‑D array of values.
+        dx : float
+            Step size along the independent variable.
+
+        Returns
+        -------
+        numpy.ndarray
+            1‑D array containing the cumulative integral at each index.
+        """
         n = y.size
         if n < 2:
-            return np.zeros_like(y)
+            return np.zeros(n, dtype=y.dtype)
 
-        # Pre‑allocate result array
-        result = np.empty(n, dtype=np.float64)
+        # weight vector for composite Simpson's rule:
+        # w[0] = 1, w[1] = 4, w[2] = 2, w[3] = 4, w[4] = 2, ...
+        # last weight depends on whether the number of intervals is odd or even
+        w = np.empty(n, dtype=y.dtype)
+        w[0] = 1
+        # Create an array of indices 1..n-1
+        idx = np.arange(1, n, dtype=int)
+        w[idx] = np.where(idx % 2, 4, 2)
 
-        # Simpson's constants for cumulative sum
-        w = np.empty(n, dtype=np.float64)
-        w[0] = 1.0                 # first point weight
-        if n > 1:
-            # interior points
-            w[1:n - 1] = np.where(
-                np.arange(1, n - 1) % 2, 4.0, 2.0
-            )
-            w[-1] = 1.0                # last point weight
+        # Adjust the final weight: if number of intervals is odd,
+        # the last term is not multiplied by 2 in Simpson's rule.
+        if (n - 1) % 2 == 1:  # odd number of intervals
+            w[-1] = 1
+        else:
+            w[-1] = 2
 
-        # Cumulative sum of weighted y
-        cumw = np.cumsum(w * y)
-        result = dx / 3.0 * cumw
+        # Vectorised cumulative sum of weighted values
+        cum_integral = np.cumsum(y * w) * dx / 3.0
+        return cum_integral
 
-        return result
+    def solve(self, problem: dict) -> NDArray:
+        """
+        Compute the cumulative integral of the 1D array using Simpson's rule.
+        """
+        y = np.asarray(problem["y"])
+        dx = problem["dx"]
+        return self._cumulative_simpson(y, dx)
