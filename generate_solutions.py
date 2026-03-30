@@ -4,11 +4,17 @@ import jsonlines
 import re
 import time
 import os
+from functools import lru_cache
 from pathlib import Path
 
 from openai import OpenAI
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+try:
+    import tomllib
+except ImportError:
+    import toml as tomllib
 
 def extract_code_blocks(text: str) -> str:
     if text is None:
@@ -36,6 +42,83 @@ def build_code_opt_prompt(original_code: str) -> str:
         f"- Provide a full replacement for this code.\n"
         f"- Return only the code in a single fenced block.\n\n"
         f"--- current source ---\n{original_code}\n"
+    )
+
+
+@lru_cache(maxsize=1)
+def get_dynamic_package_list(pyproject_path: str = "pyproject.toml") -> str:
+    """Return a comma-separated package list derived from pyproject.toml."""
+    if not os.path.exists(pyproject_path):
+        return ""
+
+    file_mode = "rb" if tomllib.__name__ == "tomllib" else "r"
+    with open(pyproject_path, file_mode) as f:
+        project = tomllib.load(f)
+
+    deps = project.get("project", {}).get("dependencies")
+    if deps is None:
+        deps = project.get("tool", {}).get("poetry", {}).get("dependencies", [])
+
+    if isinstance(deps, dict):
+        dep_iterable = deps.keys()
+    elif isinstance(deps, list):
+        dep_iterable = deps
+    else:
+        dep_iterable = []
+
+    exclude = {
+        "openai",
+        "huggingface-hub",
+        "litellm",
+        "google-generativeai",
+        "pandas",
+        "pylint",
+        "line_profiler",
+        "pytest",
+        "toml",
+        "python",
+        "orjson",
+        "pyaml",
+        "pillow",
+    }
+
+    package_names = []
+    for dep in dep_iterable:
+        name = (
+            dep.split("[")[0]
+            .split(" ")[0]
+            .split("=")[0]
+            .split(">")[0]
+            .split("<")[0]
+            .strip()
+            .strip('"')
+            .strip("'")
+        )
+        if name and name not in exclude:
+            package_names.append(name)
+
+    return ", ".join(sorted(dict.fromkeys(package_names)))
+
+
+def build_code_opt_prompt_with_output_instructions(original_code: str) -> str:
+    """Build the original optimization prompt plus stronger output instructions."""
+    package_list = get_dynamic_package_list()
+    package_line = (
+        f"Available packages: {package_list}\n\n"
+        if package_list
+        else ""
+    )
+
+    return (
+        f"You are an expert python performance engineer.\n\n"
+        f"Environment: Python version: 3.10\n"
+        f"{package_line}"
+        f"Task: Optimize the provided `solve` function to make it run as fast as possible.\n"
+        f"IMPORTANT: Compilation time of your init function will not count towards your function's runtime.\n"
+        f"- Provide a full replacement for this code.\n"
+        f"Return exactly one Python code block containing the full contents of `solver.py`.\n"
+        f"Your code must define a class named `Solver` with a callable `solve` method.\n"
+        f"--- source code ---\n{original_code}\n"
     )
 
 def llm_generate(client, model: str, prompt: str) -> str:
@@ -81,7 +164,7 @@ def generate_solutions(problems: dict, model: str):
     start = time.time()
 
     def process_problem(problem_name: str, baseline_code: str) -> tuple[str, str]:
-        prompt = build_code_opt_prompt(baseline_code)
+        prompt = build_code_opt_prompt_with_output_instructions(baseline_code)
         response = llm_generate(client, model, prompt)
         code = extract_code_blocks(response)
         return problem_name, code
@@ -128,7 +211,7 @@ def main():
     for benchmark, generation in generations.items():
         (Path(args.output) / benchmark).mkdir(parents=True, exist_ok=True)
 
-        with open(Path(args.output) / benchmark / "solver.py" as f:
+        with open(Path(args.output) / benchmark / "solver.py", "w") as f:
             f.write(generation)
 
 if __name__ == "__main__":
