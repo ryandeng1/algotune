@@ -32,9 +32,10 @@ class LiteLLMModel:
         # Store max_tokens/max_completion_tokens separately to handle later
         self.max_tokens = kwargs.pop("max_tokens", None)
         self.max_completion_tokens = kwargs.pop("max_completion_tokens", None)
+        self.fixed_call_cost = kwargs.pop("fixed_call_cost", None)
 
         # Filter out configuration-only parameters that shouldn't be sent to API
-        config_only_params = {"modify_params", "drop_params"}
+        config_only_params = {"modify_params", "drop_params", "fixed_call_cost"}
         self.additional_params = {k: v for k, v in kwargs.items() if k not in config_only_params}
 
         # For Claude models with thinking enabled, remove top_p as it conflicts with temperature
@@ -174,6 +175,23 @@ class LiteLLMModel:
 
     def _extract_cost_from_response(self, response) -> float:
         """Extract cost from LiteLLM response with budget protection."""
+        if self.fixed_call_cost is not None:
+            try:
+                fixed_cost = float(self.fixed_call_cost)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f"Invalid fixed_call_cost for {self.model_name}: {self.fixed_call_cost}"
+                ) from exc
+            if fixed_cost < 0:
+                raise ValueError(
+                    f"fixed_call_cost must be non-negative for {self.model_name}: {fixed_cost}"
+                )
+            logging.debug(
+                "Using configured fixed_call_cost for %s: $%s",
+                self.model_name,
+                fixed_cost,
+            )
+            return fixed_cost
 
         # Method 1: Standard LiteLLM hidden params
         if hasattr(response, "_hidden_params") and response._hidden_params:

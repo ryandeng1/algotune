@@ -231,6 +231,8 @@ models:
     api_base: "http://127.0.0.1:8000/v1"
     temperature: 1.0
     top_p: 1.0
+    reasoning_effort: "low"
+    fixed_call_cost: 0.01
     drop_params: true
     # Optional. Leave unset to use the server/model default output cap.
     # max_tokens: 4096
