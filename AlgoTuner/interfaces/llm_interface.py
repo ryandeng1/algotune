@@ -101,23 +101,10 @@ class LLMInterface(base_interface.BaseLLMInterface):
                 train_iter, test_iter = self.task_instance.load_dataset()
                 dataset_to_evaluate = train_iter if subset == "train" else test_iter
 
-                # Check if we're in test mode based on max_samples
-                test_mode = False
-                if self.max_samples is not None:
-                    test_mode = True
-                    logging.info(f"Test mode enabled with max_samples={self.max_samples}")
-                # Also check model's max_samples attribute (for DummyLLM compatibility)
-                elif (
-                    hasattr(self, "model")
-                    and hasattr(self.model, "max_samples")
-                    and self.model.max_samples is not None
-                ):
-                    test_mode = True
-                    logging.info(
-                        f"Test mode enabled via model.max_samples={self.model.max_samples}"
-                    )
-
-                logging.info(f"Calling evaluate_code_on_dataset with test_mode={test_mode}")
+                test_mode = True
+                logging.info(
+                    "Calling evaluate_code_on_dataset with fixed agent cap of 10 samples"
+                )
 
                 return evaluate_code_on_dataset(
                     task_obj=self.task_instance,

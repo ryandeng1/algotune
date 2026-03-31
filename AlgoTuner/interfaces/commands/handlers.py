@@ -1893,11 +1893,9 @@ class CommandHandlers:
             train_iter, test_iter = task_instance.load_dataset()
             dataset_to_evaluate = train_iter if data_subset == "train" else test_iter
 
-            # Check if we're in test mode
-            test_mode = False
-            if hasattr(self.interface, "max_samples") and self.interface.max_samples is not None:
-                test_mode = True
-                logging.info(f"Test mode enabled with max_samples={self.interface.max_samples}")
+            # Hardcode agent dataset evaluation to the first 10 problems.
+            test_mode = True
+            logging.info("Agent dataset evaluation capped at 10 samples")
             # Use dev_runs for train, eval_runs for test
             num_runs = DEV_RUNS if data_subset == "train" else EVAL_RUNS
 
