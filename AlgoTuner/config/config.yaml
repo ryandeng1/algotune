@@ -1,6 +1,6 @@
 global:
   spend_limit: 1.0 # in USD
-  total_messages: 9999
+  total_messages: 20
   max_messages_in_history: 5
 
 benchmark:
